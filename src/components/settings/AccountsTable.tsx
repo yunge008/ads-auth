@@ -171,16 +171,38 @@ export function AccountsTable() {
     }
   };
 
+  const [editingConnId, setEditingConnId] = useState<string | null>(null);
+  const [editingConnLabel, setEditingConnLabel] = useState("");
+
+  const handleSaveConnLabel = async (id: string) => {
+    const label = editingConnLabel.trim();
+    if (!label) {
+      toast.error("标签不能为空");
+      return;
+    }
+    try {
+      await invokeFn("tiktok-connections", { op: "update", id, label });
+      toast.success("已更新标签");
+      setEditingConnId(null);
+      loadConns();
+    } catch (e) {
+      toast.error(`更新失败：${(e as Error).message}`);
+    }
+  };
+
   const advNameById = new Map(advertisers.map((a) => [a.advertiser_id, a.advertiser_name]));
   const flatRows = conns.flatMap((c) =>
-    (c.advertiser_ids.length ? c.advertiser_ids : [""]).map((aid) => ({
+    (c.advertiser_ids.length ? c.advertiser_ids : [""]).map((aid, idx) => ({
       conn_id: c.id,
       label: c.label,
       advertiser_id: aid,
       advertiser_name: aid ? (advNameById.get(aid) ?? "—") : "—",
       created_at: c.created_at,
+      is_first: idx === 0,
+      row_span: c.advertiser_ids.length || 1,
     })),
   );
+
 
   return (
     <div className="space-y-4">
@@ -220,24 +242,62 @@ export function AccountsTable() {
                 ) : (
                   flatRows.map((r, i) => (
                     <TableRow key={`${r.conn_id}-${r.advertiser_id || i}`}>
-                      <TableCell className="font-medium">{r.label}</TableCell>
+                      <TableCell className="font-medium">
+                        {r.is_first ? (
+                          editingConnId === r.conn_id ? (
+                            <div className="flex items-center gap-1">
+                              <Input
+                                value={editingConnLabel}
+                                onChange={(e) => setEditingConnLabel(e.target.value)}
+                                className="h-7 w-32"
+                                autoFocus
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") handleSaveConnLabel(r.conn_id);
+                                  if (e.key === "Escape") setEditingConnId(null);
+                                }}
+                              />
+                              <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => handleSaveConnLabel(r.conn_id)}>
+                                <Check className="h-4 w-4" />
+                              </Button>
+                              <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setEditingConnId(null)}>
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 hover:underline"
+                              onClick={() => {
+                                setEditingConnId(r.conn_id);
+                                setEditingConnLabel(r.label);
+                              }}
+                            >
+                              {r.label}
+                              <Pencil className="h-3 w-3 text-muted-foreground" />
+                            </button>
+                          )
+                        ) : null}
+                      </TableCell>
                       <TableCell>{r.advertiser_name}</TableCell>
                       <TableCell className="font-mono text-xs">{r.advertiser_id || "—"}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">
-                        {new Date(r.created_at).toLocaleString()}
+                        {r.is_first ? new Date(r.created_at).toLocaleString() : null}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 w-7 p-0 text-destructive"
-                          onClick={() => handleDeleteConn(r.conn_id, r.label)}
-                        >
-                          <Unlink className="h-3.5 w-3.5" />
-                        </Button>
+                        {r.is_first && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 w-7 p-0 text-destructive"
+                            onClick={() => handleDeleteConn(r.conn_id, r.label)}
+                          >
+                            <Unlink className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))
+
                 )}
               </TableBody>
             </Table>
