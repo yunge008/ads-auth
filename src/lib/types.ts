@@ -12,6 +12,12 @@ export type StaffSheet = {
   active: boolean;
 };
 
+export type BCAdvertiser = {
+  advertiser_id: string;
+  advertiser_name: string;
+  status?: string;
+};
+
 export type MaterialStatus =
   | "待授权"
   | "已授权"
@@ -28,6 +34,7 @@ export type Material = {
   row_number: number;
   staff_name: string;
   sheet_name: string;
+  register_date: string;
   country: string;
   creator_name: string;
   vid: string;
