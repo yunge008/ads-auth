@@ -271,8 +271,8 @@ function AuthorizePage() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card>
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+        <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle className="text-base">
               待授权账户{" "}
@@ -286,7 +286,7 @@ function AuthorizePage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-28">国家</TableHead>
+                    <TableHead className="w-20">国家</TableHead>
                     <TableHead>广告户名称</TableHead>
                     <TableHead>广告户ID</TableHead>
                   </TableRow>
@@ -313,54 +313,64 @@ function AuthorizePage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="lg:col-span-3">
           <CardHeader>
             <CardTitle className="text-base">
               抓取数据统计{" "}
-              {totalWarning > 0 && (
+              {warningTotal > 0 && (
                 <span className="ml-1 inline-flex items-center gap-1 text-xs font-normal text-red-600">
                   <AlertTriangle className="h-3 w-3" />
-                  {totalWarning} 条警告
+                  {warningTotal} 条警告
                 </span>
               )}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="border rounded-md">
+            <div className="border rounded-md overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>人员姓名</TableHead>
-                    <TableHead>国家</TableHead>
-                    <TableHead className="text-right">待授权素材数</TableHead>
-                    <TableHead className="text-right">警告素材数</TableHead>
+                    <TableHead className="sticky left-0 bg-background">人员姓名</TableHead>
+                    {statsCountries.map((c) => (
+                      <TableHead key={c} className="text-right">{c}</TableHead>
+                    ))}
+                    <TableHead className="text-right">汇总</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {stats.length === 0 ? (
+                  {statsRows.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={4} className="h-20 text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={2} className="h-20 text-center text-sm text-muted-foreground">
                         暂无数据
                       </TableCell>
                     </TableRow>
                   ) : (
                     <>
-                      {stats.map((s) => (
-                        <TableRow key={`${s.staff_name}-${s.country}`}>
-                          <TableCell>{s.staff_name}</TableCell>
-                          <TableCell>{s.country}</TableCell>
-                          <TableCell className="text-right tabular-nums">{s.pending}</TableCell>
-                          <TableCell className={cn("text-right tabular-nums", s.warning > 0 && "text-red-600 font-medium")}>
-                            {s.warning}
+                      {statsRows.map((r) => (
+                        <TableRow key={r.staff_name}>
+                          <TableCell className="sticky left-0 bg-background">
+                            {r.staff_name}
+                            {r.warning > 0 && (
+                              <span className="ml-1 text-xs text-red-600">({r.warning}警告)</span>
+                            )}
                           </TableCell>
+                          {statsCountries.map((c) => {
+                            const v = r.pendingByCountry.get(c) ?? 0;
+                            return (
+                              <TableCell key={c} className="text-right tabular-nums">
+                                {v || <span className="text-muted-foreground">—</span>}
+                              </TableCell>
+                            );
+                          })}
+                          <TableCell className="text-right tabular-nums font-medium">{r.total}</TableCell>
                         </TableRow>
                       ))}
                       <TableRow className="bg-muted/40 font-medium">
-                        <TableCell colSpan={2}>合计</TableCell>
-                        <TableCell className="text-right tabular-nums">{totalPending}</TableCell>
-                        <TableCell className={cn("text-right tabular-nums", totalWarning > 0 && "text-red-600")}>
-                          {totalWarning}
-                        </TableCell>
+                        <TableCell className="sticky left-0 bg-muted/40">合计</TableCell>
+                        {colTotals.map((v, i) => (
+                          <TableCell key={i} className="text-right tabular-nums">{v}</TableCell>
+                        ))}
+                        <TableCell className="text-right tabular-nums">{grandTotal}</TableCell>
                       </TableRow>
                     </>
                   )}
@@ -370,6 +380,7 @@ function AuthorizePage() {
           </CardContent>
         </Card>
       </div>
+
 
       <Card>
         <CardHeader className="space-y-3">
