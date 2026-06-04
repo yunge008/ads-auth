@@ -17,6 +17,7 @@ import {
   listSheets,
   readRange,
 } from "../_shared/feishu.ts";
+import { checkAdminPasscode } from "../_shared/auth.ts";
 
 type Account = { country: string; advertiser_name: string; advertiser_id: string };
 type StaffIn = { name: string; sheet_name: string };
@@ -72,6 +73,7 @@ function parseDate(v: unknown): string | null {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
+    checkAdminPasscode(req);
     const { staff, accounts } = (await req.json()) as {
       staff: StaffIn[];
       accounts: Account[];
@@ -149,9 +151,10 @@ Deno.serve(async (req) => {
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {
+    const status = (e as Error & { status?: number }).status ?? 400;
     console.error("feishu-read error", e);
     return new Response(JSON.stringify({ error: (e as Error).message }), {
-      status: 400,
+      status,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
