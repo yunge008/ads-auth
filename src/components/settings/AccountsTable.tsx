@@ -149,11 +149,11 @@ export function AccountsTable() {
         label,
         redirect_uri: redirectUri,
       });
-      // 跳转去 TikTok 授权
-      window.location.href = data.authorize_url;
-    } catch (e) {
-      toast.error(`生成授权链接失败：${(e as Error).message}`);
+      // 新标签页打开，避免预览 iframe 被 TikTok 拒绝（X-Frame-Options）
+      window.open(data.authorize_url, "_blank", "noopener");
       setConnecting(false);
+      setConnectOpen(false);
+      toast.info("已在新标签页打开 TikTok 授权页，完成后回到本页面会自动刷新连接列表");
     }
   };
 
