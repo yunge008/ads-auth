@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useSyncExternalStore } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { invokeFn } from "./api";
 import type { AuthAccount, BCAdvertiser, Material, StaffSheet } from "./types";
 
 const ACC_KEY = "tt_auth_accounts";
@@ -32,29 +32,21 @@ export function useStaff() {
   const [staff, setStaff] = useState<StaffSheet[]>([]);
 
   const refresh = useCallback(async () => {
-    const { data, error } = await supabase
-      .from("staff_sheets")
-      .select("id,name,sheet_name,active,sort_order")
-      .order("sort_order", { ascending: true })
-      .order("created_at", { ascending: true });
-    if (error) {
-      console.warn("load staff_sheets", error.message);
-      return;
-    }
-    const rows: StaffSheet[] = (data ?? []).map((r) => ({
-      id: r.id,
-      name: r.name,
-      sheet_name: r.sheet_name,
-      active: r.active,
-    }));
-    setStaff(rows);
-    if (typeof window !== "undefined") {
-      localStorage.setItem(STAFF_KEY, JSON.stringify(rows));
+    try {
+      const { staff: rows } = await invokeFn<{ staff: StaffSheet[] }>("staff-sheets", {
+        action: "list",
+      });
+      setStaff(rows);
+      if (typeof window !== "undefined") {
+        localStorage.setItem(STAFF_KEY, JSON.stringify(rows));
+      }
+    } catch (e) {
+      console.warn("load staff_sheets", (e as Error).message);
     }
   }, []);
 
   useEffect(() => {
-    // Show cached value immediately, then fetch fresh from Supabase.
+    // Show cached value immediately, then fetch fresh from server.
     setStaff(read<StaffSheet[]>(STAFF_KEY, []));
     void refresh();
   }, [refresh]);
@@ -65,29 +57,7 @@ export function useStaff() {
     if (typeof window !== "undefined") {
       localStorage.setItem(STAFF_KEY, JSON.stringify(next));
     }
-    // Replace-all semantics to match the UI's edit model.
-    const { error: delErr } = await supabase
-      .from("staff_sheets")
-      .delete()
-      .not("id", "is", null);
-    if (delErr) {
-      console.error("staff delete", delErr);
-      throw new Error(delErr.message);
-    }
-    if (next.length > 0) {
-      const payload = next.map((r, i) => ({
-        id: r.id,
-        name: r.name,
-        sheet_name: r.sheet_name,
-        active: r.active,
-        sort_order: i,
-      }));
-      const { error: insErr } = await supabase.from("staff_sheets").insert(payload);
-      if (insErr) {
-        console.error("staff insert", insErr);
-        throw new Error(insErr.message);
-      }
-    }
+    await invokeFn("staff-sheets", { action: "replace", staff: next });
     await refresh();
   }, [refresh]);
 
