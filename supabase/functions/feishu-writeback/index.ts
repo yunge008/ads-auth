@@ -1,4 +1,6 @@
-// Write status + error message back to Feishu sheet (cols F & G).
+// Write authorize result back to Feishu sheet.
+// P = 投放日期 (今天日期，仅成功时写入)
+// Q = 状态 + 错误信息 (合并)
 // Body: { items: [{sheet_name, row_number, status, error_message?}] }
 
 import {
@@ -16,6 +18,14 @@ type Item = {
   error_message?: string;
 };
 
+function today(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -26,14 +36,20 @@ Deno.serve(async (req) => {
     const spreadsheetToken = getSpreadsheetToken();
     const sheets = await listSheets(token, spreadsheetToken);
     const sheetByName = new Map(sheets.map((s) => [s.title, s.sheet_id]));
+    const dateStr = today();
 
     const valueRanges = items
       .map((it) => {
         const sid = sheetByName.get(it.sheet_name);
         if (!sid) return null;
+        const success = it.status === "已授权";
+        const pVal = success ? dateStr : "";
+        const qVal = it.error_message
+          ? `${it.status}：${it.error_message}`
+          : it.status;
         return {
-          range: `${sid}!F${it.row_number}:G${it.row_number}`,
-          values: [[it.status, it.error_message ?? ""]],
+          range: `${sid}!P${it.row_number}:Q${it.row_number}`,
+          values: [[pVal, qVal]],
         };
       })
       .filter((v): v is { range: string; values: unknown[][] } => v != null);
