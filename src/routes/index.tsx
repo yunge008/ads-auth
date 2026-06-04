@@ -248,6 +248,43 @@ function AuthorizePage() {
     }
   };
 
+  const handleWritebackAuthorized = async () => {
+    const KEEP_ERR: MaterialStatus[] = [
+      "代码有误",
+      "代码过期",
+      "代码删除",
+      "代码涉及多素材",
+    ];
+    const targets = materials.filter((m) => m.status === "已授权");
+    if (targets.length === 0) {
+      toast.error("没有「已授权」素材可回写");
+      return;
+    }
+    try {
+      const data = await invokeFn<{ updated?: number }>("feishu-writeback", {
+        items: targets.map((m) => ({
+          sheet_name: m.sheet_name,
+          row_number: m.row_number,
+          status: m.status,
+        })),
+      });
+      const okIds = new Set(targets.map((t) => t.id));
+      setMaterials((prev) =>
+        prev
+          .filter((m) => !okIds.has(m.id))
+          .map((m) =>
+            KEEP_ERR.includes(m.status)
+              ? m
+              : { ...m, status: "待授权" as MaterialStatus, error_message: undefined },
+          ),
+      );
+      toast.success(`已回写 ${data?.updated ?? targets.length} 条已授权，并重置其它素材`);
+    } catch (e) {
+      toast.error(`回写失败：${(e as Error).message}`);
+    }
+  };
+
+
   const handleDownload = () => {
     if (materials.length === 0) {
       toast.error("没有可下载的数据");
