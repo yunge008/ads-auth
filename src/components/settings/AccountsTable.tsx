@@ -322,12 +322,10 @@ export function AccountsTable() {
                                 <SelectContent>
                                   {advertisers.map((a) => (
                                     <SelectItem key={a.advertiser_id} value={a.advertiser_id}>
-                                      {a.advertiser_name}
-                                      <span className="ml-2 text-xs text-muted-foreground font-mono">
-                                        {a.advertiser_id}
-                                      </span>
+                                      {a.advertiser_name}（{a.advertiser_id}）
                                     </SelectItem>
                                   ))}
+
                                 </SelectContent>
                               </Select>
                             ) : (
