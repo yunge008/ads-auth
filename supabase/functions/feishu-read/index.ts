@@ -24,7 +24,7 @@ type StaffIn = { name: string; sheet_name: string };
 
 const VID_RE = /^7\d{18}$/;
 const CODE_RE = /^#[A-Za-z0-9+/]{63}=$/;
-const COUNTRY_RE = /^[\u4e00-\u9fa5A-Za-z\s]{1,10}$/;
+const COUNTRY_RE = /^[\u4e00-\u9fa5A-Za-z0-9\-\s]{1,10}$/;
 
 function cellText(v: unknown): string {
   if (v == null) return "";
