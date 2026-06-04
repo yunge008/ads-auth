@@ -224,11 +224,14 @@ function AuthorizePage() {
       "代码删除",
       "代码有误",
       "代码涉及多素材",
-      "API错误",
     ];
     const targets = materials.filter((m) => EXECUTED.includes(m.status));
+    const apiErrorCount = materials.filter((m) => m.status === "API错误").length;
+    if (apiErrorCount > 0) {
+      toast.warning(`有 ${apiErrorCount} 条「API错误」未回写，请人工复核后重试`);
+    }
     if (targets.length === 0) {
-      toast.error("没有可回写的素材（仅回写已执行授权并有返回结果的）");
+      toast.error("没有可回写的素材");
       return;
     }
     try {
