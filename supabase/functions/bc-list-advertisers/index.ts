@@ -18,12 +18,17 @@ async function enrich(token: string, ids: string[]) {
     const res = await fetch(u.toString(), { headers: { "Access-Token": token } });
     const j = await res.json().catch(() => ({}));
     console.log("advertiser/info response", JSON.stringify(j).slice(0, 800));
-    if (j.code === 0 && Array.isArray(j.data)) {
-      for (const it of j.data as Array<Record<string, unknown>>) {
+    const list = Array.isArray(j?.data?.list)
+      ? j.data.list
+      : Array.isArray(j?.data)
+        ? j.data
+        : [];
+    if (j.code === 0) {
+      for (const it of list as Array<Record<string, unknown>>) {
         const id = String(it.advertiser_id ?? it.id ?? "");
         if (!id) continue;
         const name = String(
-          it.name ?? it.advertiser_name ?? it.company ?? id,
+          it.advertiser_name ?? it.name ?? it.company ?? id,
         );
         out.set(id, {
           name,
@@ -31,6 +36,7 @@ async function enrich(token: string, ids: string[]) {
         });
       }
     }
+
   }
   return out;
 }
