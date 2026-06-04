@@ -2,6 +2,8 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { LogOut, Settings, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { APP_VERSION } from "@/lib/version";
+import { setPasscode } from "@/lib/api";
+import { toast } from "sonner";
 
 const nav = [
   { to: "/", label: "执行授权", icon: Zap },
