@@ -1,8 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { Settings, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { PasscodeGate } from "./PasscodeGate";
-import { useHasPasscode } from "@/lib/api";
 import { APP_VERSION } from "@/lib/version";
 
 const nav = [
@@ -12,19 +10,6 @@ const nav = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { location } = useRouterState();
-  const hasPasscode = useHasPasscode();
-
-  // Before passcode is entered: blank screen with only the app title.
-  if (!hasPasscode) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-          AR广告工具
-        </h1>
-        <PasscodeGate />
-      </div>
-    );
-  }
 
   return (
     <div className="flex min-h-screen bg-muted/30">
@@ -67,7 +52,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </header>
         <main className="flex-1 p-6 overflow-auto">{children}</main>
       </div>
-      <PasscodeGate />
     </div>
   );
 }
