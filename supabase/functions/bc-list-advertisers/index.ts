@@ -11,15 +11,22 @@ async function enrich(token: string, ids: string[]) {
     const batch = ids.slice(i, i + 100);
     const u = new URL(`${TT}/advertiser/info/`);
     u.searchParams.set("advertiser_ids", JSON.stringify(batch));
-    u.searchParams.set("fields", JSON.stringify(["id", "name", "status"]));
+    u.searchParams.set(
+      "fields",
+      JSON.stringify(["advertiser_id", "name", "status", "company"]),
+    );
     const res = await fetch(u.toString(), { headers: { "Access-Token": token } });
     const j = await res.json().catch(() => ({}));
+    console.log("advertiser/info response", JSON.stringify(j).slice(0, 800));
     if (j.code === 0 && Array.isArray(j.data)) {
       for (const it of j.data as Array<Record<string, unknown>>) {
-        const id = String(it.id ?? it.advertiser_id ?? "");
+        const id = String(it.advertiser_id ?? it.id ?? "");
         if (!id) continue;
+        const name = String(
+          it.name ?? it.advertiser_name ?? it.company ?? id,
+        );
         out.set(id, {
-          name: String(it.name ?? id),
+          name,
           status: it.status ? String(it.status) : undefined,
         });
       }
@@ -27,6 +34,7 @@ async function enrich(token: string, ids: string[]) {
   }
   return out;
 }
+
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
