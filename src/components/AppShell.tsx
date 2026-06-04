@@ -1,7 +1,9 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Settings, Zap } from "lucide-react";
+import { LogOut, Settings, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { APP_VERSION } from "@/lib/version";
+import { setPasscode } from "@/lib/api";
+import { toast } from "sonner";
 
 const nav = [
   { to: "/", label: "执行授权", icon: Zap },
@@ -42,6 +44,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             );
           })}
         </nav>
+        <div className="p-3 border-t">
+          <button
+            onClick={() => {
+              setPasscode("");
+              toast.success("已退出登录");
+              window.location.reload();
+            }}
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <LogOut className="h-4 w-4" />
+            退出登录
+          </button>
+        </div>
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
