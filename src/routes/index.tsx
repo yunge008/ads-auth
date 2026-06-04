@@ -33,7 +33,6 @@ import {
 import { toast } from "sonner";
 import { useBCAdvertisers, useMaterials, useStaff } from "@/lib/store";
 import {
-  ALL_STATUSES,
   type Material,
   type MaterialStatus,
 } from "@/lib/types";
@@ -135,6 +134,17 @@ function AuthorizePage() {
       return true;
     });
   }, [materials, fStaff, fCountry, fStatus, fVid, fAuth]);
+
+  const statusCounts = React.useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const m of materials) c[m.status] = (c[m.status] ?? 0) + 1;
+    return c;
+  }, [materials]);
+  const statusOptions = React.useMemo(
+    () => Object.keys(statusCounts).sort((a, b) => (STATUS_RANK[a as MaterialStatus] ?? 99) - (STATUS_RANK[b as MaterialStatus] ?? 99)),
+    [statusCounts],
+  );
+
 
   const handleFetch = async () => {
     const activeStaff = staff.filter((s) => s.active);
@@ -248,6 +258,43 @@ function AuthorizePage() {
       toast.error(`回写失败：${(e as Error).message}`);
     }
   };
+
+  const handleWritebackAuthorized = async () => {
+    const KEEP_ERR: MaterialStatus[] = [
+      "代码有误",
+      "代码过期",
+      "代码删除",
+      "代码涉及多素材",
+    ];
+    const targets = materials.filter((m) => m.status === "已授权");
+    if (targets.length === 0) {
+      toast.error("没有「已授权」素材可回写");
+      return;
+    }
+    try {
+      const data = await invokeFn<{ updated?: number }>("feishu-writeback", {
+        items: targets.map((m) => ({
+          sheet_name: m.sheet_name,
+          row_number: m.row_number,
+          status: m.status,
+        })),
+      });
+      const okIds = new Set(targets.map((t) => t.id));
+      setMaterials((prev) =>
+        prev
+          .filter((m) => !okIds.has(m.id))
+          .map((m) =>
+            KEEP_ERR.includes(m.status)
+              ? m
+              : { ...m, status: "待授权" as MaterialStatus, error_message: undefined },
+          ),
+      );
+      toast.success(`已回写 ${data?.updated ?? targets.length} 条已授权，并重置其它素材`);
+    } catch (e) {
+      toast.error(`回写失败：${(e as Error).message}`);
+    }
+  };
+
 
   const handleDownload = () => {
     if (materials.length === 0) {
@@ -435,7 +482,7 @@ function AuthorizePage() {
                   value={fVid}
                   onChange={(e) => setFVid(e.target.value)}
                   placeholder="模糊搜索"
-                  className="h-8 w-40"
+                  className="h-8 w-52"
                 />
               </div>
               <div className="flex flex-col gap-1">
@@ -444,20 +491,25 @@ function AuthorizePage() {
                   value={fAuth}
                   onChange={(e) => setFAuth(e.target.value)}
                   placeholder="模糊搜索"
-                  className="h-8 w-40"
+                  className="h-8 w-[480px]"
                 />
               </div>
               <MultiSelect
                 label="状态"
-                options={ALL_STATUSES}
+                options={statusOptions}
                 value={fStatus}
                 onChange={setFStatus}
+                counts={statusCounts}
               />
             </div>
             <div className="flex items-end gap-2">
               <Button size="sm" onClick={handleAuthorize}>
                 <Send className="h-4 w-4 mr-1.5" />
                 执行授权
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleWritebackAuthorized}>
+                <Upload className="h-4 w-4 mr-1.5" />
+                回写飞书已授权
               </Button>
               <Button size="sm" variant="outline" onClick={handleWriteback}>
                 <Upload className="h-4 w-4 mr-1.5" />

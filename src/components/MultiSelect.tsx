@@ -17,6 +17,7 @@ export function MultiSelect({
   onChange,
   placeholder = "全部",
   className,
+  counts,
 }: {
   label: string;
   options: string[];
@@ -24,6 +25,7 @@ export function MultiSelect({
   onChange: (v: string[]) => void;
   placeholder?: string;
   className?: string;
+  counts?: Record<string, number>;
 }) {
   const allChecked = options.length > 0 && value.length === options.length;
   const toggle = (opt: string) => {
@@ -81,7 +83,12 @@ export function MultiSelect({
                     checked={value.includes(opt)}
                     onCheckedChange={() => toggle(opt)}
                   />
-                  <span className="truncate">{opt}</span>
+                  <span className="truncate flex-1">{opt}</span>
+                  {counts && (
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {counts[opt] ?? 0}
+                    </span>
+                  )}
                 </label>
               ))
             )}
