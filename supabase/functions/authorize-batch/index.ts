@@ -18,7 +18,7 @@ function mapErr(msg: string) {
   return "API错误" as const;
 }
 
-async function authOne(token: string, it: Item) {
+async function authOne(token: string, it: Item, attempt = 0): Promise<{ id: string; status: string; error_message?: string }> {
   const encoded = it.auth_code.replace(/\+/g, "%2B");
   const res = await fetch(`${TT}/tt_video/authorize/`, {
     method: "POST",
@@ -28,6 +28,11 @@ async function authOne(token: string, it: Item) {
   const j = await res.json().catch(() => ({}));
   if (j.code === 0) return { id: it.id, status: "已授权" as const };
   const msg = String(j.message ?? `HTTP ${res.status}`);
+  if ((/too many requests|rate limit/i.test(msg) || res.status === 429) && attempt < 4) {
+    const delay = 1000 * Math.pow(2, attempt) + Math.random() * 500;
+    await new Promise((r) => setTimeout(r, delay));
+    return authOne(token, it, attempt + 1);
+  }
   return { id: it.id, status: mapErr(msg), error_message: msg };
 }
 
