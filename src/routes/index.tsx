@@ -491,13 +491,9 @@ function AuthorizePage() {
                 <Send className="h-4 w-4 mr-1.5" />
                 执行授权
               </Button>
-              <Button size="sm" variant="outline" onClick={handleWritebackAuthorized}>
-                <Upload className="h-4 w-4 mr-1.5" />
-                回写飞书已授权
-              </Button>
               <Button size="sm" variant="outline" onClick={handleWriteback}>
                 <Upload className="h-4 w-4 mr-1.5" />
-                回写飞书表
+                回写飞书
               </Button>
               <Button size="sm" variant="outline" onClick={handleDownload}>
                 <Download className="h-4 w-4 mr-1.5" />
