@@ -31,7 +31,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useAccounts, useStaff } from "@/lib/store";
+import { useAccounts, useMaterials, useStaff } from "@/lib/store";
 import {
   ALL_STATUSES,
   type Material,
@@ -55,7 +55,7 @@ export const Route = createFileRoute("/")({
 function AuthorizePage() {
   const { accounts } = useAccounts();
   const { staff } = useStaff();
-  const [materials, setMaterials] = React.useState<Material[]>([]);
+  const { materials, setMaterials } = useMaterials();
   const [loading, setLoading] = React.useState(false);
 
   // filters
@@ -70,7 +70,6 @@ function AuthorizePage() {
     [materials],
   );
 
-  // pending accounts: matched countries from current fetch
   const pendingAccounts = React.useMemo(() => {
     const seen = new Set<string>();
     const list: { country: string; advertiser_name: string; advertiser_id: string }[] = [];
@@ -86,7 +85,6 @@ function AuthorizePage() {
     return list;
   }, [materials]);
 
-  // stats: staff_name × country
   const stats = React.useMemo(() => {
     const map = new Map<
       string,
@@ -112,9 +110,9 @@ function AuthorizePage() {
   const totalPending = stats.reduce((a, b) => a + b.pending, 0);
   const totalWarning = stats.reduce((a, b) => a + b.warning, 0);
 
-  // filtered & sorted materials
+  // Filter only (NO dynamic re-sort — order is frozen at fetch time)
   const visibleMaterials = React.useMemo(() => {
-    const filtered = materials.filter((m) => {
+    return materials.filter((m) => {
       if (fStaff.length && !fStaff.includes(m.staff_name)) return false;
       if (fCountry.length && !fCountry.includes(m.country)) return false;
       if (fStatus.length && !fStatus.includes(m.status)) return false;
@@ -122,12 +120,6 @@ function AuthorizePage() {
       if (fAuth && !m.auth_code.toLowerCase().includes(fAuth.toLowerCase())) return false;
       return true;
     });
-    return filtered.sort(
-      (a, b) =>
-        STATUS_RANK[a.status] - STATUS_RANK[b.status] ||
-        a.staff_name.localeCompare(b.staff_name) ||
-        a.row_number - b.row_number,
-    );
   }, [materials, fStaff, fCountry, fStatus, fVid, fAuth]);
 
   const handleFetch = async () => {
@@ -150,7 +142,14 @@ function AuthorizePage() {
       });
       if (error) throw error;
       const list = (data?.materials ?? []) as Material[];
-      setMaterials(list);
+      // Sort ONCE at fetch time, then freeze order
+      const sorted = [...list].sort(
+        (a, b) =>
+          STATUS_RANK[a.status] - STATUS_RANK[b.status] ||
+          a.staff_name.localeCompare(b.staff_name) ||
+          a.row_number - b.row_number,
+      );
+      setMaterials(sorted);
       if (data?.missing_sheets?.length) {
         toast.warning(`以下 sheet 未找到：${data.missing_sheets.join(", ")}`);
       }
@@ -244,10 +243,10 @@ function AuthorizePage() {
       return;
     }
     const headers = [
-      "人员姓名","sheet名","行号","国家","达人名称","VID","授权码","产品","广告户名称","广告户ID","状态","错误信息",
+      "人员姓名","sheet名","行号","登记日期","国家","达人名称","VID","授权码","产品","广告户名称","广告户ID","状态","错误信息",
     ];
     const rows = materials.map((m) => [
-      m.staff_name, m.sheet_name, m.row_number, m.country, m.creator_name,
+      m.staff_name, m.sheet_name, m.row_number, m.register_date, m.country, m.creator_name,
       m.vid, m.auth_code, m.product, m.advertiser_name ?? "",
       m.advertiser_id ?? "", m.status, m.error_message ?? "",
     ]);
@@ -285,7 +284,6 @@ function AuthorizePage() {
         </Button>
       </div>
 
-      {/* Top row: pending accounts + stats */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card>
           <CardHeader>
@@ -386,7 +384,6 @@ function AuthorizePage() {
         </Card>
       </div>
 
-      {/* Materials table */}
       <Card>
         <CardHeader className="space-y-3">
           <CardTitle className="text-base">
@@ -456,6 +453,7 @@ function AuthorizePage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>人员姓名</TableHead>
+                  <TableHead>登记日期</TableHead>
                   <TableHead>国家</TableHead>
                   <TableHead>达人名称</TableHead>
                   <TableHead>VID</TableHead>
@@ -469,7 +467,7 @@ function AuthorizePage() {
               <TableBody>
                 {visibleMaterials.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="h-24 text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={10} className="h-24 text-center text-sm text-muted-foreground">
                       暂无素材数据
                     </TableCell>
                   </TableRow>
@@ -520,6 +518,7 @@ function MaterialRow({
   return (
     <TableRow className={cn(isWarn && "bg-red-50/60 hover:bg-red-50")}>
       <TableCell className="whitespace-nowrap">{m.staff_name}</TableCell>
+      <TableCell className="whitespace-nowrap text-xs">{m.register_date}</TableCell>
       <TableCell>
         {isWarn ? (
           <Select value="" onValueChange={onAssignCountry}>
