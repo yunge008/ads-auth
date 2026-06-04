@@ -549,6 +549,10 @@ function AuthorizePage() {
                 <Download className="h-4 w-4 mr-1.5" />
                 下载到 Excel
               </Button>
+              <Button size="sm" variant="outline" onClick={handleCopyAuthCodes}>
+                <Copy className="h-4 w-4 mr-1.5" />
+                复制授权码
+              </Button>
             </div>
           </div>
         </CardHeader>
