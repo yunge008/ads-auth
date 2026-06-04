@@ -17,7 +17,10 @@ import {
   listSheets,
   readRange,
 } from "../_shared/feishu.ts";
-import { checkAdminPasscode } from "../_shared/auth.ts";
+import { admin, checkAdminPasscode } from "../_shared/auth.ts";
+
+type StaffIn = { name: string; sheet_name: string };
+
 
 type Account = { country: string; advertiser_name: string; advertiser_id: string };
 type StaffIn = { name: string; sheet_name: string };
