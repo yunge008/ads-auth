@@ -29,6 +29,7 @@ import {
   Send,
   Upload,
   AlertTriangle,
+  Copy,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useBCAdvertisers, useMaterials, useStaff } from "@/lib/store";
