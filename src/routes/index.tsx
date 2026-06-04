@@ -40,6 +40,7 @@ import {
 import { MultiSelect } from "@/components/MultiSelect";
 import { STATUS_RANK, StatusBadge } from "@/components/StatusBadge";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -130,15 +131,32 @@ function AuthorizePage() {
   }, [materials, fStaff, fCountry, fStatus, fVid, fAuth]);
 
   const handleFetch = async () => {
+    const activeStaff = staff.filter((s) => s.active);
+    if (activeStaff.length === 0) {
+      toast.error("请先在「设置」中配置启用的人员");
+      return;
+    }
     setLoading(true);
     try {
-      if (staff.filter((s) => s.active).length === 0) {
-        toast.error("请先在「设置」中配置启用的人员");
-        return;
+      const { data, error } = await supabase.functions.invoke("feishu-read", {
+        body: {
+          staff: activeStaff.map((s) => ({ name: s.name, sheet_name: s.sheet_name })),
+          accounts: accounts.map((a) => ({
+            country: a.country,
+            advertiser_name: a.advertiser_name,
+            advertiser_id: a.advertiser_id,
+          })),
+        },
+      });
+      if (error) throw error;
+      const list = (data?.materials ?? []) as Material[];
+      setMaterials(list);
+      if (data?.missing_sheets?.length) {
+        toast.warning(`以下 sheet 未找到：${data.missing_sheets.join(", ")}`);
       }
-      // TODO: invoke supabase edge function `feishu-read`
-      toast.info("feishu-read Edge Function 尚未配置，将返回空数据。请启用 Lovable Cloud 后接入。");
-      setMaterials([]);
+      toast.success(`已拉取 ${list.length} 条素材`);
+    } catch (e) {
+      toast.error(`拉取失败：${(e as Error).message}`);
     } finally {
       setLoading(false);
     }
@@ -152,16 +170,72 @@ function AuthorizePage() {
       toast.error("没有可执行授权的素材");
       return;
     }
-    toast.info(`authorize-batch Edge Function 尚未配置，将跳过 ${targets.length} 条请求`);
+    setMaterials((prev) =>
+      prev.map((m) =>
+        targets.find((t) => t.id === m.id) ? { ...m, status: "授权中" } : m,
+      ),
+    );
+    try {
+      const { data, error } = await supabase.functions.invoke("authorize-batch", {
+        body: {
+          items: targets.map((t) => ({
+            id: t.id,
+            advertiser_id: t.advertiser_id,
+            auth_code: t.auth_code,
+            vid: t.vid,
+          })),
+        },
+      });
+      if (error) throw error;
+      const byId = new Map<string, { status: MaterialStatus; error_message?: string }>(
+        (data?.results ?? []).map(
+          (r: { id: string; status: MaterialStatus; error_message?: string }) => [
+            r.id,
+            { status: r.status, error_message: r.error_message },
+          ],
+        ),
+      );
+      setMaterials((prev) =>
+        prev.map((m) => {
+          const r = byId.get(m.id);
+          return r ? { ...m, status: r.status, error_message: r.error_message } : m;
+        }),
+      );
+      toast.success(`已处理 ${targets.length} 条`);
+    } catch (e) {
+      toast.error(`授权失败：${(e as Error).message}`);
+      setMaterials((prev) =>
+        prev.map((m) =>
+          targets.find((t) => t.id === m.id) ? { ...m, status: "待授权" } : m,
+        ),
+      );
+    }
   };
 
   const handleWriteback = async () => {
-    const targets = materials.filter((m) => m.status !== "待授权");
+    const targets = materials.filter(
+      (m) => m.status !== "待授权" && m.status !== "授权中",
+    );
     if (targets.length === 0) {
       toast.error("没有可回写的素材");
       return;
     }
-    toast.info(`feishu-writeback Edge Function 尚未配置，将跳过 ${targets.length} 条回写`);
+    try {
+      const { data, error } = await supabase.functions.invoke("feishu-writeback", {
+        body: {
+          items: targets.map((m) => ({
+            sheet_name: m.sheet_name,
+            row_number: m.row_number,
+            status: m.status,
+            error_message: m.error_message,
+          })),
+        },
+      });
+      if (error) throw error;
+      toast.success(`已回写 ${data?.updated ?? targets.length} 条到飞书`);
+    } catch (e) {
+      toast.error(`回写失败：${(e as Error).message}`);
+    }
   };
 
   const handleDownload = () => {
