@@ -234,26 +234,40 @@ function AuthorizePage() {
       "代码删除",
       "代码有误",
       "代码涉及多素材",
+      "视频不可见",
     ];
     const targets = materials.filter((m) => EXECUTED.includes(m.status));
-    const apiErrorCount = materials.filter((m) => m.status === "API错误").length;
-    if (apiErrorCount > 0) {
-      toast.warning(`有 ${apiErrorCount} 条「API错误」未回写，请人工复核后重试`);
+    const apiErrors = materials.filter((m) => m.status === "API错误");
+    if (apiErrors.length > 0) {
+      toast.warning(`${apiErrors.length} 条「API错误」不回写，已重置为待授权`);
     }
-    if (targets.length === 0) {
+    if (targets.length === 0 && apiErrors.length === 0) {
       toast.error("没有可回写的素材");
       return;
     }
     try {
-      const data = await invokeFn<{ updated?: number }>("feishu-writeback", {
-        items: targets.map((m) => ({
-          sheet_name: m.sheet_name,
-          row_number: m.row_number,
-          status: m.status,
-          error_message: m.error_message,
-        })),
-      });
-      toast.success(`已回写 ${data?.updated ?? targets.length} 条到飞书`);
+      let updated = 0;
+      if (targets.length > 0) {
+        const data = await invokeFn<{ updated?: number }>("feishu-writeback", {
+          items: targets.map((m) => ({
+            sheet_name: m.sheet_name,
+            row_number: m.row_number,
+            status: m.status,
+          })),
+        });
+        updated = data?.updated ?? targets.length;
+      }
+      if (apiErrors.length > 0) {
+        const apiIds = new Set(apiErrors.map((m) => m.id));
+        setMaterials((prev) =>
+          prev.map((m) =>
+            apiIds.has(m.id)
+              ? { ...m, status: "待授权" as MaterialStatus, error_message: undefined }
+              : m,
+          ),
+        );
+      }
+      toast.success(`已回写 ${updated} 条到飞书`);
     } catch (e) {
       toast.error(`回写失败：${(e as Error).message}`);
     }
