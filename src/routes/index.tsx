@@ -135,6 +135,17 @@ function AuthorizePage() {
     });
   }, [materials, fStaff, fCountry, fStatus, fVid, fAuth]);
 
+  const statusCounts = React.useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const m of materials) c[m.status] = (c[m.status] ?? 0) + 1;
+    return c;
+  }, [materials]);
+  const statusOptions = React.useMemo(
+    () => Object.keys(statusCounts).sort((a, b) => (STATUS_RANK[a as MaterialStatus] ?? 99) - (STATUS_RANK[b as MaterialStatus] ?? 99)),
+    [statusCounts],
+  );
+
+
   const handleFetch = async () => {
     const activeStaff = staff.filter((s) => s.active);
     if (activeStaff.length === 0) {
