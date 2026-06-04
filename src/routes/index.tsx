@@ -85,30 +85,28 @@ function AuthorizePage() {
     return list;
   }, [materials]);
 
-  const stats = React.useMemo(() => {
-    const map = new Map<
-      string,
-      { staff_name: string; country: string; pending: number; warning: number }
-    >();
+  // Pivot: rows = staff, cols = countries
+  const { statsRows, statsCountries, colTotals, grandTotal, warningTotal } = React.useMemo(() => {
+    const countrySet = new Set<string>();
+    const byStaff = new Map<string, { pendingByCountry: Map<string, number>; warning: number; total: number }>();
     for (const m of materials) {
-      const key = `${m.staff_name}__${m.country}`;
-      const row = map.get(key) ?? {
-        staff_name: m.staff_name,
-        country: m.country,
-        pending: 0,
-        warning: 0,
-      };
-      row.pending += 1;
+      countrySet.add(m.country);
+      const row = byStaff.get(m.staff_name) ?? { pendingByCountry: new Map(), warning: 0, total: 0 };
+      row.pendingByCountry.set(m.country, (row.pendingByCountry.get(m.country) ?? 0) + 1);
+      row.total += 1;
       if (m.status === "无授权账号") row.warning += 1;
-      map.set(key, row);
+      byStaff.set(m.staff_name, row);
     }
-    return Array.from(map.values()).sort(
-      (a, b) => a.staff_name.localeCompare(b.staff_name) || a.country.localeCompare(b.country),
-    );
+    const countries = Array.from(countrySet).sort();
+    const rows = Array.from(byStaff.entries())
+      .map(([staff_name, v]) => ({ staff_name, ...v }))
+      .sort((a, b) => a.staff_name.localeCompare(b.staff_name));
+    const colTotals = countries.map((c) => rows.reduce((s, r) => s + (r.pendingByCountry.get(c) ?? 0), 0));
+    const grandTotal = rows.reduce((s, r) => s + r.total, 0);
+    const warningTotal = rows.reduce((s, r) => s + r.warning, 0);
+    return { statsRows: rows, statsCountries: countries, colTotals, grandTotal, warningTotal };
   }, [materials]);
 
-  const totalPending = stats.reduce((a, b) => a + b.pending, 0);
-  const totalWarning = stats.reduce((a, b) => a + b.warning, 0);
 
   // Filter only (NO dynamic re-sort — order is frozen at fetch time)
   const visibleMaterials = React.useMemo(() => {
