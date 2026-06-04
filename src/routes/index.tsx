@@ -218,11 +218,17 @@ function AuthorizePage() {
   };
 
   const handleWriteback = async () => {
-    const targets = materials.filter(
-      (m) => m.status !== "待授权" && m.status !== "授权中",
-    );
+    const EXECUTED: MaterialStatus[] = [
+      "已授权",
+      "代码过期",
+      "代码删除",
+      "代码有误",
+      "代码涉及多素材",
+      "API错误",
+    ];
+    const targets = materials.filter((m) => EXECUTED.includes(m.status));
     if (targets.length === 0) {
-      toast.error("没有可回写的素材");
+      toast.error("没有可回写的素材（仅回写已执行授权并有返回结果的）");
       return;
     }
     try {
