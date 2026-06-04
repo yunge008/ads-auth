@@ -59,15 +59,3 @@ export const ALL_STATUSES: MaterialStatus[] = [
   "API错误",
   "授权中",
 ];
-
-export const ALL_STATUSES: MaterialStatus[] = [
-  "待授权",
-  "已授权",
-  "无授权账号",
-  "代码过期",
-  "代码删除",
-  "代码有误",
-  "代码涉及多素材",
-  "API错误",
-  "授权中",
-];
