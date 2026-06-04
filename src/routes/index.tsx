@@ -454,7 +454,7 @@ function MaterialRow({
             </SelectTrigger>
             <SelectContent>
               {accounts.map((a) => (
-                <SelectItem key={a.id ?? a.advertiser_id} value={a.country}>
+                <SelectItem key={a.advertiser_id} value={a.country}>
                   {a.country} · {a.advertiser_name}
                 </SelectItem>
               ))}
