@@ -81,7 +81,7 @@ Deno.serve(async (req) => {
 
     await writeValues(token, spreadsheetToken, valueRanges);
     return new Response(
-      JSON.stringify({ ok: true, updated: valueRanges.length }),
+      JSON.stringify({ ok: true, updated: items.length, cells: valueRanges.length }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {
