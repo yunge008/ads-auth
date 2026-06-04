@@ -75,17 +75,34 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     checkAdminPasscode(req);
-    const { staff, accounts } = (await req.json()) as {
-      staff: StaffIn[];
-      accounts: Account[];
-    };
+    const { staff } = (await req.json()) as { staff: StaffIn[] };
     if (!staff?.length) throw new Error("staff 不能为空");
+
+    // Load advertiser→country map + advertiser names from DB
+    const [{ data: acRows, error: acErr }, { data: connRows, error: connErr }] = await Promise.all([
+      admin().from("advertiser_countries").select("advertiser_id, country"),
+      admin().from("tiktok_connections").select("advertiser_ids"),
+    ]);
+    if (acErr) throw new Error(acErr.message);
+    if (connErr) throw new Error(connErr.message);
+    const knownAdv = new Set<string>();
+    for (const r of (connRows ?? []) as { advertiser_ids: string[] }[]) {
+      for (const id of r.advertiser_ids) knownAdv.add(id);
+    }
+    // country -> [{advertiser_id}]
+    const accByCountry = new Map<string, { advertiser_id: string }[]>();
+    for (const r of (acRows ?? []) as { advertiser_id: string; country: string }[]) {
+      if (!knownAdv.has(r.advertiser_id)) continue;
+      const key = r.country.trim();
+      const arr = accByCountry.get(key) ?? [];
+      arr.push({ advertiser_id: r.advertiser_id });
+      accByCountry.set(key, arr);
+    }
 
     const token = await getTenantAccessToken();
     const spreadsheetToken = getSpreadsheetToken();
     const sheets = await listSheets(token, spreadsheetToken);
     const sheetByName = new Map(sheets.map((s) => [s.title, s.sheet_id]));
-    const accByCountry = new Map(accounts.map((a) => [a.country.trim(), a]));
 
     const materials: unknown[] = [];
     const missingSheets: string[] = [];
@@ -96,42 +113,36 @@ Deno.serve(async (req) => {
         missingSheets.push(s.sheet_name);
         continue;
       }
-      // Read A2:Q (rows from 2 onward, cols A..Q = 17 columns)
       const rows = await readRange(token, spreadsheetToken, `${sheetId}!A2:Q`);
 
-      // Pre-scan: find first row with non-empty P (col index 15)
       let firstPRowIdx = -1;
       for (let i = 0; i < rows.length; i++) {
-        const r = rows[i] ?? [];
-        if (cellText(r[15])) {
+        if (cellText((rows[i] ?? [])[15])) {
           firstPRowIdx = i;
           break;
         }
       }
-      // No "投放日期" anchor yet → no pending rows by spec
       if (firstPRowIdx < 0) continue;
 
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i] ?? [];
-        if (i <= firstPRowIdx) continue; // must be below an anchor row
-        // B (登记日期), G (VID), I (产品) are allowed to be empty.
+        if (i <= firstPRowIdx) continue;
         const dateRaw = cellText(r[1]);
         const dateStr = dateRaw ? parseDate(r[1]) : "";
-        if (dateRaw && dateStr === null) continue; // invalid date value
+        if (dateRaw && dateStr === null) continue;
         const country = cellText(r[2]);
         if (!COUNTRY_RE.test(country)) continue;
         const creator = cellText(r[3]);
         const vid = cellText(r[6]);
-        if (vid && !VID_RE.test(vid)) continue; // if present, must match
+        if (vid && !VID_RE.test(vid)) continue;
         const authCode = cellText(r[7]);
-        if (!CODE_RE.test(authCode)) continue; // auth code remains required
+        if (!CODE_RE.test(authCode)) continue;
         const product = cellText(r[8]);
         const pCell = cellText(r[15]);
-        if (pCell) continue; // already has 投放日期 → already done
+        if (pCell) continue;
 
-        const acc = accByCountry.get(country);
-        materials.push({
-          id: crypto.randomUUID(),
+        const matched = accByCountry.get(country) ?? [];
+        const base = {
           row_number: i + 2,
           staff_name: s.name,
           sheet_name: s.sheet_name,
@@ -141,13 +152,30 @@ Deno.serve(async (req) => {
           vid,
           auth_code: authCode,
           product,
-          advertiser_id: acc?.advertiser_id,
-          advertiser_name: acc?.advertiser_name,
-          status: !acc ? "无授权账号" : "待授权",
           error_message: undefined,
-        });
+        };
+        if (matched.length === 0) {
+          materials.push({
+            ...base,
+            id: crypto.randomUUID(),
+            advertiser_id: undefined,
+            advertiser_name: undefined,
+            status: "无授权账号",
+          });
+        } else {
+          for (const acc of matched) {
+            materials.push({
+              ...base,
+              id: crypto.randomUUID(),
+              advertiser_id: acc.advertiser_id,
+              advertiser_name: acc.advertiser_id,
+              status: "待授权",
+            });
+          }
+        }
       }
     }
+
 
     return new Response(
       JSON.stringify({ materials, missing_sheets: missingSheets }),
