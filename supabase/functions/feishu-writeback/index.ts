@@ -105,10 +105,8 @@ Deno.serve(async (req) => {
     if (valueRanges.length === 0) throw new Error("没有匹配的 sheet 可回写");
     await writeValues(token, spreadsheetToken, valueRanges);
 
-    // ----- 2) Append/Update "授权记录" sheet for 已授权 items -----
-    const logItems = items.filter(
-      (it) => it.status === "已授权" && it.vid && it.auth_code,
-    );
+    // ----- 2) Append/Update "授权记录" sheet for ALL auth-status items -----
+    const logItems = items.filter((it) => it.vid && it.auth_code);
     let logged = 0;
     const logSid = sheetByName.get(LOG_SHEET_TITLE);
     if (logItems.length > 0 && logSid) {
@@ -121,18 +119,27 @@ Deno.serve(async (req) => {
         if (Number.isFinite(seq) && seq > maxSeq) maxSeq = seq;
         const vid = String(row?.[3] ?? "").trim();
         const code = String(row?.[4] ?? "").trim();
-        if (vid && code) keyToRow.set(`${vid}__${code}`, idx + 2); // +2: header + 1-indexed
+        if (vid && code) keyToRow.set(`${vid}__${code}`, idx + 2);
       });
 
       const ts = nowTs();
       const updates: Array<{ range: string; values: unknown[][] }> = [];
       const appends: unknown[][] = [];
 
+      // Column H 投手备注: encode status (+ error message for API错误).
+      const buildNote = (it: Item) => {
+        if (it.status === "已授权") return "";
+        if (it.status === "API错误") {
+          return it.error_message ? `${it.status}: ${it.error_message}` : it.status;
+        }
+        return it.status;
+      };
+
       for (const it of logItems) {
         const key = `${it.vid}__${it.auth_code}`;
+        const note = buildNote(it);
         const existingRow = keyToRow.get(key);
-        if (existingRow != null) {
-          // Preserve existing 序号 in column A; update B..I.
+        if (existingRow != null && existingRow > 0) {
           updates.push({
             range: `${logSid}!B${existingRow}:I${existingRow}`,
             values: [[
@@ -142,7 +149,7 @@ Deno.serve(async (req) => {
               it.auth_code ?? "",
               it.product ?? "",
               ts,
-              "",
+              note,
               it.staff_name ?? "",
             ]],
           });
@@ -156,10 +163,9 @@ Deno.serve(async (req) => {
             it.auth_code ?? "",
             it.product ?? "",
             ts,
-            "",
+            note,
             it.staff_name ?? "",
           ]);
-          // Reserve key so duplicate items in this batch don't all append.
           keyToRow.set(key, -1);
         }
       }
