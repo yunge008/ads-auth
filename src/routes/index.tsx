@@ -29,6 +29,7 @@ import {
   Send,
   Upload,
   AlertTriangle,
+  Copy,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useBCAdvertisers, useMaterials, useStaff } from "@/lib/store";
@@ -310,6 +311,21 @@ function AuthorizePage() {
   };
 
 
+  const handleCopyAuthCodes = async () => {
+    const codes = visibleMaterials.map((m) => m.auth_code).filter(Boolean);
+    if (codes.length === 0) {
+      toast.error("没有可复制的授权码");
+      return;
+    }
+    const text = codes.join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`已复制 ${codes.length} 个授权码`);
+    } catch {
+      toast.error("复制失败，请手动复制");
+    }
+  };
+
   const handleDownload = () => {
     if (materials.length === 0) {
       toast.error("没有可下载的数据");
@@ -532,6 +548,10 @@ function AuthorizePage() {
               <Button size="sm" variant="outline" onClick={handleDownload}>
                 <Download className="h-4 w-4 mr-1.5" />
                 下载到 Excel
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleCopyAuthCodes}>
+                <Copy className="h-4 w-4 mr-1.5" />
+                复制授权码
               </Button>
             </div>
           </div>
