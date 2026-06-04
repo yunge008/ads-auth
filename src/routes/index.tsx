@@ -212,17 +212,14 @@ function AuthorizePage() {
       return;
     }
     try {
-      const { data, error } = await supabase.functions.invoke("feishu-writeback", {
-        body: {
-          items: targets.map((m) => ({
-            sheet_name: m.sheet_name,
-            row_number: m.row_number,
-            status: m.status,
-            error_message: m.error_message,
-          })),
-        },
+      const data = await invokeFn<{ updated?: number }>("feishu-writeback", {
+        items: targets.map((m) => ({
+          sheet_name: m.sheet_name,
+          row_number: m.row_number,
+          status: m.status,
+          error_message: m.error_message,
+        })),
       });
-      if (error) throw error;
       toast.success(`已回写 ${data?.updated ?? targets.length} 条到飞书`);
     } catch (e) {
       toast.error(`回写失败：${(e as Error).message}`);
