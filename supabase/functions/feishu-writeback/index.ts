@@ -175,10 +175,13 @@ Deno.serve(async (req) => {
         await writeValues(token, spreadsheetToken, updates);
       }
       if (appends.length > 0) {
+        // Append starting from the first empty row; range height must be >= rows being appended.
+        const startRow = existing.length + 2;
+        const endRow = startRow + appends.length - 1;
         await appendValues(
           token,
           spreadsheetToken,
-          `${logSid}!A1:I1`,
+          `${logSid}!A${startRow}:I${endRow}`,
           appends,
         );
       }
