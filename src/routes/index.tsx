@@ -482,7 +482,7 @@ function AuthorizePage() {
                   value={fVid}
                   onChange={(e) => setFVid(e.target.value)}
                   placeholder="模糊搜索"
-                  className="h-8 w-40"
+                  className="h-8 w-52"
                 />
               </div>
               <div className="flex flex-col gap-1">
@@ -491,20 +491,25 @@ function AuthorizePage() {
                   value={fAuth}
                   onChange={(e) => setFAuth(e.target.value)}
                   placeholder="模糊搜索"
-                  className="h-8 w-40"
+                  className="h-8 w-[480px]"
                 />
               </div>
               <MultiSelect
                 label="状态"
-                options={ALL_STATUSES}
+                options={statusOptions}
                 value={fStatus}
                 onChange={setFStatus}
+                counts={statusCounts}
               />
             </div>
             <div className="flex items-end gap-2">
               <Button size="sm" onClick={handleAuthorize}>
                 <Send className="h-4 w-4 mr-1.5" />
                 执行授权
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleWritebackAuthorized}>
+                <Upload className="h-4 w-4 mr-1.5" />
+                回写飞书已授权
               </Button>
               <Button size="sm" variant="outline" onClick={handleWriteback}>
                 <Upload className="h-4 w-4 mr-1.5" />
