@@ -248,16 +248,23 @@ function AuthorizePage() {
       return;
     }
     try {
-      const data = await invokeFn<{ updated?: number }>("feishu-writeback", {
+      const data = await invokeFn<{ updated?: number; logged?: number }>("feishu-writeback", {
         items: targets.map((m) => ({
           sheet_name: m.sheet_name,
           row_number: m.row_number,
           status: m.status,
+          country: m.country,
+          creator_name: m.creator_name,
+          vid: m.vid,
+          auth_code: m.auth_code,
+          product: m.product,
+          staff_name: m.staff_name,
         })),
       });
       const ids = new Set(targets.map((t) => t.id));
       setMaterials((prev) => prev.filter((m) => !ids.has(m.id)));
-      toast.success(`已回写 ${data?.updated ?? targets.length} 条到飞书`);
+      const logMsg = data?.logged ? `，记录 ${data.logged} 条到「授权记录」` : "";
+      toast.success(`已回写 ${data?.updated ?? targets.length} 条到飞书${logMsg}`);
     } catch (e) {
       toast.error(`回写失败：${(e as Error).message}`);
     }
