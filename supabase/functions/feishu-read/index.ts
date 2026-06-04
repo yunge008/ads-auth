@@ -22,8 +22,6 @@ import { admin, checkAdminPasscode } from "../_shared/auth.ts";
 type StaffIn = { name: string; sheet_name: string };
 
 
-type Account = { country: string; advertiser_name: string; advertiser_id: string };
-type StaffIn = { name: string; sheet_name: string };
 
 const VID_RE = /^7\d{18}$/;
 const CODE_RE = /^#[A-Za-z0-9+/]{63}=$/;
