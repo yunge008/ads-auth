@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
     }
 
     const results: Array<{ id: string; status: string; error_message?: string }> = [];
-    const CONC = 4;
+    const CONC = 2;
     for (let i = 0; i < items.length; i += CONC) {
       const slice = items.slice(i, i + CONC);
       const part = await Promise.all(
@@ -77,6 +77,9 @@ Deno.serve(async (req) => {
         }),
       );
       results.push(...part);
+      if (i + CONC < items.length) {
+        await new Promise((r) => setTimeout(r, 350));
+      }
     }
 
     return new Response(JSON.stringify({ results }), {
