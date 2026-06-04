@@ -35,6 +35,36 @@ export type Database = {
         }
         Relationships: []
       }
+      staff_sheets: {
+        Row: {
+          active: boolean
+          created_at: string
+          id: string
+          name: string
+          sheet_name: string
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          id?: string
+          name: string
+          sheet_name: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          id?: string
+          name?: string
+          sheet_name?: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       tiktok_connections: {
         Row: {
           access_token: string
