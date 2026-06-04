@@ -53,13 +53,17 @@ export function StaffTable() {
     if (editingId === id) setEditingId(null);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!drafts) return;
     const cleaned = drafts.filter((r) => r.name.trim() && r.sheet_name.trim());
-    save(cleaned);
-    setDrafts(null);
-    setEditingId(null);
-    toast.success(`已保存 ${cleaned.length} 位人员`);
+    try {
+      await save(cleaned);
+      setDrafts(null);
+      setEditingId(null);
+      toast.success(`已保存 ${cleaned.length} 位人员`);
+    } catch (e) {
+      toast.error(`保存失败：${(e as Error).message}`);
+    }
   };
 
   return (
