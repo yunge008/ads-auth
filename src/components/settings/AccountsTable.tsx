@@ -79,7 +79,7 @@ export function AccountsTable() {
     try {
       await invokeFn("tiktok-connections", { op: "delete", id });
       toast.success("已删除");
-      loadConns();
+      refreshConnections();
     } catch (e) {
       toast.error(`删除失败：${(e as Error).message}`);
     }
