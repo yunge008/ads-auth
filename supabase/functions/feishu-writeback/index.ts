@@ -129,7 +129,6 @@ Deno.serve(async (req) => {
 
       // Column H 投手备注: encode status (+ error message for API错误).
       const buildNote = (it: Item) => {
-        if (it.status === "已授权") return "";
         if (it.status === "API错误") {
           return it.error_message ? `${it.status}: ${it.error_message}` : it.status;
         }
