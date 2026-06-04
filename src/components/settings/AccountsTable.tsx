@@ -171,6 +171,17 @@ export function AccountsTable() {
     }
   };
 
+  const advNameById = new Map(advertisers.map((a) => [a.advertiser_id, a.advertiser_name]));
+  const flatRows = conns.flatMap((c) =>
+    (c.advertiser_ids.length ? c.advertiser_ids : [""]).map((aid) => ({
+      conn_id: c.id,
+      label: c.label,
+      advertiser_id: aid,
+      advertiser_name: aid ? (advNameById.get(aid) ?? "—") : "—",
+      created_at: c.created_at,
+    })),
+  );
+
   return (
     <div className="space-y-4">
       {/* TikTok 连接管理 */}
@@ -179,7 +190,7 @@ export function AccountsTable() {
           <CardTitle className="text-base">
             TikTok 授权连接
             <span className="ml-2 text-xs font-normal text-muted-foreground">
-              （共 {conns.length} 个，覆盖 {conns.reduce((s, c) => s + c.advertiser_ids.length, 0)} 个广告户）
+              （共 {conns.length} 个连接，覆盖 {flatRows.filter((r) => r.advertiser_id).length} 个广告户）
             </span>
           </CardTitle>
           <Button size="sm" onClick={() => setConnectOpen(true)}>
@@ -193,36 +204,34 @@ export function AccountsTable() {
               <TableHeader>
                 <TableRow>
                   <TableHead>标签</TableHead>
-                  <TableHead className="text-right">广告户数</TableHead>
-                  <TableHead>过期时间</TableHead>
-                  <TableHead>创建时间</TableHead>
-                  <TableHead className="w-20 text-right">操作</TableHead>
+                  <TableHead>账户名</TableHead>
+                  <TableHead>账户ID</TableHead>
+                  <TableHead>授权时间</TableHead>
+                  <TableHead className="w-16 text-right">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {conns.length === 0 ? (
+                {flatRows.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={5} className="h-16 text-center text-sm text-muted-foreground">
                       尚无连接，点「连接 TikTok」开始首次授权
                     </TableCell>
                   </TableRow>
                 ) : (
-                  conns.map((c) => (
-                    <TableRow key={c.id}>
-                      <TableCell className="font-medium">{c.label}</TableCell>
-                      <TableCell className="text-right tabular-nums">{c.advertiser_ids.length}</TableCell>
+                  flatRows.map((r, i) => (
+                    <TableRow key={`${r.conn_id}-${r.advertiser_id || i}`}>
+                      <TableCell className="font-medium">{r.label}</TableCell>
+                      <TableCell>{r.advertiser_name}</TableCell>
+                      <TableCell className="font-mono text-xs">{r.advertiser_id || "—"}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">
-                        {c.expires_at ? new Date(c.expires_at).toLocaleString() : "—"}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {new Date(c.created_at).toLocaleString()}
+                        {new Date(r.created_at).toLocaleString()}
                       </TableCell>
                       <TableCell className="text-right">
                         <Button
                           size="sm"
                           variant="ghost"
                           className="h-7 w-7 p-0 text-destructive"
-                          onClick={() => handleDeleteConn(c.id, c.label)}
+                          onClick={() => handleDeleteConn(r.conn_id, r.label)}
                         >
                           <Unlink className="h-3.5 w-3.5" />
                         </Button>
@@ -235,6 +244,7 @@ export function AccountsTable() {
           </div>
         </CardContent>
       </Card>
+
 
       {/* 授权账户表 */}
       <Card className="h-full">
@@ -312,12 +322,10 @@ export function AccountsTable() {
                                 <SelectContent>
                                   {advertisers.map((a) => (
                                     <SelectItem key={a.advertiser_id} value={a.advertiser_id}>
-                                      {a.advertiser_name}
-                                      <span className="ml-2 text-xs text-muted-foreground font-mono">
-                                        {a.advertiser_id}
-                                      </span>
+                                      {a.advertiser_name}（{a.advertiser_id}）
                                     </SelectItem>
                                   ))}
+
                                 </SelectContent>
                               </Select>
                             ) : (
