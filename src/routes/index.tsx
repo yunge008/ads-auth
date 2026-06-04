@@ -40,7 +40,7 @@ import {
 import { MultiSelect } from "@/components/MultiSelect";
 import { STATUS_RANK, StatusBadge } from "@/components/StatusBadge";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/integrations/supabase/client";
+import { invokeFn } from "@/lib/api";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -130,17 +130,14 @@ function AuthorizePage() {
     }
     setLoading(true);
     try {
-      const { data, error } = await supabase.functions.invoke("feishu-read", {
-        body: {
-          staff: activeStaff.map((s) => ({ name: s.name, sheet_name: s.sheet_name })),
-          accounts: accounts.map((a) => ({
-            country: a.country,
-            advertiser_name: a.advertiser_name,
-            advertiser_id: a.advertiser_id,
-          })),
-        },
+      const data = await invokeFn<{ materials: Material[]; missing_sheets?: string[] }>("feishu-read", {
+        staff: activeStaff.map((s) => ({ name: s.name, sheet_name: s.sheet_name })),
+        accounts: accounts.map((a) => ({
+          country: a.country,
+          advertiser_name: a.advertiser_name,
+          advertiser_id: a.advertiser_id,
+        })),
       });
-      if (error) throw error;
       const list = (data?.materials ?? []) as Material[];
       // Sort ONCE at fetch time, then freeze order
       const sorted = [...list].sort(
@@ -175,8 +172,9 @@ function AuthorizePage() {
       ),
     );
     try {
-      const { data, error } = await supabase.functions.invoke("authorize-batch", {
-        body: {
+      const data = await invokeFn<{ results: { id: string; status: MaterialStatus; error_message?: string }[] }>(
+        "authorize-batch",
+        {
           items: targets.map((t) => ({
             id: t.id,
             advertiser_id: t.advertiser_id,
@@ -184,15 +182,9 @@ function AuthorizePage() {
             vid: t.vid,
           })),
         },
-      });
-      if (error) throw error;
+      );
       const byId = new Map<string, { status: MaterialStatus; error_message?: string }>(
-        (data?.results ?? []).map(
-          (r: { id: string; status: MaterialStatus; error_message?: string }) => [
-            r.id,
-            { status: r.status, error_message: r.error_message },
-          ],
-        ),
+        (data?.results ?? []).map((r) => [r.id, { status: r.status, error_message: r.error_message }]),
       );
       setMaterials((prev) =>
         prev.map((m) => {
