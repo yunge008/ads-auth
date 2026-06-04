@@ -1,8 +1,10 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { LogOut, Settings, Zap } from "lucide-react";
+import { LogOut, RefreshCw, Settings, Zap } from "lucide-react";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { APP_VERSION } from "@/lib/version";
 import { setPasscode } from "@/lib/api";
+import { refreshAllSettings } from "@/lib/store";
 import { toast } from "sonner";
 
 const nav = [
@@ -12,6 +14,19 @@ const nav = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { location } = useRouterState();
+  const [syncing, setSyncing] = useState(false);
+
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      await refreshAllSettings();
+      toast.success("已同步表格信息");
+    } catch (e) {
+      toast.error(`同步失败：${(e as Error).message}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   return (
     <div className="flex min-h-screen bg-muted/30">
@@ -60,7 +75,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-12 border-b bg-card flex items-center justify-end px-6">
+        <header className="h-12 border-b bg-card flex items-center justify-end gap-3 px-6">
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-3 py-1.5 text-xs text-foreground transition-colors hover:bg-accent disabled:opacity-60"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", syncing && "animate-spin")} />
+            同步表格信息
+          </button>
           <span className="text-xs text-muted-foreground font-mono">
             v{APP_VERSION}
           </span>

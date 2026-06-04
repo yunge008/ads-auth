@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { Link2, Unlink, RefreshCw, Check, X, Pencil } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Link2, Unlink, Check, X, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -20,25 +20,17 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import type { BCAdvertiser } from "@/lib/types";
-import { useBCAdvertisers } from "@/lib/store";
+import {
+  useBCAdvertisers,
+  useConnections,
+  refreshConnections,
+  refreshBCAdvertisers,
+} from "@/lib/store";
 import { invokeFn } from "@/lib/api";
 
-type Connection = {
-  id: string;
-  label: string;
-  bc_id: string | null;
-  advertiser_ids: string[];
-  expires_at: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
 export function AccountsTable() {
-  const { advertisers, save: saveAdv } = useBCAdvertisers();
-  const [syncing, setSyncing] = useState(false);
-  const [conns, setConns] = useState<Connection[]>([]);
-  const [countries, setCountries] = useState<Record<string, string>>({});
+  const { advertisers } = useBCAdvertisers();
+  const { connections: conns, countries, setCountries } = useConnections();
   const [connectOpen, setConnectOpen] = useState(false);
   const [connectLabel, setConnectLabel] = useState("");
   const [connecting, setConnecting] = useState(false);
@@ -47,44 +39,17 @@ export function AccountsTable() {
   const [editingCountryAdv, setEditingCountryAdv] = useState<string | null>(null);
   const [editingCountryVal, setEditingCountryVal] = useState("");
 
-  const loadConns = useCallback(async () => {
-    try {
-      const data = await invokeFn<{ connections: Connection[]; countries: Record<string, string> }>(
-        "tiktok-connections",
-        { op: "list" },
-      );
-      setConns(data.connections ?? []);
-      setCountries(data.countries ?? {});
-    } catch (e) {
-      console.warn("load connections", (e as Error).message);
-    }
-  }, []);
-
-  const handleSyncBC = useCallback(async () => {
-    setSyncing(true);
-    try {
-      const data = await invokeFn<{ advertisers: BCAdvertiser[]; warning?: string }>("bc-list-advertisers");
-      const list = data.advertisers ?? [];
-      saveAdv(list);
-      if (data.warning) toast.warning(data.warning);
-      else toast.success(`已同步 ${list.length} 个 BC 广告户`);
-    } catch (e) {
-      toast.error(`同步失败：${(e as Error).message}`);
-    } finally {
-      setSyncing(false);
-    }
-  }, [saveAdv]);
-
+  // Handle OAuth callback flag (new connection just added)
   useEffect(() => {
-    loadConns();
     const flag = sessionStorage.getItem("tt_connect_done");
     if (flag) {
       sessionStorage.removeItem("tt_connect_done");
       toast.success(`新增连接：${flag}`);
-      loadConns();
-      handleSyncBC();
+      refreshConnections().catch(() => {});
+      refreshBCAdvertisers().catch(() => {});
     }
-  }, [loadConns, handleSyncBC]);
+  }, []);
+
 
   const handleStartConnect = async () => {
     const label = connectLabel.trim();
@@ -114,7 +79,7 @@ export function AccountsTable() {
     try {
       await invokeFn("tiktok-connections", { op: "delete", id });
       toast.success("已删除");
-      loadConns();
+      refreshConnections();
     } catch (e) {
       toast.error(`删除失败：${(e as Error).message}`);
     }
@@ -130,7 +95,7 @@ export function AccountsTable() {
       await invokeFn("tiktok-connections", { op: "update", id, label });
       toast.success("已更新标签");
       setEditingConnId(null);
-      loadConns();
+      refreshConnections();
     } catch (e) {
       toast.error(`更新失败：${(e as Error).message}`);
     }
@@ -181,10 +146,6 @@ export function AccountsTable() {
             </span>
           </CardTitle>
           <div className="flex gap-2">
-            <Button size="sm" variant="outline" onClick={handleSyncBC} disabled={syncing}>
-              <RefreshCw className={`h-4 w-4 mr-1 ${syncing ? "animate-spin" : ""}`} />
-              同步广告户名称
-            </Button>
             <Button size="sm" onClick={() => setConnectOpen(true)}>
               <Link2 className="h-4 w-4 mr-1" />
               连接 TikTok

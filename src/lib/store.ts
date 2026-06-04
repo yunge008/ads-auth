@@ -3,8 +3,6 @@ import { invokeFn } from "./api";
 import type { AuthAccount, BCAdvertiser, Material, StaffSheet } from "./types";
 
 const ACC_KEY = "tt_auth_accounts";
-const STAFF_KEY = "tt_staff_sheets"; // legacy localStorage cache (migrated to supabase)
-const BC_KEY = "tt_bc_advertisers";
 
 function read<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
@@ -16,6 +14,29 @@ function read<T>(key: string, fallback: T): T {
   }
 }
 
+// ============== Generic module-level store ==============
+function createStore<T>(initial: T) {
+  let value = initial;
+  const listeners = new Set<() => void>();
+  return {
+    get: () => value,
+    set: (v: T | ((prev: T) => T)) => {
+      value =
+        typeof v === "function"
+          ? (v as (p: T) => T)(value)
+          : v;
+      for (const l of listeners) l();
+    },
+    subscribe: (cb: () => void) => {
+      listeners.add(cb);
+      return () => {
+        listeners.delete(cb);
+      };
+    },
+  };
+}
+
+// ============== Accounts (localStorage only) ==============
 export function useAccounts() {
   const [accounts, setAccounts] = useState<AuthAccount[]>([]);
   useEffect(() => {
@@ -27,63 +48,139 @@ export function useAccounts() {
   }, []);
   return { accounts, save };
 }
-
-export function useStaff() {
-  const [staff, setStaff] = useState<StaffSheet[]>([]);
-
-  const refresh = useCallback(async () => {
-    try {
-      const { staff: rows } = await invokeFn<{ staff: StaffSheet[] }>("staff-sheets", {
-        action: "list",
-      });
-      setStaff(rows);
-      if (typeof window !== "undefined") {
-        localStorage.setItem(STAFF_KEY, JSON.stringify(rows));
-      }
-    } catch (e) {
-      console.warn("load staff_sheets", (e as Error).message);
-    }
-  }, []);
-
-  useEffect(() => {
-    // Show cached value immediately, then fetch fresh from server.
-    setStaff(read<StaffSheet[]>(STAFF_KEY, []));
-    void refresh();
-  }, [refresh]);
-
-  const save = useCallback(async (next: StaffSheet[]) => {
-    // Optimistic update
-    setStaff(next);
-    if (typeof window !== "undefined") {
-      localStorage.setItem(STAFF_KEY, JSON.stringify(next));
-    }
-    await invokeFn("staff-sheets", { action: "replace", staff: next });
-    await refresh();
-  }, [refresh]);
-
-  return { staff, save };
+export function loadAccounts(): AuthAccount[] {
+  return read<AuthAccount[]>(ACC_KEY, []);
 }
 
-export function useBCAdvertisers() {
-  const [list, setList] = useState<BCAdvertiser[]>([]);
+// ============== Staff (Supabase) ==============
+const staffStore = createStore<StaffSheet[]>([]);
+let staffLoaded = false;
+export async function refreshStaff() {
+  const { staff } = await invokeFn<{ staff: StaffSheet[] }>("staff-sheets", {
+    action: "list",
+  });
+  staffStore.set(staff ?? []);
+  staffLoaded = true;
+}
+export function useStaff() {
+  const staff = useSyncExternalStore(
+    staffStore.subscribe,
+    staffStore.get,
+    () => [] as StaffSheet[],
+  );
   useEffect(() => {
-    setList(read<BCAdvertiser[]>(BC_KEY, []));
+    if (!staffLoaded) {
+      refreshStaff().catch((e) => console.warn("load staff", (e as Error).message));
+    }
+  }, []);
+  const save = useCallback(async (next: StaffSheet[]) => {
+    staffStore.set(next);
+    await invokeFn("staff-sheets", { action: "replace", staff: next });
+    await refreshStaff();
+  }, []);
+  return { staff, save };
+}
+export function loadStaff(): StaffSheet[] {
+  return staffStore.get();
+}
+
+// ============== BC Advertisers (TikTok BC API) ==============
+const bcStore = createStore<BCAdvertiser[]>([]);
+let bcLoaded = false;
+export async function refreshBCAdvertisers(): Promise<{ count: number; warning?: string }> {
+  const data = await invokeFn<{ advertisers: BCAdvertiser[]; warning?: string }>(
+    "bc-list-advertisers",
+  );
+  const list = data?.advertisers ?? [];
+  bcStore.set(list);
+  bcLoaded = true;
+  return { count: list.length, warning: data?.warning };
+}
+export function useBCAdvertisers() {
+  const list = useSyncExternalStore(
+    bcStore.subscribe,
+    bcStore.get,
+    () => [] as BCAdvertiser[],
+  );
+  useEffect(() => {
+    if (!bcLoaded) {
+      refreshBCAdvertisers().catch((e) =>
+        console.warn("load BC advertisers", (e as Error).message),
+      );
+    }
   }, []);
   const save = useCallback((next: BCAdvertiser[]) => {
-    setList(next);
-    localStorage.setItem(BC_KEY, JSON.stringify(next));
+    bcStore.set(next);
   }, []);
   return { advertisers: list, save };
 }
 
-export function loadAccounts(): AuthAccount[] {
-  return read<AuthAccount[]>(ACC_KEY, []);
+// ============== TikTok Connections (Supabase) ==============
+export type Connection = {
+  id: string;
+  label: string;
+  bc_id: string | null;
+  advertiser_ids: string[];
+  expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+type ConnectionsState = {
+  connections: Connection[];
+  countries: Record<string, string>;
+};
+const connStore = createStore<ConnectionsState>({ connections: [], countries: {} });
+let connLoaded = false;
+export async function refreshConnections() {
+  const data = await invokeFn<{
+    connections: Connection[];
+    countries: Record<string, string>;
+  }>("tiktok-connections", { op: "list" });
+  connStore.set({
+    connections: data?.connections ?? [],
+    countries: data?.countries ?? {},
+  });
+  connLoaded = true;
 }
-export function loadStaff(): StaffSheet[] {
-  return read<StaffSheet[]>(STAFF_KEY, []);
+export function useConnections() {
+  const state = useSyncExternalStore(
+    connStore.subscribe,
+    connStore.get,
+    () => ({ connections: [], countries: {} }) as ConnectionsState,
+  );
+  useEffect(() => {
+    if (!connLoaded) {
+      refreshConnections().catch((e) =>
+        console.warn("load connections", (e as Error).message),
+      );
+    }
+  }, []);
+  const setCountries = useCallback(
+    (updater: (prev: Record<string, string>) => Record<string, string>) => {
+      connStore.set((prev) => ({ ...prev, countries: updater(prev.countries) }));
+    },
+    [],
+  );
+  return { ...state, setCountries };
 }
 
-// -------- Global materials store (persists across route changes) --------
+// ============== Global "sync settings" ==============
+export async function refreshAllSettings() {
+  await Promise.all([
+    refreshStaff().catch((e) => {
+      throw new Error(`人员表：${(e as Error).message}`);
+    }),
+    refreshConnections().catch((e) => {
+      throw new Error(`授权连接：${(e as Error).message}`);
+    }),
+  ]);
+  // BC advertisers (TikTok side) — best-effort, don't block
+  refreshBCAdvertisers().catch((e) =>
+    console.warn("sync BC advertisers", (e as Error).message),
+  );
+}
+
+// ============== Global materials store ==============
 let _materials: Material[] = [];
 const _listeners = new Set<() => void>();
 function emit() {
@@ -93,7 +190,8 @@ function emit() {
 export const materialsStore = {
   get: () => _materials,
   set: (next: Material[] | ((prev: Material[]) => Material[])) => {
-    _materials = typeof next === "function" ? (next as (p: Material[]) => Material[])(_materials) : next;
+    _materials =
+      typeof next === "function" ? (next as (p: Material[]) => Material[])(_materials) : next;
     emit();
   },
   subscribe: (cb: () => void) => {
