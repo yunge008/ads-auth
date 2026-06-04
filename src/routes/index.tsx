@@ -185,15 +185,20 @@ function AuthorizePage() {
 
   const handleAuthorize = async () => {
     const targets = materials.filter(
-      (m) => m.status === "待授权" && m.advertiser_id && m.auth_code,
+      (m) =>
+        (m.status === "待授权" || m.status === "API错误") &&
+        m.advertiser_id &&
+        m.auth_code,
     );
     if (targets.length === 0) {
-      toast.error("没有可执行授权的素材");
+      toast.error("没有可执行授权的素材（待授权 / API错误）");
       return;
     }
     setMaterials((prev) =>
       prev.map((m) =>
-        targets.find((t) => t.id === m.id) ? { ...m, status: "授权中" } : m,
+        targets.find((t) => t.id === m.id)
+          ? { ...m, status: "授权中", error_message: undefined }
+          : m,
       ),
     );
     try {
@@ -229,7 +234,7 @@ function AuthorizePage() {
   };
 
   const handleWriteback = async () => {
-    const EXECUTED: MaterialStatus[] = [
+    const WRITE: MaterialStatus[] = [
       "已授权",
       "代码过期",
       "代码删除",
@@ -237,53 +242,9 @@ function AuthorizePage() {
       "代码涉及多素材",
       "视频不可见",
     ];
-    const targets = materials.filter((m) => EXECUTED.includes(m.status));
-    const apiErrors = materials.filter((m) => m.status === "API错误");
-    if (apiErrors.length > 0) {
-      toast.warning(`${apiErrors.length} 条「API错误」不回写，已重置为待授权`);
-    }
-    if (targets.length === 0 && apiErrors.length === 0) {
-      toast.error("没有可回写的素材");
-      return;
-    }
-    try {
-      let updated = 0;
-      if (targets.length > 0) {
-        const data = await invokeFn<{ updated?: number }>("feishu-writeback", {
-          items: targets.map((m) => ({
-            sheet_name: m.sheet_name,
-            row_number: m.row_number,
-            status: m.status,
-          })),
-        });
-        updated = data?.updated ?? targets.length;
-      }
-      if (apiErrors.length > 0) {
-        const apiIds = new Set(apiErrors.map((m) => m.id));
-        setMaterials((prev) =>
-          prev.map((m) =>
-            apiIds.has(m.id)
-              ? { ...m, status: "待授权" as MaterialStatus, error_message: undefined }
-              : m,
-          ),
-        );
-      }
-      toast.success(`已回写 ${updated} 条到飞书`);
-    } catch (e) {
-      toast.error(`回写失败：${(e as Error).message}`);
-    }
-  };
-
-  const handleWritebackAuthorized = async () => {
-    const KEEP_ERR: MaterialStatus[] = [
-      "代码有误",
-      "代码过期",
-      "代码删除",
-      "代码涉及多素材",
-    ];
-    const targets = materials.filter((m) => m.status === "已授权");
+    const targets = materials.filter((m) => WRITE.includes(m.status));
     if (targets.length === 0) {
-      toast.error("没有「已授权」素材可回写");
+      toast.error("没有可回写的素材");
       return;
     }
     try {
@@ -294,21 +255,14 @@ function AuthorizePage() {
           status: m.status,
         })),
       });
-      const okIds = new Set(targets.map((t) => t.id));
-      setMaterials((prev) =>
-        prev
-          .filter((m) => !okIds.has(m.id))
-          .map((m) =>
-            KEEP_ERR.includes(m.status)
-              ? m
-              : { ...m, status: "待授权" as MaterialStatus, error_message: undefined },
-          ),
-      );
-      toast.success(`已回写 ${data?.updated ?? targets.length} 条已授权，并重置其它素材`);
+      const ids = new Set(targets.map((t) => t.id));
+      setMaterials((prev) => prev.filter((m) => !ids.has(m.id)));
+      toast.success(`已回写 ${data?.updated ?? targets.length} 条到飞书`);
     } catch (e) {
       toast.error(`回写失败：${(e as Error).message}`);
     }
   };
+
 
 
   const handleCopyAuthCodes = async () => {
