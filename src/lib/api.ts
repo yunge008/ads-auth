@@ -1,6 +1,11 @@
+import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
 const KEY = "tt_admin_passcode";
+const _changeListeners = new Set<() => void>();
+function emitChange() {
+  for (const l of _changeListeners) l();
+}
 
 export function getPasscode(): string {
   if (typeof window === "undefined") return "";
@@ -8,9 +13,21 @@ export function getPasscode(): string {
 }
 export function setPasscode(v: string) {
   localStorage.setItem(KEY, v);
+  emitChange();
 }
 export function clearPasscode() {
   localStorage.removeItem(KEY);
+  emitChange();
+}
+
+export function useHasPasscode(): boolean {
+  const [has, setHas] = useState(() => !!getPasscode());
+  useEffect(() => {
+    const cb = () => setHas(!!getPasscode());
+    _changeListeners.add(cb);
+    return () => { _changeListeners.delete(cb); };
+  }, []);
+  return has;
 }
 
 const _listeners = new Set<() => void>();
