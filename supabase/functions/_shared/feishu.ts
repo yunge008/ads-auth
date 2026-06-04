@@ -68,6 +68,30 @@ export async function writeValues(
   return json.data;
 }
 
+// Append rows after the last filled row in the given range. Feishu auto-extends
+// rows when sheet capacity is reached.
+export async function appendValues(
+  token: string,
+  spreadsheetToken: string,
+  range: string, // e.g. "<sheet_id>!A1:I1"
+  values: unknown[][],
+) {
+  const res = await fetch(
+    `${FEISHU_BASE}/sheets/v2/spreadsheets/${spreadsheetToken}/values_append?insertDataOption=INSERT_ROWS`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ valueRange: { range, values } }),
+    },
+  );
+  const json = await res.json();
+  if (json.code !== 0) throw new Error(`追加行失败: ${json.msg}`);
+  return json.data;
+}
+
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
