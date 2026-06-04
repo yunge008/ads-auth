@@ -146,14 +146,13 @@ function AuthorizePage() {
     try {
       const data = await invokeFn<{ materials: Material[]; missing_sheets?: string[] }>("feishu-read", {
         staff: activeStaff.map((s) => ({ name: s.name, sheet_name: s.sheet_name })),
-        accounts: accounts.map((a) => ({
-          country: a.country,
-          advertiser_name: a.advertiser_name,
-          advertiser_id: a.advertiser_id,
-        })),
       });
-      const list = (data?.materials ?? []) as Material[];
-      // Sort ONCE at fetch time, then freeze order
+      const list = (data?.materials ?? []).map((m) => ({
+        ...m,
+        advertiser_name: m.advertiser_id
+          ? (advNameById.get(m.advertiser_id) ?? m.advertiser_id)
+          : m.advertiser_name,
+      })) as Material[];
       const sorted = [...list].sort(
         (a, b) =>
           STATUS_RANK[a.status] - STATUS_RANK[b.status] ||
@@ -165,6 +164,7 @@ function AuthorizePage() {
         toast.warning(`以下 sheet 未找到：${data.missing_sheets.join(", ")}`);
       }
       toast.success(`已拉取 ${list.length} 条素材`);
+
     } catch (e) {
       toast.error(`拉取失败：${(e as Error).message}`);
     } finally {
