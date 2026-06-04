@@ -83,7 +83,12 @@ export function MultiSelect({
                     checked={value.includes(opt)}
                     onCheckedChange={() => toggle(opt)}
                   />
-                  <span className="truncate">{opt}</span>
+                  <span className="truncate flex-1">{opt}</span>
+                  {counts && (
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {counts[opt] ?? 0}
+                    </span>
+                  )}
                 </label>
               ))
             )}
