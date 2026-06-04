@@ -26,6 +26,7 @@ export type MaterialStatus =
   | "代码删除"
   | "代码有误"
   | "代码涉及多素材"
+  | "视频不可见"
   | "API错误"
   | "授权中";
 
@@ -54,6 +55,7 @@ export const ALL_STATUSES: MaterialStatus[] = [
   "代码删除",
   "代码有误",
   "代码涉及多素材",
+  "视频不可见",
   "API错误",
   "授权中",
 ];

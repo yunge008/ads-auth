@@ -9,6 +9,7 @@ const styles: Record<MaterialStatus, string> = {
   代码删除: "bg-red-100 text-red-700 border-red-200",
   代码有误: "bg-red-100 text-red-700 border-red-200",
   代码涉及多素材: "bg-red-100 text-red-700 border-red-200",
+  视频不可见: "bg-red-100 text-red-700 border-red-200",
   API错误: "bg-red-100 text-red-700 border-red-200",
   授权中: "bg-blue-100 text-blue-700 border-blue-200",
 };
@@ -33,6 +34,7 @@ export const STATUS_RANK: Record<MaterialStatus, number> = {
   代码删除: 1,
   代码有误: 1,
   代码涉及多素材: 1,
+  视频不可见: 1,
   待授权: 2,
   授权中: 3,
   已授权: 4,

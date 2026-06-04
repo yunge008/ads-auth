@@ -24,8 +24,17 @@ function today(): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  return `${y}/${m}/${day}`;
 }
+
+// Only these statuses write to Q column (status text only, no API message).
+const Q_STATUSES = new Set([
+  "代码有误",
+  "代码删除",
+  "代码过期",
+  "代码涉及多素材",
+  "视频不可见",
+]);
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -44,15 +53,22 @@ Deno.serve(async (req) => {
       .map((it) => {
         const sid = sheetByName.get(it.sheet_name);
         if (!sid) return null;
-        const success = it.status === "已授权";
-        const pVal = success ? dateStr : "";
-        const qVal = it.error_message
-          ? `${it.status}：${it.error_message}`
-          : it.status;
-        return {
-          range: `${sid}!P${it.row_number}:Q${it.row_number}`,
-          values: [[pVal, qVal]],
-        };
+        if (it.status === "已授权") {
+          // Only write P column (date), do not touch Q
+          return {
+            range: `${sid}!P${it.row_number}:P${it.row_number}`,
+            values: [[dateStr]],
+          };
+        }
+        if (Q_STATUSES.has(it.status)) {
+          // Only write Q column (status text, no English API message)
+          return {
+            range: `${sid}!Q${it.row_number}:Q${it.row_number}`,
+            values: [[it.status]],
+          };
+        }
+        // Other statuses (API错误, etc.) — skip
+        return null;
       })
       .filter((v): v is { range: string; values: unknown[][] } => v != null);
 
