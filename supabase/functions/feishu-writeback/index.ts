@@ -102,8 +102,9 @@ Deno.serve(async (req) => {
       return [];
     });
 
-    if (valueRanges.length === 0) throw new Error("没有匹配的 sheet 可回写");
-    await writeValues(token, spreadsheetToken, valueRanges);
+    if (valueRanges.length > 0) {
+      await writeValues(token, spreadsheetToken, valueRanges);
+    }
 
     // ----- 2) Append/Update "授权记录" sheet for ALL auth-status items -----
     const logItems = items.filter((it) => it.vid && it.auth_code);
