@@ -9,9 +9,9 @@ export function PasscodeGate() {
   const [val, setVal] = useState("");
 
   useEffect(() => {
-    // 首次打开应用就检查
     if (!getPasscode()) setOpen(true);
-    return onPasscodeNeeded(() => setOpen(true));
+    const off = onPasscodeNeeded(() => setOpen(true));
+    return () => { off(); };
   }, []);
 
   const submit = () => {
