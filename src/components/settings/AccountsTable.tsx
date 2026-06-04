@@ -154,6 +154,9 @@ export function AccountsTable() {
       setConnecting(false);
       setConnectOpen(false);
       toast.info("已在新标签页打开 TikTok 授权页，完成后回到本页面会自动刷新连接列表");
+    } catch (e) {
+      toast.error(`生成授权链接失败：${(e as Error).message}`);
+      setConnecting(false);
     }
   };
 
