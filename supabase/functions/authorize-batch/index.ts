@@ -13,7 +13,7 @@ function mapErr(msg: string) {
   if (m.includes("expire")) return "代码过期" as const;
   if (m.includes("delete") || m.includes("not exist") || m.includes("not found"))
     return "代码删除" as const;
-  if (m.includes("not visible") || m.includes("invisible") || m.includes("video not visible"))
+  if (m.includes("not visible") || m.includes("invisible") || m.includes("video not visible") || m.includes("not publicly accessible") || m.includes("not public"))
     return "视频不可见" as const;
   if (m.includes("invalid") || m.includes("incorrect")) return "代码有误" as const;
   if (m.includes("multi") || m.includes("multiple")) return "代码涉及多素材" as const;
