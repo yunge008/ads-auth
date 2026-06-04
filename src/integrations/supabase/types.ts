@@ -14,6 +14,27 @@ export type Database = {
   }
   public: {
     Tables: {
+      advertiser_countries: {
+        Row: {
+          advertiser_id: string
+          country: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          advertiser_id: string
+          country: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          advertiser_id?: string
+          country?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       tiktok_connections: {
         Row: {
           access_token: string
