@@ -113,15 +113,17 @@ Deno.serve(async (req) => {
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i] ?? [];
         if (i <= firstPRowIdx) continue; // must be below an anchor row
-        const dateStr = parseDate(r[1]);
-        if (!dateStr) continue;
+        // B (登记日期), G (VID), I (产品) are allowed to be empty.
+        const dateRaw = cellText(r[1]);
+        const dateStr = dateRaw ? parseDate(r[1]) : "";
+        if (dateRaw && dateStr === null) continue; // invalid date value
         const country = cellText(r[2]);
         if (!COUNTRY_RE.test(country)) continue;
         const creator = cellText(r[3]);
         const vid = cellText(r[6]);
-        if (!VID_RE.test(vid)) continue;
+        if (vid && !VID_RE.test(vid)) continue; // if present, must match
         const authCode = cellText(r[7]);
-        if (!CODE_RE.test(authCode)) continue;
+        if (!CODE_RE.test(authCode)) continue; // auth code remains required
         const product = cellText(r[8]);
         const pCell = cellText(r[15]);
         if (pCell) continue; // already has 投放日期 → already done
@@ -132,7 +134,7 @@ Deno.serve(async (req) => {
           row_number: i + 2,
           staff_name: s.name,
           sheet_name: s.sheet_name,
-          register_date: dateStr,
+          register_date: dateStr ?? "",
           country,
           creator_name: creator,
           vid,
