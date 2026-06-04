@@ -21,11 +21,10 @@ function mapErr(msg: string) {
 }
 
 async function authOne(token: string, it: Item, attempt = 0): Promise<{ id: string; status: string; error_message?: string }> {
-  const encoded = it.auth_code.replace(/\+/g, "%2B");
   const res = await fetch(`${TT}/tt_video/authorize/`, {
     method: "POST",
     headers: { "Access-Token": token, "Content-Type": "application/json" },
-    body: JSON.stringify({ advertiser_id: it.advertiser_id, auth_code: encoded }),
+    body: JSON.stringify({ advertiser_id: it.advertiser_id, auth_code: it.auth_code }),
   });
   const j = await res.json().catch(() => ({}));
   if (j.code === 0) return { id: it.id, status: "已授权" as const };
