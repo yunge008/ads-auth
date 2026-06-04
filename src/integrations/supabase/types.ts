@@ -14,7 +14,39 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      tiktok_connections: {
+        Row: {
+          access_token: string
+          advertiser_ids: string[]
+          bc_id: string | null
+          created_at: string
+          expires_at: string | null
+          id: string
+          label: string
+          updated_at: string
+        }
+        Insert: {
+          access_token: string
+          advertiser_ids?: string[]
+          bc_id?: string | null
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          label: string
+          updated_at?: string
+        }
+        Update: {
+          access_token?: string
+          advertiser_ids?: string[]
+          bc_id?: string | null
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          label?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
