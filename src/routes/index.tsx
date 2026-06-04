@@ -241,6 +241,7 @@ function AuthorizePage() {
       "代码有误",
       "代码涉及多素材",
       "视频不可见",
+      "API错误",
     ];
     const targets = materials.filter((m) => WRITE.includes(m.status));
     if (targets.length === 0) {
@@ -253,6 +254,7 @@ function AuthorizePage() {
           sheet_name: m.sheet_name,
           row_number: m.row_number,
           status: m.status,
+          error_message: m.error_message,
           country: m.country,
           creator_name: m.creator_name,
           vid: m.vid,
@@ -261,8 +263,11 @@ function AuthorizePage() {
           staff_name: m.staff_name,
         })),
       });
-      const ids = new Set(targets.map((t) => t.id));
-      setMaterials((prev) => prev.filter((m) => !ids.has(m.id)));
+      // Keep API错误 items visible; remove the rest (P/Q written back).
+      const removeIds = new Set(
+        targets.filter((t) => t.status !== "API错误").map((t) => t.id),
+      );
+      setMaterials((prev) => prev.filter((m) => !removeIds.has(m.id)));
       const logMsg = data?.logged ? `，记录 ${data.logged} 条到「授权记录」` : "";
       toast.success(`已回写 ${data?.updated ?? targets.length} 条到飞书${logMsg}`);
     } catch (e) {
