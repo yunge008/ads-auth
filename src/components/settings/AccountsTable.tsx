@@ -95,7 +95,7 @@ export function AccountsTable() {
       await invokeFn("tiktok-connections", { op: "update", id, label });
       toast.success("已更新标签");
       setEditingConnId(null);
-      loadConns();
+      refreshConnections();
     } catch (e) {
       toast.error(`更新失败：${(e as Error).message}`);
     }
