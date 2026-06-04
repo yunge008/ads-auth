@@ -26,6 +26,7 @@ export type MaterialStatus =
   | "代码删除"
   | "代码有误"
   | "代码涉及多素材"
+  | "视频不可见"
   | "API错误"
   | "授权中";
 
@@ -45,6 +46,19 @@ export type Material = {
   status: MaterialStatus;
   error_message?: string;
 };
+
+export const ALL_STATUSES: MaterialStatus[] = [
+  "待授权",
+  "已授权",
+  "无授权账号",
+  "代码过期",
+  "代码删除",
+  "代码有误",
+  "代码涉及多素材",
+  "视频不可见",
+  "API错误",
+  "授权中",
+];
 
 export const ALL_STATUSES: MaterialStatus[] = [
   "待授权",
