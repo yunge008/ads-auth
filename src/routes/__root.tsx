@@ -125,9 +125,11 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AppShell>
-        <Outlet />
-      </AppShell>
+      <PasscodeGate>
+        <AppShell>
+          <Outlet />
+        </AppShell>
+      </PasscodeGate>
       <Toaster />
     </QueryClientProvider>
   );
