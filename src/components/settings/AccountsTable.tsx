@@ -242,24 +242,62 @@ export function AccountsTable() {
                 ) : (
                   flatRows.map((r, i) => (
                     <TableRow key={`${r.conn_id}-${r.advertiser_id || i}`}>
-                      <TableCell className="font-medium">{r.label}</TableCell>
+                      <TableCell className="font-medium">
+                        {r.is_first ? (
+                          editingConnId === r.conn_id ? (
+                            <div className="flex items-center gap-1">
+                              <Input
+                                value={editingConnLabel}
+                                onChange={(e) => setEditingConnLabel(e.target.value)}
+                                className="h-7 w-32"
+                                autoFocus
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") handleSaveConnLabel(r.conn_id);
+                                  if (e.key === "Escape") setEditingConnId(null);
+                                }}
+                              />
+                              <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => handleSaveConnLabel(r.conn_id)}>
+                                <Check className="h-4 w-4" />
+                              </Button>
+                              <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setEditingConnId(null)}>
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 hover:underline"
+                              onClick={() => {
+                                setEditingConnId(r.conn_id);
+                                setEditingConnLabel(r.label);
+                              }}
+                            >
+                              {r.label}
+                              <Pencil className="h-3 w-3 text-muted-foreground" />
+                            </button>
+                          )
+                        ) : null}
+                      </TableCell>
                       <TableCell>{r.advertiser_name}</TableCell>
                       <TableCell className="font-mono text-xs">{r.advertiser_id || "—"}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">
-                        {new Date(r.created_at).toLocaleString()}
+                        {r.is_first ? new Date(r.created_at).toLocaleString() : null}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 w-7 p-0 text-destructive"
-                          onClick={() => handleDeleteConn(r.conn_id, r.label)}
-                        >
-                          <Unlink className="h-3.5 w-3.5" />
-                        </Button>
+                        {r.is_first && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 w-7 p-0 text-destructive"
+                            onClick={() => handleDeleteConn(r.conn_id, r.label)}
+                          >
+                            <Unlink className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))
+
                 )}
               </TableBody>
             </Table>
