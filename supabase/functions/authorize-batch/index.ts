@@ -57,31 +57,45 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Group by advertiser_id: different advertisers run in parallel,
+    // items of the same advertiser run sequentially (avoids per-advertiser rate limits).
+    const byAdv = new Map<string, Item[]>();
+    for (const it of items) {
+      const arr = byAdv.get(it.advertiser_id) ?? [];
+      arr.push(it);
+      byAdv.set(it.advertiser_id, arr);
+    }
+
     const results: Array<{ id: string; status: string; error_message?: string }> = [];
-    const CONC = 2;
-    for (let i = 0; i < items.length; i += CONC) {
-      const slice = items.slice(i, i + CONC);
-      const part = await Promise.all(
-        slice.map((it) => {
-          const tok = tokenByAdv.get(it.advertiser_id);
-          if (!tok) {
-            return Promise.resolve({
-              id: it.id,
-              status: "API错误" as const,
-              error_message: `广告户 ${it.advertiser_id} 未在任何 TikTok 连接中找到，请重新授权`,
-            });
-          }
-          return authOne(tok, it).catch((e) => ({
+    const ADV_CONC = 8; // max parallel advertisers
+    const advIds = [...byAdv.keys()];
+
+    async function processAdv(advId: string) {
+      const list = byAdv.get(advId)!;
+      const tok = tokenByAdv.get(advId);
+      for (const it of list) {
+        if (!tok) {
+          results.push({
             id: it.id,
-            status: "API错误" as const,
+            status: "API错误",
+            error_message: `广告户 ${advId} 未在任何 TikTok 连接中找到，请重新授权`,
+          });
+          continue;
+        }
+        try {
+          results.push(await authOne(tok, it));
+        } catch (e) {
+          results.push({
+            id: it.id,
+            status: "API错误",
             error_message: (e as Error).message,
-          }));
-        }),
-      );
-      results.push(...part);
-      if (i + CONC < items.length) {
-        await new Promise((r) => setTimeout(r, 350));
+          });
+        }
       }
+    }
+
+    for (let i = 0; i < advIds.length; i += ADV_CONC) {
+      await Promise.all(advIds.slice(i, i + ADV_CONC).map(processAdv));
     }
 
     return new Response(JSON.stringify({ results }), {
