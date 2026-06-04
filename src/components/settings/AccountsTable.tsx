@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Trash2, Save, Pencil, Check, X, RefreshCw, Link2, Unlink } from "lucide-react";
+import { Link2, Unlink, RefreshCw, Check, X, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -17,21 +17,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import type { AuthAccount, BCAdvertiser } from "@/lib/types";
-import { useAccounts, useBCAdvertisers } from "@/lib/store";
+import type { BCAdvertiser } from "@/lib/types";
+import { useBCAdvertisers } from "@/lib/store";
 import { invokeFn } from "@/lib/api";
-
-type Draft = AuthAccount & { _new?: boolean };
 
 type Connection = {
   id: string;
@@ -44,84 +35,32 @@ type Connection = {
 };
 
 export function AccountsTable() {
-  const { accounts, save } = useAccounts();
   const { advertisers, save: saveAdv } = useBCAdvertisers();
-  const [drafts, setDrafts] = useState<Draft[] | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [conns, setConns] = useState<Connection[]>([]);
+  const [countries, setCountries] = useState<Record<string, string>>({});
   const [connectOpen, setConnectOpen] = useState(false);
   const [connectLabel, setConnectLabel] = useState("");
   const [connecting, setConnecting] = useState(false);
-
-  const rows = drafts ?? accounts;
-  const dirty = drafts !== null;
+  const [editingConnId, setEditingConnId] = useState<string | null>(null);
+  const [editingConnLabel, setEditingConnLabel] = useState("");
+  const [editingCountryAdv, setEditingCountryAdv] = useState<string | null>(null);
+  const [editingCountryVal, setEditingCountryVal] = useState("");
 
   const loadConns = useCallback(async () => {
     try {
-      const data = await invokeFn<{ connections: Connection[] }>("tiktok-connections", { op: "list" });
+      const data = await invokeFn<{ connections: Connection[]; countries: Record<string, string> }>(
+        "tiktok-connections",
+        { op: "list" },
+      );
       setConns(data.connections ?? []);
+      setCountries(data.countries ?? {});
     } catch (e) {
-      // 静默 — 没填密码时不打扰
       console.warn("load connections", (e as Error).message);
     }
   }, []);
 
-  useEffect(() => {
-    loadConns();
-    // 回调成功后会 sessionStorage 设标记
-    const flag = sessionStorage.getItem("tt_connect_done");
-    if (flag) {
-      sessionStorage.removeItem("tt_connect_done");
-      toast.success(`新增连接：${flag}`);
-      loadConns();
-      handleSyncBC();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadConns]);
-
-  const startEdit = () => setDrafts([...accounts]);
-
-  const handleAdd = () => {
-    const next: Draft = {
-      id: crypto.randomUUID(),
-      country: "",
-      advertiser_name: "",
-      advertiser_id: "",
-      _new: true,
-    };
-    setDrafts([...(drafts ?? accounts), next]);
-    setEditingId(next.id);
-  };
-
-  const updateRow = (id: string, patch: Partial<AuthAccount>) => {
-    const base = drafts ?? accounts;
-    setDrafts(base.map((r) => (r.id === id ? { ...r, ...patch } : r)));
-  };
-
-  const removeRow = (id: string) => {
-    const base = drafts ?? accounts;
-    setDrafts(base.filter((r) => r.id !== id));
-    if (editingId === id) setEditingId(null);
-  };
-
-  const handleSave = () => {
-    if (!drafts) return;
-    const cleaned = drafts.filter(
-      (r) => r.country.trim() && r.advertiser_name.trim() && r.advertiser_id.trim(),
-    );
-    save(cleaned.map(({ _new, ...r }) => r));
-    setDrafts(null);
-    setEditingId(null);
-    toast.success(`已保存 ${cleaned.length} 条授权账户`);
-  };
-
-  const handleCancel = () => {
-    setDrafts(null);
-    setEditingId(null);
-  };
-
-  const handleSyncBC = async () => {
+  const handleSyncBC = useCallback(async () => {
     setSyncing(true);
     try {
       const data = await invokeFn<{ advertisers: BCAdvertiser[]; warning?: string }>("bc-list-advertisers");
@@ -134,7 +73,18 @@ export function AccountsTable() {
     } finally {
       setSyncing(false);
     }
-  };
+  }, [saveAdv]);
+
+  useEffect(() => {
+    loadConns();
+    const flag = sessionStorage.getItem("tt_connect_done");
+    if (flag) {
+      sessionStorage.removeItem("tt_connect_done");
+      toast.success(`新增连接：${flag}`);
+      loadConns();
+      handleSyncBC();
+    }
+  }, [loadConns, handleSyncBC]);
 
   const handleStartConnect = async () => {
     const label = connectLabel.trim();
@@ -149,11 +99,10 @@ export function AccountsTable() {
         label,
         redirect_uri: redirectUri,
       });
-      // 新标签页打开，避免预览 iframe 被 TikTok 拒绝（X-Frame-Options）
       window.open(data.authorize_url, "_blank", "noopener");
       setConnecting(false);
       setConnectOpen(false);
-      toast.info("已在新标签页打开 TikTok 授权页，完成后回到本页面会自动刷新连接列表");
+      toast.info("已在新标签页打开 TikTok 授权页，完成后回到本页面会自动刷新");
     } catch (e) {
       toast.error(`生成授权链接失败：${(e as Error).message}`);
       setConnecting(false);
@@ -171,9 +120,6 @@ export function AccountsTable() {
     }
   };
 
-  const [editingConnId, setEditingConnId] = useState<string | null>(null);
-  const [editingConnLabel, setEditingConnLabel] = useState("");
-
   const handleSaveConnLabel = async (id: string) => {
     const label = editingConnLabel.trim();
     if (!label) {
@@ -190,52 +136,78 @@ export function AccountsTable() {
     }
   };
 
+  const handleSaveCountry = async (advertiser_id: string) => {
+    const country = editingCountryVal.trim();
+    try {
+      await invokeFn("tiktok-connections", { op: "set_country", advertiser_id, country });
+      toast.success(country ? "已保存国家" : "已清空国家");
+      setEditingCountryAdv(null);
+      // Optimistic local update
+      setCountries((prev) => {
+        const next = { ...prev };
+        if (country) next[advertiser_id] = country;
+        else delete next[advertiser_id];
+        return next;
+      });
+    } catch (e) {
+      toast.error(`保存失败：${(e as Error).message}`);
+    }
+  };
+
   const advNameById = new Map(advertisers.map((a) => [a.advertiser_id, a.advertiser_name]));
   const flatRows = conns.flatMap((c) =>
     (c.advertiser_ids.length ? c.advertiser_ids : [""]).map((aid, idx) => ({
       conn_id: c.id,
       label: c.label,
       advertiser_id: aid,
-      advertiser_name: aid ? (advNameById.get(aid) ?? "—") : "—",
+      advertiser_name: aid ? (advNameById.get(aid) ?? aid) : "—",
+      country: aid ? (countries[aid] ?? "") : "",
       created_at: c.created_at,
       is_first: idx === 0,
-      row_span: c.advertiser_ids.length || 1,
     })),
   );
 
+  const totalAdvertisers = flatRows.filter((r) => r.advertiser_id).length;
+  const taggedCount = flatRows.filter((r) => r.advertiser_id && r.country).length;
 
   return (
     <div className="space-y-4">
-      {/* TikTok 连接管理 */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
           <CardTitle className="text-base">
             TikTok 授权连接
             <span className="ml-2 text-xs font-normal text-muted-foreground">
-              （共 {conns.length} 个连接，覆盖 {flatRows.filter((r) => r.advertiser_id).length} 个广告户）
+              （共 {conns.length} 个连接 · {totalAdvertisers} 个广告户 · 已标注国家 {taggedCount}）
             </span>
           </CardTitle>
-          <Button size="sm" onClick={() => setConnectOpen(true)}>
-            <Link2 className="h-4 w-4 mr-1" />
-            连接 TikTok
-          </Button>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={handleSyncBC} disabled={syncing}>
+              <RefreshCw className={`h-4 w-4 mr-1 ${syncing ? "animate-spin" : ""}`} />
+              同步广告户名称
+            </Button>
+            <Button size="sm" onClick={() => setConnectOpen(true)}>
+              <Link2 className="h-4 w-4 mr-1" />
+              连接 TikTok
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="border rounded-md">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>标签</TableHead>
+                  <TableHead className="w-32">标签</TableHead>
                   <TableHead>账户名</TableHead>
-                  <TableHead>账户ID</TableHead>
-                  <TableHead>授权时间</TableHead>
+                  <TableHead className="w-44">账户ID</TableHead>
+                  <TableHead className="w-32">国家</TableHead>
+                  <TableHead className="w-40">授权时间</TableHead>
                   <TableHead className="w-16 text-right">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {flatRows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="h-16 text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={6} className="h-16 text-center text-sm text-muted-foreground">
                       尚无连接，点「连接 TikTok」开始首次授权
                     </TableCell>
                   </TableRow>
@@ -249,7 +221,7 @@ export function AccountsTable() {
                               <Input
                                 value={editingConnLabel}
                                 onChange={(e) => setEditingConnLabel(e.target.value)}
-                                className="h-7 w-32"
+                                className="h-7 w-24"
                                 autoFocus
                                 onKeyDown={(e) => {
                                   if (e.key === "Enter") handleSaveConnLabel(r.conn_id);
@@ -280,6 +252,43 @@ export function AccountsTable() {
                       </TableCell>
                       <TableCell>{r.advertiser_name}</TableCell>
                       <TableCell className="font-mono text-xs">{r.advertiser_id || "—"}</TableCell>
+                      <TableCell>
+                        {!r.advertiser_id ? (
+                          <span className="text-muted-foreground">—</span>
+                        ) : editingCountryAdv === r.advertiser_id ? (
+                          <div className="flex items-center gap-1">
+                            <Input
+                              value={editingCountryVal}
+                              onChange={(e) => setEditingCountryVal(e.target.value)}
+                              placeholder="如 MX-AR"
+                              className="h-7 w-20"
+                              autoFocus
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") handleSaveCountry(r.advertiser_id);
+                                if (e.key === "Escape") setEditingCountryAdv(null);
+                              }}
+                            />
+                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => handleSaveCountry(r.advertiser_id)}>
+                              <Check className="h-4 w-4" />
+                            </Button>
+                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setEditingCountryAdv(null)}>
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 hover:underline"
+                            onClick={() => {
+                              setEditingCountryAdv(r.advertiser_id);
+                              setEditingCountryVal(r.country);
+                            }}
+                          >
+                            {r.country || <span className="text-muted-foreground">点击设置</span>}
+                            <Pencil className="h-3 w-3 text-muted-foreground" />
+                          </button>
+                        )}
+                      </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {r.is_first ? new Date(r.created_at).toLocaleString() : null}
                       </TableCell>
@@ -297,7 +306,6 @@ export function AccountsTable() {
                       </TableCell>
                     </TableRow>
                   ))
-
                 )}
               </TableBody>
             </Table>
@@ -305,169 +313,6 @@ export function AccountsTable() {
         </CardContent>
       </Card>
 
-
-      {/* 授权账户表 */}
-      <Card className="h-full">
-        <CardHeader className="flex flex-row items-center justify-between space-y-0">
-          <CardTitle className="text-base">
-            授权账户表
-            <span className="ml-2 text-xs font-normal text-muted-foreground">
-              （已同步 {advertisers.length} 个广告户可选）
-            </span>
-          </CardTitle>
-          <div className="flex gap-2">
-            <Button size="sm" variant="outline" onClick={handleSyncBC} disabled={syncing}>
-              <RefreshCw className={`h-4 w-4 mr-1 ${syncing ? "animate-spin" : ""}`} />
-              同步 BC 广告户
-            </Button>
-            <Button size="sm" variant="outline" onClick={handleAdd}>
-              <Plus className="h-4 w-4 mr-1" />
-              新增
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="border rounded-md">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-32">国家</TableHead>
-                  <TableHead>广告户名称</TableHead>
-                  <TableHead>广告户ID</TableHead>
-                  <TableHead className="w-28 text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={4} className="h-20 text-center text-sm text-muted-foreground">
-                      暂无授权账户，点击「新增」添加
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  rows.map((row) => {
-                    const isEditing = editingId === row.id;
-                    return (
-                      <TableRow key={row.id}>
-                        <TableCell>
-                          {isEditing ? (
-                            <Input
-                              value={row.country}
-                              onChange={(e) => updateRow(row.id, { country: e.target.value })}
-                              placeholder="美国 / US"
-                              className="h-8"
-                            />
-                          ) : (
-                            row.country || <span className="text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {isEditing ? (
-                            advertisers.length > 0 ? (
-                              <Select
-                                value={row.advertiser_id || undefined}
-                                onValueChange={(id) => {
-                                  const adv = advertisers.find((a) => a.advertiser_id === id);
-                                  if (adv) {
-                                    updateRow(row.id, {
-                                      advertiser_id: adv.advertiser_id,
-                                      advertiser_name: adv.advertiser_name,
-                                    });
-                                  }
-                                }}
-                              >
-                                <SelectTrigger className="h-8">
-                                  <SelectValue placeholder="选择广告户" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {advertisers.map((a) => (
-                                    <SelectItem key={a.advertiser_id} value={a.advertiser_id}>
-                                      {a.advertiser_name}（{a.advertiser_id}）
-                                    </SelectItem>
-                                  ))}
-
-                                </SelectContent>
-                              </Select>
-                            ) : (
-                              <Input
-                                value={row.advertiser_name}
-                                onChange={(e) =>
-                                  updateRow(row.id, { advertiser_name: e.target.value })
-                                }
-                                placeholder="先点「同步 BC 广告户」"
-                                className="h-8"
-                              />
-                            )
-                          ) : (
-                            row.advertiser_name || <span className="text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <span className="font-mono text-xs">
-                            {row.advertiser_id || "—"}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="inline-flex gap-1">
-                            {isEditing ? (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-7 w-7 p-0"
-                                onClick={() => setEditingId(null)}
-                              >
-                                <Check className="h-4 w-4" />
-                              </Button>
-                            ) : (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-7 w-7 p-0"
-                                onClick={() => {
-                                  if (!dirty) startEdit();
-                                  setEditingId(row.id);
-                                }}
-                              >
-                                <Pencil className="h-3.5 w-3.5" />
-                              </Button>
-                            )}
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-                              onClick={() => {
-                                if (!dirty) startEdit();
-                                removeRow(row.id);
-                              }}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
-                )}
-              </TableBody>
-            </Table>
-          </div>
-
-          <div className="flex justify-end gap-2">
-            {dirty && (
-              <Button variant="outline" size="sm" onClick={handleCancel}>
-                <X className="h-4 w-4 mr-1" />
-                取消
-              </Button>
-            )}
-            <Button size="sm" onClick={handleSave} disabled={!dirty}>
-              <Save className="h-4 w-4 mr-1" />
-              保存
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Connect dialog */}
       <Dialog open={connectOpen} onOpenChange={(o) => { if (!connecting) setConnectOpen(o); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>

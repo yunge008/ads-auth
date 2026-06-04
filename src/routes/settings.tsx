@@ -30,6 +30,7 @@ function SettingsPage() {
           <StaffTable />
         </div>
       </div>
+
     </div>
   );
 }
