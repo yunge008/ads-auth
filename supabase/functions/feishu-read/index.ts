@@ -74,7 +74,7 @@ function parseDate(v: unknown): string | null {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    checkAdminPasscode(req);
+    await checkAdminPasscode(req, "home");
     const { staff } = (await req.json()) as { staff: StaffIn[] };
     if (!staff?.length) throw new Error("staff 不能为空");
 

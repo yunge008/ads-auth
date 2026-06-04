@@ -3,12 +3,22 @@ import { Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getPasscode, setPasscode, invokeFn } from "@/lib/api";
+import { accountStore, type CurrentAccount } from "@/lib/account";
 import { toast } from "sonner";
 
 export function PasscodeGate({ children }: { children: ReactNode }) {
   const [unlocked, setUnlocked] = useState(false);
   const [val, setVal] = useState("");
   const [checking, setChecking] = useState(true);
+
+  const login = async () => {
+    const { account } = await invokeFn<{ account: CurrentAccount }>(
+      "app-accounts",
+      { op: "me" },
+    );
+    accountStore.set(account);
+    setUnlocked(true);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -17,13 +27,12 @@ export function PasscodeGate({ children }: { children: ReactNode }) {
       setChecking(false);
       return;
     }
-    // Validate stored passcode against a cheap edge function
-    invokeFn("tiktok-connections", { op: "list" })
-      .then(() => {
-        if (!cancelled) setUnlocked(true);
-      })
+    login()
       .catch(() => {
-        if (!cancelled) setPasscode("");
+        if (!cancelled) {
+          setPasscode("");
+          accountStore.set(null);
+        }
       })
       .finally(() => {
         if (!cancelled) setChecking(false);
@@ -32,6 +41,7 @@ export function PasscodeGate({ children }: { children: ReactNode }) {
     const onInvalid = () => {
       setUnlocked(false);
       setVal("");
+      accountStore.set(null);
       toast.error("密码已失效，请重新输入");
     };
     window.addEventListener("tt-passcode-invalid", onInvalid);
@@ -48,10 +58,10 @@ export function PasscodeGate({ children }: { children: ReactNode }) {
     setPasscode(v);
     setChecking(true);
     try {
-      await invokeFn("tiktok-connections", { op: "list" });
-      setUnlocked(true);
+      await login();
     } catch (err) {
       setPasscode("");
+      accountStore.set(null);
       toast.error(`密码错误：${(err as Error).message}`);
     } finally {
       setChecking(false);

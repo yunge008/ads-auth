@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { AccountsTable } from "@/components/settings/AccountsTable";
 import { StaffTable } from "@/components/settings/StaffTable";
+import { AccountsManager } from "@/components/settings/AccountsManager";
+import { useCurrentAccount } from "@/lib/account";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({
@@ -13,6 +15,7 @@ export const Route = createFileRoute("/settings")({
 });
 
 function SettingsPage() {
+  const account = useCurrentAccount();
   return (
     <div className="space-y-4">
       <div>
@@ -31,6 +34,7 @@ function SettingsPage() {
         </div>
       </div>
 
+      {account?.isAdmin && <AccountsManager />}
     </div>
   );
 }

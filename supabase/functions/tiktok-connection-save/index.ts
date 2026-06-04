@@ -7,7 +7,7 @@ import { admin, checkAdminPasscode } from "../_shared/auth.ts";
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    checkAdminPasscode(req);
+    await checkAdminPasscode(req, "settings");
     const body = (await req.json()) as {
       label?: string;
       access_token?: string;

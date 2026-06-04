@@ -6,7 +6,7 @@ import { checkAdminPasscode } from "../_shared/auth.ts";
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    checkAdminPasscode(req);
+    await checkAdminPasscode(req, "settings");
     const appId = Deno.env.get("TIKTOK_APP_ID");
     if (!appId) throw new Error("TIKTOK_APP_ID 未配置");
     const { label, redirect_uri } = (await req.json()) as { label?: string; redirect_uri?: string };

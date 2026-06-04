@@ -14,7 +14,7 @@ type StaffRow = {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    checkAdminPasscode(req);
+    await checkAdminPasscode(req, "settings");
     const body = (await req.json().catch(() => ({}))) as {
       action?: string;
       staff?: StaffRow[];

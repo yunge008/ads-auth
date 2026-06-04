@@ -43,7 +43,7 @@ async function enrich(token: string, ids: string[]) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    checkAdminPasscode(req);
+    await checkAdminPasscode(req, "settings");
     const appId = Deno.env.get("TIKTOK_APP_ID");
     const appSecret = Deno.env.get("TIKTOK_APP_SECRET");
     if (!appId || !appSecret) throw new Error("TIKTOK_APP_ID / TIKTOK_APP_SECRET 未配置");

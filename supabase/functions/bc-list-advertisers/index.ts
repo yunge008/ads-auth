@@ -45,7 +45,7 @@ async function enrich(token: string, ids: string[]) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    checkAdminPasscode(req);
+    await checkAdminPasscode(req, "settings");
     const { data: conns, error } = await admin()
       .from("tiktok_connections")
       .select("*");

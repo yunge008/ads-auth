@@ -40,7 +40,7 @@ async function authOne(token: string, it: Item, attempt = 0): Promise<{ id: stri
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    checkAdminPasscode(req);
+    await checkAdminPasscode(req, "home");
     const { items } = (await req.json()) as { items: Item[] };
     if (!items?.length) throw new Error("items 不能为空");
 
