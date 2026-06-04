@@ -248,11 +248,17 @@ function AuthorizePage() {
       return;
     }
     try {
-      const data = await invokeFn<{ updated?: number }>("feishu-writeback", {
+      const data = await invokeFn<{ updated?: number; logged?: number }>("feishu-writeback", {
         items: targets.map((m) => ({
           sheet_name: m.sheet_name,
           row_number: m.row_number,
           status: m.status,
+          country: m.country,
+          creator_name: m.creator_name,
+          vid: m.vid,
+          auth_code: m.auth_code,
+          product: m.product,
+          staff_name: m.staff_name,
         })),
       });
       const ids = new Set(targets.map((t) => t.id));
