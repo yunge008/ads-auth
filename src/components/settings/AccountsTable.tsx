@@ -171,16 +171,38 @@ export function AccountsTable() {
     }
   };
 
+  const [editingConnId, setEditingConnId] = useState<string | null>(null);
+  const [editingConnLabel, setEditingConnLabel] = useState("");
+
+  const handleSaveConnLabel = async (id: string) => {
+    const label = editingConnLabel.trim();
+    if (!label) {
+      toast.error("标签不能为空");
+      return;
+    }
+    try {
+      await invokeFn("tiktok-connections", { op: "update", id, label });
+      toast.success("已更新标签");
+      setEditingConnId(null);
+      loadConns();
+    } catch (e) {
+      toast.error(`更新失败：${(e as Error).message}`);
+    }
+  };
+
   const advNameById = new Map(advertisers.map((a) => [a.advertiser_id, a.advertiser_name]));
   const flatRows = conns.flatMap((c) =>
-    (c.advertiser_ids.length ? c.advertiser_ids : [""]).map((aid) => ({
+    (c.advertiser_ids.length ? c.advertiser_ids : [""]).map((aid, idx) => ({
       conn_id: c.id,
       label: c.label,
       advertiser_id: aid,
       advertiser_name: aid ? (advNameById.get(aid) ?? "—") : "—",
       created_at: c.created_at,
+      is_first: idx === 0,
+      row_span: c.advertiser_ids.length || 1,
     })),
   );
+
 
   return (
     <div className="space-y-4">
