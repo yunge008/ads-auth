@@ -1,6 +1,7 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { Settings, Zap, Circle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { PasscodeGate } from "./PasscodeGate";
 
 const nav = [
   { to: "/", label: "执行授权", icon: Zap },
@@ -63,6 +64,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </header>
         <main className="flex-1 p-6 overflow-auto">{children}</main>
       </div>
+      <PasscodeGate />
     </div>
   );
 }

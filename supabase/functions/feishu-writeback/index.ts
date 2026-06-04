@@ -10,6 +10,7 @@ import {
   listSheets,
   writeValues,
 } from "../_shared/feishu.ts";
+import { checkAdminPasscode } from "../_shared/auth.ts";
 
 type Item = {
   sheet_name: string;
@@ -29,6 +30,7 @@ function today(): string {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
+    checkAdminPasscode(req);
     const { items } = (await req.json()) as { items: Item[] };
     if (!items?.length) throw new Error("items 不能为空");
 
@@ -62,9 +64,10 @@ Deno.serve(async (req) => {
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {
+    const status = (e as Error & { status?: number }).status ?? 400;
     console.error("feishu-writeback error", e);
     return new Response(JSON.stringify({ error: (e as Error).message }), {
-      status: 400,
+      status,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
