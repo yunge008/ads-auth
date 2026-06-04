@@ -8,7 +8,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     checkAdminPasscode(req);
-    const body = (await req.json().catch(() => ({}))) as { op?: string; id?: string };
+    const body = (await req.json().catch(() => ({}))) as { op?: string; id?: string; label?: string };
 
     if (body.op === "delete") {
       if (!body.id) throw new Error("id 必填");
@@ -18,6 +18,21 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    if (body.op === "update") {
+      if (!body.id) throw new Error("id 必填");
+      const label = (body.label ?? "").trim();
+      if (!label) throw new Error("label 不能为空");
+      const { error } = await admin()
+        .from("tiktok_connections")
+        .update({ label })
+        .eq("id", body.id);
+      if (error) throw new Error(error.message);
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
 
     // default: list
     const { data, error } = await admin()
