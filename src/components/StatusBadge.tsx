@@ -34,6 +34,7 @@ export const STATUS_RANK: Record<MaterialStatus, number> = {
   代码删除: 1,
   代码有误: 1,
   代码涉及多素材: 1,
+  视频不可见: 1,
   待授权: 2,
   授权中: 3,
   已授权: 4,
