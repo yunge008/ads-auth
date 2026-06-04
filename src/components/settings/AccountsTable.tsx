@@ -146,10 +146,6 @@ export function AccountsTable() {
             </span>
           </CardTitle>
           <div className="flex gap-2">
-            <Button size="sm" variant="outline" onClick={handleSyncBC} disabled={syncing}>
-              <RefreshCw className={`h-4 w-4 mr-1 ${syncing ? "animate-spin" : ""}`} />
-              同步广告户名称
-            </Button>
             <Button size="sm" onClick={() => setConnectOpen(true)}>
               <Link2 className="h-4 w-4 mr-1" />
               连接 TikTok
