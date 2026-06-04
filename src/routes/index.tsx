@@ -263,7 +263,8 @@ function AuthorizePage() {
       });
       const ids = new Set(targets.map((t) => t.id));
       setMaterials((prev) => prev.filter((m) => !ids.has(m.id)));
-      toast.success(`已回写 ${data?.updated ?? targets.length} 条到飞书`);
+      const logMsg = data?.logged ? `，记录 ${data.logged} 条到「授权记录」` : "";
+      toast.success(`已回写 ${data?.updated ?? targets.length} 条到飞书${logMsg}`);
     } catch (e) {
       toast.error(`回写失败：${(e as Error).message}`);
     }
