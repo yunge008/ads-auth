@@ -50,27 +50,32 @@ Deno.serve(async (req) => {
     const dateStr = today();
 
     const valueRanges = items
-      .map((it) => {
+      .flatMap((it) => {
         const sid = sheetByName.get(it.sheet_name);
-        if (!sid) return null;
+        if (!sid) return [];
         if (it.status === "已授权") {
-          // Only write P column (date), do not touch Q
-          return {
+          // Only write P column (date)
+          return [{
             range: `${sid}!P${it.row_number}:P${it.row_number}`,
             values: [[dateStr]],
-          };
+          }];
         }
         if (Q_STATUSES.has(it.status)) {
-          // Only write Q column (status text, no English API message)
-          return {
-            range: `${sid}!Q${it.row_number}:Q${it.row_number}`,
-            values: [[it.status]],
-          };
+          // Write both P (date) and Q (status text, no English API message)
+          return [
+            {
+              range: `${sid}!P${it.row_number}:P${it.row_number}`,
+              values: [[dateStr]],
+            },
+            {
+              range: `${sid}!Q${it.row_number}:Q${it.row_number}`,
+              values: [[it.status]],
+            },
+          ];
         }
         // Other statuses (API错误, etc.) — skip
-        return null;
-      })
-      .filter((v): v is { range: string; values: unknown[][] } => v != null);
+        return [];
+      });
 
     if (valueRanges.length === 0) throw new Error("没有匹配的 sheet 可回写");
 
