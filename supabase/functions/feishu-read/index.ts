@@ -163,15 +163,15 @@ Deno.serve(async (req) => {
             status: "无授权账号",
           });
         } else {
-          for (const acc of matched) {
-            materials.push({
-              ...base,
-              id: crypto.randomUUID(),
-              advertiser_id: acc.advertiser_id,
-              advertiser_name: acc.advertiser_id,
-              status: "待授权",
-            });
-          }
+          // One material → one advertiser (first match wins)
+          const acc = matched[0];
+          materials.push({
+            ...base,
+            id: crypto.randomUUID(),
+            advertiser_id: acc.advertiser_id,
+            advertiser_name: acc.advertiser_id,
+            status: "待授权",
+          });
         }
       }
     }

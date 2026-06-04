@@ -53,6 +53,22 @@ Deno.serve(async (req) => {
           .eq("advertiser_id", aid);
         if (error) throw new Error(error.message);
       } else {
+        // Enforce country uniqueness: one country -> one advertiser
+        const { data: occupant, error: qErr } = await admin()
+          .from("advertiser_countries")
+          .select("advertiser_id")
+          .eq("country", country)
+          .neq("advertiser_id", aid)
+          .maybeSingle();
+        if (qErr) throw new Error(qErr.message);
+        if (occupant) {
+          return new Response(
+            JSON.stringify({
+              error: `国家「${country}」已被广告户 ${occupant.advertiser_id} 占用，请先清空对方再设置`,
+            }),
+            { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
         const { error } = await admin()
           .from("advertiser_countries")
           .upsert({ advertiser_id: aid, country }, { onConflict: "advertiser_id" });
