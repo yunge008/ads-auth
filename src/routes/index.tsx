@@ -53,7 +53,7 @@ export const Route = createFileRoute("/")({
 });
 
 function AuthorizePage() {
-  const { accounts } = useAccounts();
+  const { advertisers } = useBCAdvertisers();
   const { staff } = useStaff();
   const { materials, setMaterials } = useMaterials();
   const [loading, setLoading] = React.useState(false);
@@ -65,25 +65,41 @@ function AuthorizePage() {
   const [fVid, setFVid] = React.useState("");
   const [fAuth, setFAuth] = React.useState("");
 
+  const advNameById = React.useMemo(
+    () => new Map(advertisers.map((a) => [a.advertiser_id, a.advertiser_name])),
+    [advertisers],
+  );
+
   const countriesInData = React.useMemo(
     () => Array.from(new Set(materials.map((m) => m.country).filter(Boolean))),
     [materials],
   );
 
-  const pendingAccounts = React.useMemo(() => {
-    const seen = new Set<string>();
-    const list: { country: string; advertiser_name: string; advertiser_id: string }[] = [];
+  // Derived account list (country → advertiser) from materials themselves.
+  const accounts = React.useMemo(() => {
+    const seen = new Map<string, { country: string; advertiser_id: string; advertiser_name: string }>();
     for (const m of materials) {
-      if (!m.advertiser_id || seen.has(m.country)) continue;
-      seen.add(m.country);
-      list.push({
+      if (!m.advertiser_id) continue;
+      const k = `${m.country}__${m.advertiser_id}`;
+      if (seen.has(k)) continue;
+      seen.set(k, {
         country: m.country,
-        advertiser_name: m.advertiser_name!,
         advertiser_id: m.advertiser_id,
+        advertiser_name: advNameById.get(m.advertiser_id) ?? m.advertiser_id,
       });
     }
-    return list;
-  }, [materials]);
+    return Array.from(seen.values());
+  }, [materials, advNameById]);
+
+  const pendingAccounts = React.useMemo(() => {
+    const seen = new Set<string>();
+    return accounts.filter((a) => {
+      if (seen.has(a.advertiser_id)) return false;
+      seen.add(a.advertiser_id);
+      return true;
+    });
+  }, [accounts]);
+
 
   // Pivot: rows = staff, cols = countries
   const { statsRows, statsCountries, colTotals, grandTotal, warningTotal } = React.useMemo(() => {
