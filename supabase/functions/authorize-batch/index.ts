@@ -17,8 +17,9 @@ type Item = {
 };
 
 async function authorizeOne(token: string, item: Item) {
-  // TikTok BC API: Apply spark ads / TTCM authorization with redemption code.
-  // Endpoint: /tt_video/authorize/  (POST)  — body shape per official docs.
+  // TikTok Spark Ads: POST /v1.3/tt_video/authorize/
+  // Per official docs: auth_code 中的 "+" 必须替换为 "%2B"
+  const encodedAuthCode = item.auth_code.replace(/\+/g, "%2B");
   const res = await fetch(`${TT_BASE}/tt_video/authorize/`, {
     method: "POST",
     headers: {
@@ -27,7 +28,7 @@ async function authorizeOne(token: string, item: Item) {
     },
     body: JSON.stringify({
       advertiser_id: item.advertiser_id,
-      auth_code: item.auth_code,
+      auth_code: encodedAuthCode,
     }),
   });
   const json = await res.json().catch(() => ({}));
