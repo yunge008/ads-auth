@@ -75,7 +75,10 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     await checkAdminPasscode(req, "home");
-    const { staff } = (await req.json()) as { staff: StaffIn[] };
+    const { staff, include_done } = (await req.json()) as {
+      staff: StaffIn[];
+      include_done?: boolean;
+    };
     if (!staff?.length) throw new Error("staff 不能为空");
 
     // Load advertiser→country map + advertiser names from DB
