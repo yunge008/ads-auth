@@ -48,24 +48,33 @@ export async function readRange(
   const CHUNK = 500; // 500 rows * ~8 cols = 4000 cells, under 5000 cap
   const out: unknown[][] = [];
   let cur = startRow;
+  let emptyStreak = 0;
+  const MAX_EMPTY_CHUNKS = 4; // tolerate ~2000 blank rows before stopping on open-ended ranges
   while (true) {
     const stop = endRow ? Math.min(cur + CHUNK - 1, endRow) : cur + CHUNK - 1;
     const r = `${sid}!${colStart}${cur}:${colEnd}${stop}`;
     const chunk = await readRangeOnce(token, spreadsheetToken, r);
-    // strip fully-empty trailing rows in chunk
-    let lastNonEmpty = -1;
-    for (let i = 0; i < chunk.length; i++) {
-      const row = chunk[i] ?? [];
-      if (row.some((c) => c != null && String(c).trim() !== "")) lastNonEmpty = i;
+    // Keep all rows (including internal blanks) so absolute row indices line up.
+    out.push(...chunk);
+    const hasContent = chunk.some((row) => (row ?? []).some((c) => c != null && String(c).trim() !== ""));
+    if (hasContent) {
+      emptyStreak = 0;
+    } else {
+      emptyStreak++;
     }
-    const trimmed = chunk.slice(0, lastNonEmpty + 1);
-    out.push(...trimmed);
-    // Stop if response was short (less than CHUNK rows of actual content) or we hit endRow
-    if (trimmed.length < CHUNK) break;
     if (endRow && stop >= endRow) break;
+    // For open-ended ranges: stop only after several consecutive fully-empty chunks,
+    // or when the API returns fewer rows than requested (end of sheet).
+    if (!endRow && (emptyStreak >= MAX_EMPTY_CHUNKS || chunk.length < CHUNK)) break;
     cur = stop + 1;
   }
-  return out;
+  // Trim trailing fully-empty rows from final result
+  let lastNonEmpty = -1;
+  for (let i = 0; i < out.length; i++) {
+    const row = out[i] ?? [];
+    if (row.some((c) => c != null && String(c).trim() !== "")) lastNonEmpty = i;
+  }
+  return out.slice(0, lastNonEmpty + 1);
 }
 
 async function readRangeOnce(token: string, spreadsheetToken: string, range: string) {
