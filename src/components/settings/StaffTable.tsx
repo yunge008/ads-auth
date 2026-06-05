@@ -127,6 +127,19 @@ export function StaffTable() {
                         )}
                       </TableCell>
                       <TableCell>
+                        <select
+                          value={row.role ?? "BD"}
+                          onChange={(e) => {
+                            if (!dirty) startEdit();
+                            updateRow(row.id, { role: e.target.value as "BD" | "EDITOR" });
+                          }}
+                          className="h-8 rounded-md border bg-background px-2 text-xs"
+                        >
+                          <option value="BD">BD</option>
+                          <option value="EDITOR">剪辑</option>
+                        </select>
+                      </TableCell>
+                      <TableCell>
                         <Switch
                           checked={row.active}
                           onCheckedChange={(v) => {
@@ -135,6 +148,7 @@ export function StaffTable() {
                           }}
                         />
                       </TableCell>
+
                       <TableCell className="text-right">
                         <div className="inline-flex gap-1">
                           {isEditing ? (
