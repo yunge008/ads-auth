@@ -271,7 +271,7 @@ Deno.serve(async (req) => {
 
       let campaigns: string[] = [];
       try {
-        campaigns = await fetchCampaigns(tok, adv);
+        campaigns = await fetchCampaigns(tok, adv, ttGet, () => ensureTime(`advertiser ${adv} campaigns`));
       } catch (err) {
         errors.push({ advertiser_id: adv, error: `campaign/get: ${(err as Error).message}` });
         return;
@@ -295,6 +295,9 @@ Deno.serve(async (req) => {
             tok, adv, shopId, groupStart, end_date,
             ["campaign_id", "item_group_id"],
             { campaign_ids: batch },
+            undefined,
+            ttGet,
+            () => ensureTime(`advertiser ${adv} group pages`),
           );
           for (const r of groups) {
             const dims = (r.dimensions ?? {}) as Record<string, unknown>;
@@ -324,6 +327,9 @@ Deno.serve(async (req) => {
                 tok, adv, shopId, s, e,
                 ["campaign_id", "item_group_id", "item_id", "stat_time_day"],
                 { campaign_ids: [cid], item_group_ids: igidBatch },
+                undefined,
+                ttGet,
+                () => ensureTime(`advertiser ${adv} creative pages`),
               );
               totalRows += list.length;
               if (list.length > maxRows) maxRows = list.length;
