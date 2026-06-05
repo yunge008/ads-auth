@@ -711,6 +711,13 @@ Deno.serve(async (req) => {
       if (nm) advertiser_names[adv] = nm;
     }
 
+    // Mark last successful sync time (used by 素材成效 page to show refresh time).
+    if (upserted > 0 || processedAdvertisers.length > 0) {
+      await db
+        .from("gmv_max_sync_state")
+        .upsert({ id: "gmv_max_vid_daily", last_synced_at: new Date().toISOString(), note: cronAuthed ? "cron" : "manual" });
+    }
+
     return new Response(
       JSON.stringify({
         mode,
