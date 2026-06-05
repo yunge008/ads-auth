@@ -144,19 +144,41 @@ function GmvMaxSection() {
       </Card>
       <PreviewCard title={`GMV Max 日报（${preview.count} 条）`} loading={preview.loading} reload={preview.reload} page={preview.page} count={preview.count} setPage={preview.setPage}>
         <Table>
-          <TableHeader><TableRow><TableHead>国家</TableHead><TableHead>广告户</TableHead><TableHead>VID</TableHead><TableHead>日期</TableHead><TableHead className="text-right">花费</TableHead><TableHead className="text-right">GMV</TableHead><TableHead className="text-right">订单</TableHead><TableHead className="text-right">展示</TableHead><TableHead className="text-right">点击</TableHead><TableHead className="text-right">ROI</TableHead></TableRow></TableHeader>
+          <TableHeader><TableRow>
+            <TableHead>国家</TableHead><TableHead>广告户</TableHead>
+            <TableHead>VID</TableHead><TableHead>TikTok账号名称</TableHead>
+            <TableHead>授权类型</TableHead><TableHead>内容类型</TableHead>
+            <TableHead>投放状态</TableHead><TableHead>日期</TableHead>
+            <TableHead className="text-right">花费</TableHead><TableHead className="text-right">订单数</TableHead>
+            <TableHead className="text-right">总收入GMV</TableHead>
+            <TableHead className="text-right">PV</TableHead><TableHead className="text-right">Click</TableHead>
+            <TableHead className="text-right">ROI</TableHead>
+            <TableHead className="text-right">2秒播放率</TableHead><TableHead className="text-right">6秒播放率</TableHead>
+            <TableHead className="text-right">25%播放率</TableHead><TableHead className="text-right">50%播放率</TableHead>
+            <TableHead className="text-right">75%播放率</TableHead><TableHead className="text-right">完播率</TableHead>
+          </TableRow></TableHeader>
           <TableBody>{preview.rows.map((r, i) => (
             <TableRow key={`${r.advertiser_id}-${r.vid}-${r.stat_date}-${i}`}>
               <TableCell>{r.country ?? "—"}</TableCell>
               <TableCell className="text-xs"><div>{nameMap.get(r.advertiser_id) ?? r.advertiser_id}</div><div className="text-[10px] text-muted-foreground font-mono">{r.advertiser_id}</div></TableCell>
               <TableCell className="font-mono text-xs">{r.vid}</TableCell>
+              <TableCell className="text-xs">{r.tt_account_name ?? "—"}</TableCell>
+              <TableCell className="text-xs">{r.tt_account_authorization_type ?? "—"}</TableCell>
+              <TableCell className="text-xs">{r.shop_content_type ?? "—"}</TableCell>
+              <TableCell className="text-xs">{r.creative_delivery_status ?? "—"}</TableCell>
               <TableCell className="text-xs">{r.stat_date}</TableCell>
               <TableCell className="text-right">{Number(r.cost).toFixed(2)}</TableCell>
-              <TableCell className="text-right">{Number(r.gross_revenue).toFixed(2)}</TableCell>
               <TableCell className="text-right">{r.orders}</TableCell>
+              <TableCell className="text-right">{Number(r.gross_revenue).toFixed(2)}</TableCell>
               <TableCell className="text-right">{r.product_impressions}</TableCell>
               <TableCell className="text-right">{r.product_clicks}</TableCell>
               <TableCell className="text-right">{r.roi == null ? "—" : Number(r.roi).toFixed(2)}</TableCell>
+              <TableCell className="text-right">{pct(r.ad_video_view_rate_2s)}</TableCell>
+              <TableCell className="text-right">{pct(r.ad_video_view_rate_6s)}</TableCell>
+              <TableCell className="text-right">{pct(r.ad_video_view_rate_p25)}</TableCell>
+              <TableCell className="text-right">{pct(r.ad_video_view_rate_p50)}</TableCell>
+              <TableCell className="text-right">{pct(r.ad_video_view_rate_p75)}</TableCell>
+              <TableCell className="text-right">{pct(r.ad_video_view_rate_p100)}</TableCell>
             </TableRow>
           ))}</TableBody>
         </Table>
