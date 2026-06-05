@@ -380,6 +380,7 @@ Deno.serve(async (req) => {
         windows: windows.length,
         advertisers: targets.length,
         batch_size: batchSize,
+        concurrency,
         upserted,
         batch_stats: batchStats,
         errors,
