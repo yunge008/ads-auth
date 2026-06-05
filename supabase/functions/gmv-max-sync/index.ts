@@ -167,7 +167,6 @@ export async function fetchReport(
   const page_size = 1000;
   const selectedMetrics = metrics ?? (dimensions.includes("item_id")
     ? [
-        "tt_account_name", "tt_account_authorization_type", "shop_content_type",
         "creative_delivery_status", "cost", "orders", "gross_revenue",
         "product_impressions", "product_clicks", "currency",
         "ad_video_view_rate_2s", "ad_video_view_rate_6s",
@@ -542,6 +541,110 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Phase 3: backfill static VID meta (title / tt_account_name / authorization_type /
+    // shop_content_type). Only fetched for VIDs not yet in gmv_max_vid_meta.
+    let metaUpserted = 0;
+    const metaErrors: { advertiser_id: string; error: string }[] = [];
+    try {
+      // collect unique (adv, cid, igid, vid) seen this run
+      const seenTuples = new Map<string, { adv: string; cid: string; igid: string; vid: string }>();
+      for (const r of upsertRows) {
+        const adv = String(r.advertiser_id ?? "");
+        const cid = String(r.campaign_id ?? "");
+        const igid = String(r.item_group_id ?? "");
+        const vid = String(r.vid ?? "");
+        if (!adv || !cid || !igid || !vid) continue;
+        const k = `${adv}|${cid}|${igid}|${vid}`;
+        if (!seenTuples.has(k)) seenTuples.set(k, { adv, cid, igid, vid });
+      }
+      const allVids = Array.from(new Set([...seenTuples.values()].map((t) => t.vid)));
+      // find existing VIDs in batches
+      const existing = new Set<string>();
+      for (let i = 0; i < allVids.length; i += 500) {
+        const slice = allVids.slice(i, i + 500);
+        const { data, error } = await db
+          .from("gmv_max_vid_meta")
+          .select("vid")
+          .in("vid", slice);
+        if (error) throw new Error(error.message);
+        for (const row of (data ?? []) as { vid: string }[]) existing.add(row.vid);
+      }
+      // group missing VIDs by (adv, cid, igid)
+      type Pair = { cid: string; igid: string; vids: Set<string> };
+      const missingByAdv = new Map<string, Map<string, Pair>>();
+      for (const t of seenTuples.values()) {
+        if (existing.has(t.vid)) continue;
+        let perAdv = missingByAdv.get(t.adv);
+        if (!perAdv) { perAdv = new Map(); missingByAdv.set(t.adv, perAdv); }
+        const key = `${t.cid}|${t.igid}`;
+        let pair = perAdv.get(key);
+        if (!pair) { pair = { cid: t.cid, igid: t.igid, vids: new Set() }; perAdv.set(key, pair); }
+        pair.vids.add(t.vid);
+      }
+      const metaRows: Record<string, unknown>[] = [];
+      const metaEnd = end_date;
+      const metaStart = addDays(metaEnd, -364);
+      const META_METRICS = ["title", "tt_account_name", "tt_account_authorization_type", "shop_content_type"];
+      for (const [adv, perAdv] of missingByAdv) {
+        const tok = tokenByAdv.get(adv);
+        const shopId = shopByAdv.get(adv);
+        if (!tok || !shopId) continue;
+        for (const pair of perAdv.values()) {
+          try {
+            ensureTime(`meta ${adv}`);
+            const list = await fetchReport(
+              tok, adv, shopId, metaStart, metaEnd,
+              ["item_id"],
+              { campaign_ids: [pair.cid], item_group_ids: [pair.igid] },
+              META_METRICS,
+              ttGet,
+              () => ensureTime(`meta ${adv} pages`),
+            );
+            for (const r of list) {
+              const dims = (r.dimensions ?? {}) as Record<string, unknown>;
+              const mets = (r.metrics ?? {}) as Record<string, unknown>;
+              const vid = String(dims.item_id ?? "");
+              if (!vid || !pair.vids.has(vid)) continue;
+              const s = (k: string) => mets[k] == null ? null : String(mets[k]);
+              metaRows.push({
+                vid,
+                campaign_id: pair.cid,
+                item_group_id: pair.igid,
+                advertiser_id: adv,
+                title: s("title"),
+                tt_account_name: s("tt_account_name"),
+                tt_account_authorization_type: s("tt_account_authorization_type"),
+                shop_content_type: s("shop_content_type"),
+                pulled_at: nowIso,
+              });
+            }
+          } catch (err) {
+            if (err instanceof TimeBudgetExceeded) throw err;
+            metaErrors.push({
+              advertiser_id: adv,
+              error: `meta campaign[${pair.cid}] group[${pair.igid}]: ${(err as Error).message}`,
+            });
+          }
+        }
+      }
+      if (metaRows.length) {
+        const CHUNK = 500;
+        for (let i = 0; i < metaRows.length; i += CHUNK) {
+          const batch = metaRows.slice(i, i + CHUNK);
+          const { error } = await db
+            .from("gmv_max_vid_meta")
+            .upsert(batch, { onConflict: "vid" });
+          if (error) throw new Error(error.message);
+          metaUpserted += batch.length;
+        }
+      }
+    } catch (err) {
+      if (!(err instanceof TimeBudgetExceeded)) {
+        metaErrors.push({ advertiser_id: "", error: `meta phase: ${(err as Error).message}` });
+      }
+    }
+    for (const e of metaErrors) errors.push(e);
+
     const advertiser_names: Record<string, string> = {};
     for (const adv of targets) {
       const nm = nameByAdv.get(adv);
@@ -561,6 +664,7 @@ Deno.serve(async (req) => {
         max_runtime_ms: maxRuntimeMs,
         stopped_before_timeout: stoppedBeforeTimeout,
         upserted,
+        meta_upserted: metaUpserted,
         batch_stats: batchStats,
         advertiser_names,
         errors,
