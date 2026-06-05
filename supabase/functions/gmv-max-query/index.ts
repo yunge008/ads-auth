@@ -275,7 +275,14 @@ Deno.serve(async (req) => {
       }));
 
 
-    return new Response(JSON.stringify({ rows, series }), {
+    const { data: stateRow } = await admin()
+      .from("gmv_max_sync_state")
+      .select("last_synced_at")
+      .eq("id", "gmv_max_vid_daily")
+      .maybeSingle();
+    const last_synced_at = (stateRow as { last_synced_at?: string } | null)?.last_synced_at ?? null;
+
+    return new Response(JSON.stringify({ rows, series, last_synced_at }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
