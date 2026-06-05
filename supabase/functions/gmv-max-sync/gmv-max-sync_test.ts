@@ -41,34 +41,50 @@ for (const adv of ADVERTISERS) {
   });
 }
 
-// ---------- fetchReport: PRODUCT filtering object + merged extra filter ----------
+// ---------- fetchReport: group-level keeps PRODUCT filter; creative-level drops it ----------
 for (const adv of ADVERTISERS) {
-  Deno.test(`fetchReport[${adv}] filtering is object with PRODUCT + extras and paginates by total_page`, async () => {
+  Deno.test(`fetchReport[${adv}] group-level: filtering object has PRODUCT + extras, paginates by total_page`, async () => {
     const TOTAL_PAGE = 2;
     const { fn, calls } = makeTtGet((path, params) => {
       assertEquals(path, "/gmv_max/report/get/");
       assertEquals(params.advertiser_id, adv);
       const filt = JSON.parse(params.filtering);
-      // MUST be a plain object, not an array (TT requires "Field must be set to object")
       assert(!Array.isArray(filt), "filtering must be object");
       assertEquals(filt.gmv_max_promotion_types, ["PRODUCT"]);
       assertEquals(filt.campaign_ids, [`${adv}_cid`]);
-      assertEquals(filt.item_group_ids, [`${adv}_igid`]);
       const page = Number(params.page);
       return {
-        list: [{ dimensions: { item_id: `${adv}_v${page}` }, metrics: { cost: 1 } }],
+        list: [{ dimensions: { item_group_id: `${adv}_g${page}` }, metrics: {} }],
         page_info: { page, total_page: TOTAL_PAGE, total_number: TOTAL_PAGE },
       };
     });
     const rows = await fetchReport(
+      "tok", adv, "shop", "2026-01-01", "2026-01-02",
+      ["campaign_id", "item_group_id", "stat_time_day"],
+      { campaign_ids: [`${adv}_cid`] },
+      undefined,
+      fn,
+    );
+    assertEquals(calls.length, TOTAL_PAGE);
+    assertEquals(rows.length, TOTAL_PAGE);
+  });
+
+  Deno.test(`fetchReport[${adv}] creative-level (item_id): filtering object OMITS gmv_max_promotion_types`, async () => {
+    const { fn } = makeTtGet((_path, params) => {
+      const filt = JSON.parse(params.filtering);
+      assert(!Array.isArray(filt));
+      assert(!("gmv_max_promotion_types" in filt), "must omit gmv_max_promotion_types for item_id dims");
+      assertEquals(filt.campaign_ids, [`${adv}_cid`]);
+      assertEquals(filt.item_group_ids, [`${adv}_igid`]);
+      return { list: [], page_info: { page: 1, total_page: 1, total_number: 0 } };
+    });
+    await fetchReport(
       "tok", adv, "shop", "2026-01-01", "2026-01-02",
       ["campaign_id", "item_group_id", "item_id", "stat_time_day"],
       { campaign_ids: [`${adv}_cid`], item_group_ids: [`${adv}_igid`] },
       undefined,
       fn,
     );
-    assertEquals(calls.length, TOTAL_PAGE);
-    assertEquals(rows.length, TOTAL_PAGE);
   });
 }
 
