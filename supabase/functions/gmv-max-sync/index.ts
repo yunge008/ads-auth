@@ -174,6 +174,7 @@ export async function fetchReport(
     ? [
         "creative_delivery_status", "cost", "orders", "gross_revenue",
         "product_impressions", "product_clicks", "currency",
+        "tt_account_name", "tt_account_authorization_type", "shop_content_type",
         "ad_video_view_rate_2s", "ad_video_view_rate_6s",
         "ad_video_view_rate_p25", "ad_video_view_rate_p50",
         "ad_video_view_rate_p75", "ad_video_view_rate_p100",
