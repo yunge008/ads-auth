@@ -1,10 +1,21 @@
 // Sync GMV Max VID-level daily report into gmv_max_vid_daily.
-// Body: { start_date: 'YYYY-MM-DD', end_date: 'YYYY-MM-DD', advertiser_ids?: string[] }
-// Auto-splits into 30-day windows. Uses /gmv_max/report/get/ with item_id dimension.
+// Body: {
+//   start_date?: 'YYYY-MM-DD', end_date?: 'YYYY-MM-DD',
+//   advertiser_ids?: string[],
+//   mode?: 'backfill' | 'incremental' | 'custom' (default: 'custom'),
+//   batch_size?: number (default 20, max 100),
+// }
+// - backfill:    last 30 days
+// - incremental: last 3 days
+// - custom:      requires start_date / end_date
+// Optimized: drops the intermediate item_group enumeration; batches campaign_ids
+// directly into the creative-level report. Adds QPS sleep + 429 retry.
 import { corsHeaders } from "../_shared/feishu.ts";
 import { admin, checkAdminPasscode, type ConnRow } from "../_shared/auth.ts";
 
 const TT = "https://business-api.tiktok.com/open_api/v1.3";
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function addDays(d: string, n: number): string {
   const t = new Date(d + "T00:00:00Z");
@@ -31,20 +42,44 @@ function safeDiv(num: number, den: number): number | null {
   if (!den || den === 0) return null;
   return num / den;
 }
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
 
 type RawRow = Record<string, unknown>;
 
-async function ttGet(token: string, path: string, params: Record<string, string>): Promise<Record<string, unknown>> {
-  const url = new URL(`${TT}${path}`);
-  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  const res = await fetch(url, { headers: { "Access-Token": token } });
-  const j = await res.json().catch(() => ({}));
-  if (j.code !== 0) throw new Error(`${path}: ${j.message ?? "unknown"}`);
-  return (j.data ?? {}) as Record<string, unknown>;
+// Rate-limited (≤ ~3 QPS) + retry on "Too many requests" with exponential backoff.
+// Other errors fail fast (don't waste QPD on bad filters / invalid metrics).
+export async function ttGet(
+  token: string,
+  path: string,
+  params: Record<string, string>,
+  retries = 5,
+  _sleep: (ms: number) => Promise<void> = sleep,
+): Promise<Record<string, unknown>> {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    const url = new URL(`${TT}${path}`);
+    for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+    const res = await fetch(url, { headers: { "Access-Token": token } });
+    const j = await res.json().catch(() => ({}));
+    if (j.code === 0) {
+      await _sleep(300);
+      return (j.data ?? {}) as Record<string, unknown>;
+    }
+    const msg = String(j.message ?? "");
+    const isRate = msg.includes("Too many requests") || j.code === 40100 || j.code === 50002;
+    if (isRate && attempt < retries - 1) {
+      await _sleep(3000 * Math.pow(2, attempt));
+      continue;
+    }
+    throw new Error(`${path}: ${msg || "unknown"}`);
+  }
+  throw new Error(`${path}: max retries exceeded`);
 }
 
 // Step 1: list all GMV Max campaign IDs for an advertiser (PRODUCT_GMV_MAX).
-// /gmv_max/campaign/get/ requires filtering.gmv_max_promotion_types (enum: PRODUCT_GMV_MAX | LIVE_GMV_MAX).
 export async function fetchCampaigns(
   token: string,
   advertiser_id: string,
@@ -77,10 +112,9 @@ export async function fetchCampaigns(
   return Array.from(new Set(ids));
 }
 
-// Generic paged report fetch. filtering MUST be an object (not array),
-// always merged with gmv_max_promotion_types: ["PRODUCT"].
-// metrics is configurable: creative-level metrics (creative_delivery_status,
-// product_impressions, product_clicks) require item_id dimension.
+// Generic paged report fetch. filtering MUST be an object (not array).
+// gmv_max_promotion_types is NOT supported when the request is already scoped
+// to specific campaigns/item_groups, nor at creative (item_id) level.
 export async function fetchReport(
   token: string,
   advertiser_id: string,
@@ -95,9 +129,6 @@ export async function fetchReport(
   const out: RawRow[] = [];
   let page = 1;
   const page_size = 200;
-  // gmv_max_promotion_types is NOT supported when the request is already scoped
-  // to specific campaigns/item_groups, nor at creative (item_id) level. Only
-  // include it for broad queries with no narrowing filters.
   const filterObj: Record<string, unknown> = { ...extraFilter };
   const alreadyScoped =
     dimensions.includes("item_id") ||
@@ -109,7 +140,7 @@ export async function fetchReport(
     filterObj.gmv_max_promotion_types = ["PRODUCT"];
   }
   const filtering = JSON.stringify(filterObj);
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 100; i++) {
     const params: Record<string, string> = {
       advertiser_id,
       store_ids: JSON.stringify([store_id]),
@@ -139,12 +170,28 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     await checkAdminPasscode(req, "material-performance");
-    const { start_date, end_date, advertiser_ids: filterIds } = (await req.json()) as {
-      start_date: string;
-      end_date: string;
+    const body = (await req.json().catch(() => ({}))) as {
+      start_date?: string;
+      end_date?: string;
       advertiser_ids?: string[];
+      mode?: "backfill" | "incremental" | "custom";
+      batch_size?: number;
     };
-    if (!start_date || !end_date) throw new Error("start_date / end_date 必填");
+    const mode = body.mode ?? "custom";
+    const today = new Date().toISOString().slice(0, 10);
+    let start_date = body.start_date ?? "";
+    let end_date = body.end_date ?? "";
+    if (mode === "backfill") {
+      start_date = addDays(today, -30);
+      end_date = today;
+    } else if (mode === "incremental") {
+      start_date = addDays(today, -3);
+      end_date = today;
+    }
+    if (!start_date || !end_date) throw new Error("start_date / end_date 必填 (或使用 mode=backfill|incremental)");
+
+    const batchSize = Math.max(1, Math.min(100, Number(body.batch_size ?? 20)));
+    const filterIds = body.advertiser_ids;
 
     const db = admin();
     const [{ data: conns, error: ce }, { data: acRows, error: ae }] = await Promise.all([
@@ -174,12 +221,12 @@ Deno.serve(async (req) => {
     for (const id of skipped) errors.push({ advertiser_id: id, error: "缺少店铺ID（shop_id），已跳过" });
     const upsertRows: Record<string, unknown>[] = [];
     const nowIso = new Date().toISOString();
+    const batchStats: { advertiser_id: string; batches: number; rows_max_batch: number; saturated: boolean }[] = [];
 
     for (const adv of targets) {
       const tok = tokenByAdv.get(adv)!;
       const shopId = shopByAdv.get(adv)!;
 
-      // Step 1: pull all campaign IDs for this advertiser
       let campaigns: string[] = [];
       try {
         campaigns = await fetchCampaigns(tok, adv);
@@ -189,71 +236,65 @@ Deno.serve(async (req) => {
       }
       if (campaigns.length === 0) continue;
 
+      const batches = chunk(campaigns, batchSize);
+      let totalBatches = 0;
+      let maxRows = 0;
+      let saturated = false;
+
       for (const [s, e] of windows) {
-        // Step 2: per campaign, pull item_group_ids via report (item group level)
-        const groupsByCampaign = new Map<string, Set<string>>();
-        for (const cid of campaigns) {
+        for (const batch of batches) {
+          totalBatches++;
           try {
-            const list = await fetchReport(tok, adv, shopId, s, e,
-              ["campaign_id", "item_group_id", "stat_time_day"],
-              { campaign_ids: [cid] },
+            const list = await fetchReport(
+              tok, adv, shopId, s, e,
+              ["campaign_id", "item_group_id", "item_id", "stat_time_day"],
+              { campaign_ids: batch },
+              ["cost", "orders", "gross_revenue", "product_impressions", "product_clicks"],
             );
-            const set = groupsByCampaign.get(cid) ?? new Set<string>();
+            if (list.length > maxRows) maxRows = list.length;
+            // 200 page_size * 100 max pages = 20000; warn if approaching
+            if (list.length >= 19500) saturated = true;
             for (const r of list) {
               const dims = (r.dimensions ?? {}) as Record<string, unknown>;
-              const igid = String(dims.item_group_id ?? "");
-              if (igid) set.add(igid);
+              const mets = (r.metrics ?? {}) as Record<string, unknown>;
+              const cost = Number(mets.cost ?? 0) || 0;
+              const rev = Number(mets.gross_revenue ?? 0) || 0;
+              const orders = Number(mets.orders ?? 0) || 0;
+              const imps = Number(mets.product_impressions ?? 0) || 0;
+              const clks = Number(mets.product_clicks ?? 0) || 0;
+              const vid = String(dims.item_id ?? "");
+              if (!vid) continue;
+              upsertRows.push({
+                country: countryByAdv.get(adv) ?? "",
+                advertiser_id: adv,
+                campaign_id: String(dims.campaign_id ?? ""),
+                item_group_id: String(dims.item_group_id ?? ""),
+                vid,
+                stat_date: String(dims.stat_time_day ?? "").slice(0, 10),
+                creative_delivery_status: null,
+                cost,
+                gross_revenue: rev,
+                orders,
+                product_impressions: imps,
+                product_clicks: clks,
+                roi: safeDiv(rev, cost),
+                ctr: safeDiv(clks, imps),
+                cvr: safeDiv(orders, clks),
+                cpm: safeDiv(cost, imps) === null ? null : (cost / imps) * 1000,
+                raw_payload: r,
+                pulled_at: nowIso,
+              });
             }
-            groupsByCampaign.set(cid, set);
           } catch (err) {
-            errors.push({ advertiser_id: adv, window: `${s}~${e}`, error: `group ${cid}: ${(err as Error).message}` });
-          }
-        }
-
-        // Step 3: per (campaign, item_group) pull creative-level VIDs
-        for (const [cid, gset] of groupsByCampaign) {
-          for (const igid of gset) {
-            try {
-              const list = await fetchReport(tok, adv, shopId, s, e,
-                ["campaign_id", "item_group_id", "item_id", "stat_time_day"],
-                { campaign_ids: [cid], item_group_ids: [igid] },
-                ["creative_delivery_status", "cost", "orders", "gross_revenue", "product_impressions", "product_clicks"],
-              );
-              for (const r of list) {
-                const dims = (r.dimensions ?? {}) as Record<string, unknown>;
-                const mets = (r.metrics ?? {}) as Record<string, unknown>;
-                const cost = Number(mets.cost ?? 0) || 0;
-                const rev = Number(mets.gross_revenue ?? 0) || 0;
-                const orders = Number(mets.orders ?? 0) || 0;
-                const imps = Number(mets.product_impressions ?? 0) || 0;
-                const clks = Number(mets.product_clicks ?? 0) || 0;
-                upsertRows.push({
-                  country: countryByAdv.get(adv) ?? "",
-                  advertiser_id: adv,
-                  campaign_id: String(dims.campaign_id ?? cid),
-                  item_group_id: String(dims.item_group_id ?? igid),
-                  vid: String(dims.item_id ?? ""),
-                  stat_date: String(dims.stat_time_day ?? "").slice(0, 10),
-                  creative_delivery_status: (mets.creative_delivery_status as string) ?? null,
-                  cost,
-                  gross_revenue: rev,
-                  orders,
-                  product_impressions: imps,
-                  product_clicks: clks,
-                  roi: safeDiv(rev, cost),
-                  ctr: safeDiv(clks, imps),
-                  cvr: safeDiv(orders, clks),
-                  cpm: safeDiv(cost, imps) === null ? null : (cost / imps) * 1000,
-                  raw_payload: r,
-                  pulled_at: nowIso,
-                });
-              }
-            } catch (err) {
-              errors.push({ advertiser_id: adv, window: `${s}~${e}`, error: `creative ${cid}/${igid}: ${(err as Error).message}` });
-            }
+            errors.push({
+              advertiser_id: adv,
+              window: `${s}~${e}`,
+              error: `batch[${batch[0]}...x${batch.length}]: ${(err as Error).message}`,
+            });
           }
         }
       }
+      batchStats.push({ advertiser_id: adv, batches: totalBatches, rows_max_batch: maxRows, saturated });
     }
 
     let upserted = 0;
@@ -273,9 +314,14 @@ Deno.serve(async (req) => {
 
     return new Response(
       JSON.stringify({
+        mode,
+        start_date,
+        end_date,
         windows: windows.length,
         advertisers: targets.length,
+        batch_size: batchSize,
         upserted,
+        batch_stats: batchStats,
         errors,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
