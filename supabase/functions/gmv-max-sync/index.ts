@@ -381,10 +381,12 @@ Deno.serve(async (req) => {
       const tok = tokenByAdv.get(adv)!;
       const shopId = shopByAdv.get(adv)!;
       const campaigns = campaignsByAdv.get(adv) ?? [];
-
+      const campaignIds = campaigns.map((c) => c.id);
+      const campaignMeta = new Map<string, CampaignInfo>();
+      for (const c of campaigns) campaignMeta.set(c.id, c);
 
       const campaignGroups = new Map<string, Set<string>>();
-      const campaignBatches = chunk(campaigns, batchSize);
+      const campaignBatches = chunk(campaignIds, batchSize);
       let groupBatches = 0;
       let creativeCalls = 0;
       let totalRows = 0;
