@@ -86,7 +86,7 @@ export async function ttGet(
       clearTimeout(timeoutId);
     }
     if (j.code === 0) {
-      await _sleep(300);
+      await _sleep(150);
       return (j.data ?? {}) as Record<string, unknown>;
     }
     const msg = String(j.message ?? "");
