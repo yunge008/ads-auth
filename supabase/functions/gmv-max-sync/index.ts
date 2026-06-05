@@ -207,6 +207,7 @@ Deno.serve(async (req) => {
               const list = await fetchReport(tok, adv, shopId, s, e,
                 ["campaign_id", "item_group_id", "item_id", "stat_time_day"],
                 { campaign_ids: [cid], item_group_ids: [igid] },
+                ["creative_delivery_status", "cost", "orders", "gross_revenue", "product_impressions", "product_clicks"],
               );
               for (const r of list) {
                 const dims = (r.dimensions ?? {}) as Record<string, unknown>;
