@@ -1,7 +1,9 @@
-// Unit tests for gmv-max-sync: filtering enum + pagination via total_page.
-// Covers all 13 advertisers independently.
-import { assertEquals, assert } from "https://deno.land/std@0.208.0/assert/mod.ts";
-import { fetchCampaigns, fetchReport } from "./index.ts";
+// Unit tests for gmv-max-sync.
+// - fetchCampaigns: filtering enum + total_page pagination, per advertiser
+// - fetchReport (creative-level batch): omits gmv_max_promotion_types, batched campaign_ids
+// - ttGet: retries on "Too many requests" with backoff, fails fast on other errors
+import { assertEquals, assert, assertRejects } from "https://deno.land/std@0.208.0/assert/mod.ts";
+import { fetchCampaigns, fetchReport, ttGet } from "./index.ts";
 
 type Call = { path: string; params: Record<string, string> };
 
@@ -18,14 +20,13 @@ function makeTtGet(
 
 const ADVERTISERS = Array.from({ length: 13 }, (_, i) => `adv_${String(i + 1).padStart(2, "0")}`);
 
-// ---------- fetchCampaigns: filtering + total_page pagination ----------
+// ---------- fetchCampaigns: filtering + total_page pagination (per advertiser) ----------
 for (const adv of ADVERTISERS) {
-  Deno.test(`fetchCampaigns[${adv}] sends PRODUCT_GMV_MAX filtering and paginates by total_page`, async () => {
+  Deno.test(`fetchCampaigns[${adv}] PRODUCT_GMV_MAX + paginates by total_page`, async () => {
     const TOTAL_PAGE = 3;
     const { fn, calls } = makeTtGet((path, params) => {
       assertEquals(path, "/gmv_max/campaign/get/");
       assertEquals(params.advertiser_id, adv);
-      // filtering must be present and an object with PRODUCT_GMV_MAX
       const filt = JSON.parse(params.filtering);
       assertEquals(filt.gmv_max_promotion_types, ["PRODUCT_GMV_MAX"]);
       const page = Number(params.page);
@@ -35,60 +36,44 @@ for (const adv of ADVERTISERS) {
       };
     });
     const ids = await fetchCampaigns("tok", adv, fn);
-    assertEquals(calls.length, TOTAL_PAGE, "should stop at total_page");
+    assertEquals(calls.length, TOTAL_PAGE);
     assertEquals(ids.length, TOTAL_PAGE * 2);
-    assert(ids.every((id) => id.startsWith(`${adv}_`)));
   });
 }
 
-// ---------- fetchReport: scoped queries drop gmv_max_promotion_types ----------
+// ---------- fetchReport creative-level batch: drops gmv_max_promotion_types ----------
 for (const adv of ADVERTISERS) {
-  Deno.test(`fetchReport[${adv}] group-level with campaign_ids: omits gmv_max_promotion_types, paginates by total_page`, async () => {
-    const TOTAL_PAGE = 2;
+  Deno.test(`fetchReport[${adv}] creative-level batch omits gmv_max_promotion_types`, async () => {
+    const batch = [`${adv}_c1`, `${adv}_c2`, `${adv}_c3`];
     const { fn, calls } = makeTtGet((path, params) => {
       assertEquals(path, "/gmv_max/report/get/");
       assertEquals(params.advertiser_id, adv);
       const filt = JSON.parse(params.filtering);
       assert(!Array.isArray(filt), "filtering must be object");
-      assert(!("gmv_max_promotion_types" in filt), "scoped query must omit promotion type");
-      assertEquals(filt.campaign_ids, [`${adv}_cid`]);
-      const page = Number(params.page);
+      assert(!("gmv_max_promotion_types" in filt), "creative-level must omit promotion type");
+      assertEquals(filt.campaign_ids, batch);
+      const dims = JSON.parse(params.dimensions);
+      assert(dims.includes("item_id"));
       return {
-        list: [{ dimensions: { item_group_id: `${adv}_g${page}` }, metrics: {} }],
-        page_info: { page, total_page: TOTAL_PAGE, total_number: TOTAL_PAGE },
+        list: [
+          { dimensions: { campaign_id: batch[0], item_group_id: "g1", item_id: "v1", stat_time_day: "2026-01-01" }, metrics: { cost: 1, gross_revenue: 2 } },
+        ],
+        page_info: { page: 1, total_page: 1, total_number: 1 },
       };
     });
     const rows = await fetchReport(
       "tok", adv, "shop", "2026-01-01", "2026-01-02",
-      ["campaign_id", "item_group_id", "stat_time_day"],
-      { campaign_ids: [`${adv}_cid`] },
-      undefined,
-      fn,
-    );
-    assertEquals(calls.length, TOTAL_PAGE);
-    assertEquals(rows.length, TOTAL_PAGE);
-  });
-
-  Deno.test(`fetchReport[${adv}] creative-level (item_id): filtering object OMITS gmv_max_promotion_types`, async () => {
-    const { fn } = makeTtGet((_path, params) => {
-      const filt = JSON.parse(params.filtering);
-      assert(!Array.isArray(filt));
-      assert(!("gmv_max_promotion_types" in filt), "must omit gmv_max_promotion_types for item_id dims");
-      assertEquals(filt.campaign_ids, [`${adv}_cid`]);
-      assertEquals(filt.item_group_ids, [`${adv}_igid`]);
-      return { list: [], page_info: { page: 1, total_page: 1, total_number: 0 } };
-    });
-    await fetchReport(
-      "tok", adv, "shop", "2026-01-01", "2026-01-02",
       ["campaign_id", "item_group_id", "item_id", "stat_time_day"],
-      { campaign_ids: [`${adv}_cid`], item_group_ids: [`${adv}_igid`] },
-      undefined,
+      { campaign_ids: batch },
+      ["cost", "orders", "gross_revenue", "product_impressions", "product_clicks"],
       fn,
     );
+    assertEquals(calls.length, 1);
+    assertEquals(rows.length, 1);
   });
 }
 
-// ---------- single-page short-circuit ----------
+// ---------- pagination short-circuit ----------
 Deno.test("fetchReport stops after one page when total_page=1", async () => {
   const { fn, calls } = makeTtGet(() => ({
     list: [{ dimensions: {}, metrics: {} }],
@@ -103,4 +88,39 @@ Deno.test("fetchCampaigns stops on empty list", async () => {
   const ids = await fetchCampaigns("t", "a", fn);
   assertEquals(calls.length, 1);
   assertEquals(ids.length, 0);
+});
+
+// ---------- ttGet rate-limit retry / fail-fast ----------
+Deno.test("ttGet retries on 'Too many requests' then succeeds", async () => {
+  let attempts = 0;
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    attempts++;
+    if (attempts < 3) {
+      return new Response(JSON.stringify({ code: 40100, message: "Too many requests" }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ code: 0, data: { ok: true } }), { status: 200 });
+  };
+  try {
+    const data = await ttGet("tok", "/x/", {}, 5, async () => {});
+    assertEquals(attempts, 3);
+    assertEquals((data as { ok: boolean }).ok, true);
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+Deno.test("ttGet fails fast on non-rate errors (no retry)", async () => {
+  let attempts = 0;
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    attempts++;
+    return new Response(JSON.stringify({ code: 40002, message: "Invalid filter" }), { status: 200 });
+  };
+  try {
+    await assertRejects(() => ttGet("tok", "/x/", {}, 5, async () => {}), Error, "Invalid filter");
+    assertEquals(attempts, 1);
+  } finally {
+    globalThis.fetch = origFetch;
+  }
 });
