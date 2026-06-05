@@ -155,7 +155,7 @@ export async function fetchReport(
   let page = 1;
   const page_size = 1000;
   const selectedMetrics = metrics ?? (dimensions.includes("item_id")
-    ? ["creative_delivery_status", "cost", "orders", "gross_revenue", "product_impressions", "product_clicks"]
+    ? ["creative_delivery_status", "cost", "orders", "gross_revenue", "product_impressions", "product_clicks", "currency"]
     : ["cost", "orders", "gross_revenue"]);
   const filtering = JSON.stringify({ ...extraFilter });
   for (let i = 0; i < 100; i++) {
