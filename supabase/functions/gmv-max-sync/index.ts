@@ -551,7 +551,7 @@ Deno.serve(async (req) => {
         }
       }
     }
-    }
+
 
     let upserted = 0;
     if (upsertRows.length) {
