@@ -26,7 +26,7 @@ Deno.serve(async (req) => {
       : table === "sku_product_map"
         ? "country,product_id,product_name,sku_id,merchant_sku,updated_at"
         : table === "gmv_max_vid_daily"
-          ? "country,advertiser_id,vid,stat_date,cost,gross_revenue,orders,product_impressions,product_clicks,roi,ctr,cvr,updated_at"
+          ? "country,advertiser_id,vid,stat_date,tt_account_name,tt_account_authorization_type,shop_content_type,creative_delivery_status,cost,gross_revenue,orders,product_impressions,product_clicks,ad_video_view_rate_2s,ad_video_view_rate_6s,ad_video_view_rate_p25,ad_video_view_rate_p50,ad_video_view_rate_p75,ad_video_view_rate_p100,updated_at"
           : table === "advertiser_countries"
             ? "advertiser_id,advertiser_name,country,shop_id,updated_at"
             : "comment_id,advertiser_id,country,vid,text,text_zh,like_count,reply_count,username,avatar_url,comment_type,parent_comment_id,comment_create_time,updated_at";
