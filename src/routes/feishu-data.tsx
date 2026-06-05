@@ -18,12 +18,11 @@ export const Route = createFileRoute("/feishu-data")({
 type StaffVidRow = { country: string | null; staff_name: string | null; vid: string; source_type: string; source_sheet: string | null; updated_at: string };
 type SkuRow = { country: string | null; product_id: string; product_name: string | null; sku_id: string | null; merchant_sku: string | null; updated_at: string };
 type GmvRow = {
-  country: string | null; advertiser_id: string; vid: string; item_id: string | null; stat_date: string;
+  country: string | null; advertiser_id: string; vid: string; stat_date: string;
   tt_account_name: string | null; tt_account_authorization_type: string | null; shop_content_type: string | null;
   creative_delivery_status: string | null;
   cost: number; orders: number; gross_revenue: number;
   product_impressions: number; product_clicks: number;
-  roi: number | null; ctr: number | null; cvr: number | null;
   ad_video_view_rate_2s: number | null; ad_video_view_rate_6s: number | null;
   ad_video_view_rate_p25: number | null; ad_video_view_rate_p50: number | null;
   ad_video_view_rate_p75: number | null; ad_video_view_rate_p100: number | null;
@@ -152,7 +151,7 @@ function GmvMaxSection() {
             <TableHead className="text-right">花费</TableHead><TableHead className="text-right">订单数</TableHead>
             <TableHead className="text-right">总收入GMV</TableHead>
             <TableHead className="text-right">PV</TableHead><TableHead className="text-right">Click</TableHead>
-            <TableHead className="text-right">ROI</TableHead>
+            
             <TableHead className="text-right">2秒播放率</TableHead><TableHead className="text-right">6秒播放率</TableHead>
             <TableHead className="text-right">25%播放率</TableHead><TableHead className="text-right">50%播放率</TableHead>
             <TableHead className="text-right">75%播放率</TableHead><TableHead className="text-right">完播率</TableHead>
@@ -172,7 +171,7 @@ function GmvMaxSection() {
               <TableCell className="text-right">{Number(r.gross_revenue).toFixed(2)}</TableCell>
               <TableCell className="text-right">{r.product_impressions}</TableCell>
               <TableCell className="text-right">{r.product_clicks}</TableCell>
-              <TableCell className="text-right">{r.roi == null ? "—" : Number(r.roi).toFixed(2)}</TableCell>
+              
               <TableCell className="text-right">{pct(r.ad_video_view_rate_2s)}</TableCell>
               <TableCell className="text-right">{pct(r.ad_video_view_rate_6s)}</TableCell>
               <TableCell className="text-right">{pct(r.ad_video_view_rate_p25)}</TableCell>

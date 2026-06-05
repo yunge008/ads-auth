@@ -89,21 +89,16 @@ export type Database = {
           campaign_id: string
           cost: number
           country: string
-          cpm: number | null
           created_at: string
           creative_delivery_status: string | null
-          ctr: number | null
           currency: string | null
-          cvr: number | null
           gross_revenue: number
           id: string
           item_group_id: string
-          item_id: string | null
           orders: number
           product_clicks: number
           product_impressions: number
           pulled_at: string
-          roi: number | null
           shop_content_type: string | null
           stat_date: string
           tt_account_authorization_type: string | null
@@ -122,21 +117,16 @@ export type Database = {
           campaign_id?: string
           cost?: number
           country?: string
-          cpm?: number | null
           created_at?: string
           creative_delivery_status?: string | null
-          ctr?: number | null
           currency?: string | null
-          cvr?: number | null
           gross_revenue?: number
           id?: string
           item_group_id?: string
-          item_id?: string | null
           orders?: number
           product_clicks?: number
           product_impressions?: number
           pulled_at?: string
-          roi?: number | null
           shop_content_type?: string | null
           stat_date: string
           tt_account_authorization_type?: string | null
@@ -155,21 +145,16 @@ export type Database = {
           campaign_id?: string
           cost?: number
           country?: string
-          cpm?: number | null
           created_at?: string
           creative_delivery_status?: string | null
-          ctr?: number | null
           currency?: string | null
-          cvr?: number | null
           gross_revenue?: number
           id?: string
           item_group_id?: string
-          item_id?: string | null
           orders?: number
           product_clicks?: number
           product_impressions?: number
           pulled_at?: string
-          roi?: number | null
           shop_content_type?: string | null
           stat_date?: string
           tt_account_authorization_type?: string | null

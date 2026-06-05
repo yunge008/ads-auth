@@ -1,0 +1,6 @@
+ALTER TABLE public.gmv_max_vid_daily
+  DROP COLUMN IF EXISTS roi,
+  DROP COLUMN IF EXISTS ctr,
+  DROP COLUMN IF EXISTS cvr,
+  DROP COLUMN IF EXISTS cpm,
+  DROP COLUMN IF EXISTS item_id;

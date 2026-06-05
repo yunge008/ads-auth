@@ -448,10 +448,6 @@ Deno.serve(async (req) => {
                   orders,
                   product_impressions: imps,
                   product_clicks: clks,
-                  roi: safeDiv(rev, cost),
-                  ctr: safeDiv(clks, imps),
-                  cvr: safeDiv(orders, clks),
-                  cpm: safeDiv(cost, imps) === null ? null : (cost / imps) * 1000,
                   pulled_at: nowIso,
                 });
               }
