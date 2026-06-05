@@ -254,6 +254,50 @@ function GmvMaxSection() {
               最近3天
             </Button>
           </div>
+          {progress && (
+            <div className="mt-3 text-xs text-muted-foreground">
+              {progress.label}：{progress.done} / {progress.total} · 当前 {progress.current}{progress.attempt ? ` · 第 ${progress.attempt} 次` : ""}
+            </div>
+          )}
+          {progressRows.length > 0 && (
+            <div className="mt-3 border rounded-md overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="h-8">国家</TableHead>
+                    <TableHead className="h-8">广告户</TableHead>
+                    <TableHead className="h-8">状态</TableHead>
+                    <TableHead className="h-8 text-right">天数</TableHead>
+                    <TableHead className="h-8 text-right">行数</TableHead>
+                    <TableHead className="h-8 text-right">广告</TableHead>
+                    <TableHead className="h-8">信息</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {progressRows.map((r) => (
+                    <TableRow key={r.advertiser_id}>
+                      <TableCell className="py-1.5 font-medium">{r.country}</TableCell>
+                      <TableCell className="py-1.5">
+                        <div className="text-xs">{r.advertiser_name ?? nameOf(r.advertiser_id)}</div>
+                        <div className="text-[10px] text-muted-foreground font-mono">{r.advertiser_id}</div>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        {r.status === "success" && <span className="inline-flex items-center gap-1 text-xs text-foreground"><CheckCircle2 className="h-3.5 w-3.5" />成功</span>}
+                        {r.status === "failed" && <span className="inline-flex items-center gap-1 text-xs text-destructive"><XCircle className="h-3.5 w-3.5" />失败</span>}
+                        {r.status === "skipped" && <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Clock className="h-3.5 w-3.5" />跳过</span>}
+                        {r.status === "pending" && <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Clock className="h-3.5 w-3.5" />排队</span>}
+                        {r.status === "running" && <span className="inline-flex items-center gap-1 text-xs text-primary"><Loader2 className="h-3.5 w-3.5 animate-spin" />抓取中</span>}
+                      </TableCell>
+                      <TableCell className="py-1.5 text-right tabular-nums">{r.days ?? "—"}</TableCell>
+                      <TableCell className="py-1.5 text-right tabular-nums">{r.rows ?? "—"}</TableCell>
+                      <TableCell className="py-1.5 text-right tabular-nums">{r.campaigns ?? "—"}</TableCell>
+                      <TableCell className="py-1.5 text-xs text-muted-foreground max-w-[320px] truncate" title={r.error}>{r.error ?? ""}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </CardContent>
       </Card>
       <PreviewCard title={`GMV Max 日报（${preview.count} 条）`} loading={preview.loading} reload={preview.reload} page={preview.page} count={preview.count} setPage={preview.setPage}>
