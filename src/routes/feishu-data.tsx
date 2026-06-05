@@ -149,10 +149,9 @@ function GmvMaxSection() {
             <TableHead className="text-right">花费</TableHead><TableHead className="text-right">订单数</TableHead>
             <TableHead className="text-right">总收入GMV</TableHead>
             <TableHead className="text-right">PV</TableHead><TableHead className="text-right">Click</TableHead>
-            
-            <TableHead className="text-right">2秒播放率</TableHead><TableHead className="text-right">6秒播放率</TableHead>
-            <TableHead className="text-right">25%播放率</TableHead><TableHead className="text-right">50%播放率</TableHead>
-            <TableHead className="text-right">75%播放率</TableHead><TableHead className="text-right">完播率</TableHead>
+            <TableHead className="text-right">CTR</TableHead><TableHead className="text-right">CVR</TableHead>
+            <TableHead className="text-right">CPM</TableHead><TableHead className="text-right">CPA</TableHead>
+            <TableHead className="text-right">ROI</TableHead>
           </TableRow></TableHeader>
           <TableBody>{preview.rows.map((r, i) => (
             <TableRow key={`${r.advertiser_id}-${r.vid}-${r.stat_date}-${i}`}>
