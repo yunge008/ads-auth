@@ -294,47 +294,56 @@ Deno.serve(async (req) => {
               if (list.length > maxRows) maxRows = list.length;
               // 1000 page_size * 100 max pages = 100000; warn if approaching
               if (list.length >= 95000) saturated = true;
-            for (const r of list) {
-              const dims = (r.dimensions ?? {}) as Record<string, unknown>;
-              const mets = (r.metrics ?? {}) as Record<string, unknown>;
-              const cost = Number(mets.cost ?? 0) || 0;
-              const rev = Number(mets.gross_revenue ?? 0) || 0;
-              const orders = Number(mets.orders ?? 0) || 0;
-              const imps = Number(mets.product_impressions ?? 0) || 0;
-              const clks = Number(mets.product_clicks ?? 0) || 0;
-              const vid = String(dims.item_id ?? "");
-              if (!vid) continue;
-              upsertRows.push({
-                country: countryByAdv.get(adv) ?? "",
+              for (const r of list) {
+                const dims = (r.dimensions ?? {}) as Record<string, unknown>;
+                const mets = (r.metrics ?? {}) as Record<string, unknown>;
+                const cost = Number(mets.cost ?? 0) || 0;
+                const rev = Number(mets.gross_revenue ?? 0) || 0;
+                const orders = Number(mets.orders ?? 0) || 0;
+                const imps = Number(mets.product_impressions ?? 0) || 0;
+                const clks = Number(mets.product_clicks ?? 0) || 0;
+                const vid = String(dims.item_id ?? "");
+                if (!vid) continue;
+                upsertRows.push({
+                  country: countryByAdv.get(adv) ?? "",
+                  advertiser_id: adv,
+                  campaign_id: String(dims.campaign_id ?? ""),
+                  item_group_id: String(dims.item_group_id ?? ""),
+                  vid,
+                  stat_date: String(dims.stat_time_day ?? "").slice(0, 10),
+                  creative_delivery_status: mets.creative_delivery_status == null ? null : String(mets.creative_delivery_status),
+                  cost,
+                  gross_revenue: rev,
+                  orders,
+                  product_impressions: imps,
+                  product_clicks: clks,
+                  roi: safeDiv(rev, cost),
+                  ctr: safeDiv(clks, imps),
+                  cvr: safeDiv(orders, clks),
+                  cpm: safeDiv(cost, imps) === null ? null : (cost / imps) * 1000,
+                  raw_payload: r,
+                  pulled_at: nowIso,
+                });
+              }
+            } catch (err) {
+              errors.push({
                 advertiser_id: adv,
-                campaign_id: String(dims.campaign_id ?? ""),
-                item_group_id: String(dims.item_group_id ?? ""),
-                vid,
-                stat_date: String(dims.stat_time_day ?? "").slice(0, 10),
-                creative_delivery_status: null,
-                cost,
-                gross_revenue: rev,
-                orders,
-                product_impressions: imps,
-                product_clicks: clks,
-                roi: safeDiv(rev, cost),
-                ctr: safeDiv(clks, imps),
-                cvr: safeDiv(orders, clks),
-                cpm: safeDiv(cost, imps) === null ? null : (cost / imps) * 1000,
-                raw_payload: r,
-                pulled_at: nowIso,
+                window: `${s}~${e}`,
+                error: `creative campaign[${cid}] groups[${igidBatch[0]}...x${igidBatch.length}]: ${(err as Error).message}`,
               });
             }
-          } catch (err) {
-            errors.push({
-              advertiser_id: adv,
-              window: `${s}~${e}`,
-              error: `batch[${batch[0]}...x${batch.length}]: ${(err as Error).message}`,
-            });
           }
         }
       }
-      batchStats.push({ advertiser_id: adv, batches: totalBatches, rows_max_batch: maxRows, saturated });
+      batchStats.push({
+        advertiser_id: adv,
+        campaigns: campaigns.length,
+        group_batches: groupBatches,
+        creative_calls: creativeCalls,
+        rows: totalRows,
+        rows_max_batch: maxRows,
+        saturated,
+      });
     }
 
     let upserted = 0;
