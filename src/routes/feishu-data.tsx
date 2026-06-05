@@ -103,31 +103,125 @@ function GmvMaxSection() {
   const [busy, setBusy] = React.useState<string | null>(null);
   const preview = usePreview<GmvRow>("gmv_max_vid_daily");
   const [nameMap, setNameMap] = React.useState<Map<string, string>>(new Map());
-  React.useEffect(() => {
-    invokeFn<{ rows: { advertiser_id: string; advertiser_name: string | null }[] }>(
+  const [advertisers, setAdvertisers] = React.useState<AdvertiserRow[]>([]);
+  const [countryRows, setCountryRows] = React.useState<Map<string, CountryProgressRow>>(new Map());
+  const [progress, setProgress] = React.useState<{ label: string; current: string; done: number; total: number; attempt: number } | null>(null);
+
+  const fetchAdvertisers = React.useCallback(async () => {
+    const r = await invokeFn<{ rows: AdvertiserRow[] }>(
       "data-preview", { table: "advertiser_countries", page: 1, page_size: 500 },
-    ).then((r) => {
-      const m = new Map<string, string>();
-      for (const a of r.rows ?? []) if (a.advertiser_name) m.set(a.advertiser_id, a.advertiser_name);
-      setNameMap(m);
-    }).catch(() => {});
+    );
+    const rows = r.rows ?? [];
+    setAdvertisers(rows);
+    setNameMap((prev) => {
+      const next = new Map(prev);
+      for (const a of rows) if (a.advertiser_name) next.set(a.advertiser_id, a.advertiser_name);
+      return next;
+    });
+    return rows;
   }, []);
 
-  const run = async (label: string, work: () => Promise<unknown>) => {
+  React.useEffect(() => {
+    fetchAdvertisers().catch(() => {});
+  }, [fetchAdvertisers]);
+
+  const nameOf = (id: string) => nameMap.get(id) ?? id;
+
+  const mergeNames = (names?: Record<string, string>) => {
+    if (!names) return;
+    setNameMap((prev) => {
+      const next = new Map(prev);
+      for (const [id, name] of Object.entries(names)) if (name) next.set(id, name);
+      return next;
+    });
+  };
+
+  const updateCountryRow = (id: string, patch: Partial<CountryProgressRow>) => {
+    setCountryRows((prev) => {
+      const next = new Map(prev);
+      const cur = next.get(id) ?? { advertiser_id: id, country: "—", status: "pending" as CountryStatus };
+      next.set(id, { ...cur, ...patch, advertiser_name: patch.advertiser_name ?? cur.advertiser_name ?? nameOf(id) });
+      return next;
+    });
+  };
+
+  const run = async (label: string, s: string, e: string) => {
     setBusy(label);
+    setProgress(null);
+    const source = advertisers.length ? advertisers : await fetchAdvertisers();
+    const targets = source.sort((a, b) => String(a.country ?? "").localeCompare(String(b.country ?? "")));
+    const days = daysBetweenInclusive(s, e);
+    const initial = new Map<string, CountryProgressRow>();
+    for (const adv of targets) {
+      initial.set(adv.advertiser_id, {
+        advertiser_id: adv.advertiser_id,
+        country: adv.country ?? "—",
+        advertiser_name: adv.advertiser_name ?? nameOf(adv.advertiser_id),
+        status: "pending",
+        days,
+      });
+    }
+    setCountryRows(initial);
     try {
-      const r = (await work()) as Record<string, unknown>;
-      const summary = Object.entries(r).filter(([k]) => k !== "errors").map(([k, v]) => `${k}=${typeof v === "number" ? v : JSON.stringify(v)}`).join(" / ");
-      toast.success(`${label} 完成：${summary}`);
-      const errs = (r as { errors?: { error: string }[] }).errors;
-      if (errs?.length) toast.warning(`${errs.length} 条错误：${errs[0].error}`);
+      let upserted = 0;
+      let failed = 0;
+      for (let i = 0; i < targets.length; i++) {
+        const adv = targets[i];
+        const country = adv.country ?? "—";
+        updateCountryRow(adv.advertiser_id, { status: "running", error: undefined });
+        let finished = false;
+        for (let attempt = 1; attempt <= 3 && !finished; attempt++) {
+          setProgress({ label, current: country, done: i, total: targets.length, attempt });
+          try {
+            const resp = await invokeFn<SyncResp>("gmv-max-sync", {
+              start_date: s,
+              end_date: e,
+              advertiser_ids: [adv.advertiser_id],
+              max_runtime_ms: 60000,
+            });
+            mergeNames(resp.advertiser_names);
+            upserted += resp.upserted ?? 0;
+            const stat = resp.batch_stats?.find((x) => x.advertiser_id === adv.advertiser_id);
+            const err = resp.errors?.find((x) => x.advertiser_id === adv.advertiser_id);
+            if (stat) {
+              updateCountryRow(adv.advertiser_id, { status: "success", rows: stat.rows, campaigns: stat.campaigns, days });
+              finished = true;
+            } else if (err) {
+              updateCountryRow(adv.advertiser_id, { status: err.error.includes("店铺ID") ? "skipped" : "failed", error: err.error, days });
+              if (!err.error.includes("店铺ID")) failed++;
+              finished = true;
+            } else if (resp.remaining_advertiser_ids?.includes(adv.advertiser_id)) {
+              updateCountryRow(adv.advertiser_id, { error: `第 ${attempt} 次仍在处理，继续重试` });
+            } else {
+              updateCountryRow(adv.advertiser_id, { status: "success", rows: 0, campaigns: 0, days });
+              finished = true;
+            }
+          } catch (err) {
+            updateCountryRow(adv.advertiser_id, { status: "failed", error: (err as Error).message, days });
+            failed++;
+            finished = true;
+          }
+        }
+        if (!finished) {
+          updateCountryRow(adv.advertiser_id, { status: "failed", error: "单个国家超过即时抓取时间预算，请单独重试", days });
+          failed++;
+        }
+        setProgress({ label, current: country, done: i + 1, total: targets.length, attempt: 0 });
+      }
+      toast.success(`${label} 完成：${targets.length} 个国家 / 写入 ${upserted} 行${failed ? ` / ${failed} 个失败` : ""}`);
       preview.reload();
     } catch (e) {
       toast.error(`${label} 失败：${(e as Error).message}`);
     } finally {
       setBusy(null);
+      setProgress(null);
     }
   };
+
+  const progressRows = Array.from(countryRows.values()).sort((a, b) => {
+    const order = { running: 0, pending: 1, failed: 2, skipped: 3, success: 4 } as Record<CountryStatus, number>;
+    return order[a.status] - order[b.status] || a.country.localeCompare(b.country);
+  });
 
   return (
     <>
