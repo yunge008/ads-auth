@@ -226,7 +226,14 @@ export async function fetchReport(
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    await checkAdminPasscode(req, "material-performance");
+    // Cron bypass: pg_cron passes x-cron-key with the vault secret value.
+    const cronKey = req.headers.get("x-cron-key") ?? "";
+    let cronAuthed = false;
+    if (cronKey) {
+      const { data: ok } = await admin().rpc("verify_gmv_cron_key", { _key: cronKey });
+      if (ok === true) cronAuthed = true;
+    }
+    if (!cronAuthed) await checkAdminPasscode(req, "material-performance");
     const body = (await req.json().catch(() => ({}))) as {
       start_date?: string;
       end_date?: string;
@@ -399,9 +406,12 @@ Deno.serve(async (req) => {
       const campaignMeta = new Map<string, CampaignInfo>();
       for (const c of campaigns) campaignMeta.set(c.id, c);
 
-      // Delete-then-insert: purge existing rows for (advertiser, campaigns, date-range)
-      // so stale records from prior pulls don't linger when a VID disappears.
-      if (campaignIds.length) {
+      // Delete-then-insert: purge existing rows for this (advertiser, date-range)
+      // so stale records (incl. campaigns no longer in PRODUCT_GMV_MAX list, or
+      // rows from older buggy runs with NULL campaign_name) get cleaned.
+      // In resume mode (preset campaign_ids), only delete the targeted campaigns
+      // so we don't wipe already-written data from earlier resume rounds.
+      if (hasPresetCampaigns && campaignIds.length) {
         for (const cidBatch of chunk(campaignIds, 100)) {
           const { error } = await db
             .from("gmv_max_vid_daily")
@@ -412,6 +422,14 @@ Deno.serve(async (req) => {
             .lte("stat_date", end_date);
           if (error) throw new Error(`delete stale: ${error.message}`);
         }
+      } else {
+        const { error } = await db
+          .from("gmv_max_vid_daily")
+          .delete()
+          .eq("advertiser_id", adv)
+          .gte("stat_date", start_date)
+          .lte("stat_date", end_date);
+        if (error) throw new Error(`delete stale: ${error.message}`);
       }
 
       const groupCache = new Map<string, Set<string>>();
@@ -691,6 +709,13 @@ Deno.serve(async (req) => {
     for (const adv of targets) {
       const nm = nameByAdv.get(adv);
       if (nm) advertiser_names[adv] = nm;
+    }
+
+    // Mark last successful sync time (used by 素材成效 page to show refresh time).
+    if (upserted > 0 || processedAdvertisers.length > 0) {
+      await db
+        .from("gmv_max_sync_state")
+        .upsert({ id: "gmv_max_vid_daily", last_synced_at: new Date().toISOString(), note: cronAuthed ? "cron" : "manual" });
     }
 
     return new Response(

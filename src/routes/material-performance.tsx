@@ -7,7 +7,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
-import { RotateCw, ChevronLeft, ChevronRight, Download, Database } from "lucide-react";
+import { RotateCw, ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { toast } from "sonner";
 import { invokeFn } from "@/lib/api";
 import { MultiSelect } from "@/components/MultiSelect";
@@ -83,8 +83,8 @@ function MaterialPerformancePage() {
 
   const [rows, setRows] = React.useState<Row[]>([]);
   const [series, setSeries] = React.useState<SeriesPoint[]>([]);
+  const [lastSyncedAt, setLastSyncedAt] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
-  const [busy, setBusy] = React.useState<string | null>(null);
 
   const [fCountry, setFCountry] = React.useState<string[]>([]);
   const [fStaff, setFStaff] = React.useState<string[]>([]);
@@ -101,12 +101,13 @@ function MaterialPerformancePage() {
   const runQuery = React.useCallback(async () => {
     setLoading(true);
     try {
-      const r = await invokeFn<{ rows: Row[]; series: SeriesPoint[] }>("gmv-max-query", {
+      const r = await invokeFn<{ rows: Row[]; series: SeriesPoint[]; last_synced_at: string | null }>("gmv-max-query", {
         start_date: startDate,
         end_date: endDate,
       });
       setRows(r.rows ?? []);
       setSeries(r.series ?? []);
+      setLastSyncedAt(r.last_synced_at ?? null);
       setPage(1);
     } catch (e) {
       toast.error(`查询失败：${(e as Error).message}`);
@@ -139,49 +140,8 @@ function MaterialPerformancePage() {
   const paged = filteredRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
 
-  // Iterative sync that auto-continues remaining_advertiser_ids and surfaces
-  // per-round progress as toasts, so the user can see which accounts finished.
-  const syncLoop = async (label: string, s: string, e: string) => {
-    setBusy(label);
-    let iter = 0;
-    let totalUpserted = 0;
-    let queue: string[] | undefined = undefined;
-    try {
-      while (iter < 10) {
-        iter++;
-        const reqBody: Record<string, unknown> = { start_date: s, end_date: e };
-        if (queue && queue.length) reqBody.advertiser_ids = queue;
-        const resp = await invokeFn<{
-          upserted: number;
-          advertisers: number;
-          processed_advertisers: number;
-          remaining_advertiser_ids: string[];
-          advertiser_names?: Record<string, string>;
-          batch_stats?: { advertiser_id: string; rows: number }[];
-          errors?: { error: string }[];
-        }>("gmv-max-sync", reqBody);
-        totalUpserted += resp.upserted ?? 0;
-        const done = (resp.batch_stats ?? [])
-          .map((b) => `${resp.advertiser_names?.[b.advertiser_id] ?? b.advertiser_id}(${b.rows})`)
-          .join("、");
-        toast.success(
-          `${label} 第${iter}轮：完成 ${resp.processed_advertisers}/${resp.advertisers}，剩余 ${resp.remaining_advertiser_ids?.length ?? 0}${done ? ` · ${done}` : ""}`,
-          { duration: 4000 },
-        );
-        const remaining = resp.remaining_advertiser_ids ?? [];
-        if (remaining.length === 0) break;
-        if (queue && queue.length === remaining.length && queue.every((x) => remaining.includes(x))) {
-          toast.warning(`${label} 续跑未推进，已停止`);
-          break;
-        }
-        queue = remaining;
-      }
-      toast.success(`${label} 全部完成：写入 ${totalUpserted} 行`);
-      await runQuery();
-    } catch (err) {
-      toast.error(`${label} 失败：${(err as Error).message}`);
-    } finally { setBusy(null); }
-  };
+  // Sync is now driven by an hourly cron job; manual trigger removed.
+
 
   const exportCsv = () => {
     const headers = [
@@ -228,13 +188,11 @@ function MaterialPerformancePage() {
           <Button size="sm" variant="outline" onClick={exportCsv} disabled={filteredRows.length === 0}>
             <Download className="h-4 w-4 mr-1.5" />导出CSV
           </Button>
-          <Button size="sm" variant="outline" disabled={!!busy} onClick={() => {
-            const end = today;
-            const start = new Date(Date.now() - 3 * 86400 * 1000).toISOString().slice(0, 10);
-            syncLoop("拉取最近3天", start, end);
-          }}>
-            <Database className={`h-4 w-4 mr-1.5 ${busy === "拉取最近3天" ? "animate-spin" : ""}`} />拉取最近3天
-          </Button>
+          <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+            <span>最近刷新</span>
+            <span className="tabular-nums">{lastSyncedAt ? new Date(lastSyncedAt).toLocaleString() : "—"}</span>
+          </div>
+
         </div>
       </div>
 
