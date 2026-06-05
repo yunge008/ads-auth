@@ -43,14 +43,17 @@ async function ttGet(token: string, path: string, params: Record<string, string>
   return (j.data ?? {}) as Record<string, unknown>;
 }
 
-// Step 1: list all GMV Max campaign IDs for an advertiser.
+// Step 1: list all GMV Max campaign IDs for an advertiser (PRODUCT_GMV_MAX).
+// /gmv_max/campaign/get/ requires filtering.gmv_max_promotion_types (enum: PRODUCT_GMV_MAX | LIVE_GMV_MAX).
 async function fetchCampaigns(token: string, advertiser_id: string): Promise<string[]> {
   const ids: string[] = [];
   let page = 1;
   const page_size = 100;
+  const filtering = JSON.stringify({ gmv_max_promotion_types: ["PRODUCT_GMV_MAX"] });
   for (let i = 0; i < 50; i++) {
     const data = await ttGet(token, "/gmv_max/campaign/get/", {
       advertiser_id,
+      filtering,
       page: String(page),
       page_size: String(page_size),
     });
@@ -60,8 +63,11 @@ async function fetchCampaigns(token: string, advertiser_id: string): Promise<str
       if (cid != null) ids.push(String(cid));
     }
     const pi = (data.page_info ?? {}) as Record<string, unknown>;
+    const totalPage = Number(pi.total_page ?? 0);
     const total = Number(pi.total_number ?? 0);
-    if (page * page_size >= total || list.length === 0) break;
+    if (list.length === 0) break;
+    if (totalPage > 0 && page >= totalPage) break;
+    if (!totalPage && total > 0 && page * page_size >= total) break;
     page++;
   }
   return Array.from(new Set(ids));
