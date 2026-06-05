@@ -77,6 +77,24 @@ export type Database = {
         }
         Relationships: []
       }
+      gmv_max_sync_state: {
+        Row: {
+          id: string
+          last_synced_at: string
+          note: string | null
+        }
+        Insert: {
+          id: string
+          last_synced_at?: string
+          note?: string | null
+        }
+        Update: {
+          id?: string
+          last_synced_at?: string
+          note?: string | null
+        }
+        Relationships: []
+      }
       gmv_max_vid_daily: {
         Row: {
           ad_video_view_rate_2s: number | null
@@ -421,7 +439,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      verify_gmv_cron_key: { Args: { _key: string }; Returns: boolean }
     }
     Enums: {
       [_ in never]: never
