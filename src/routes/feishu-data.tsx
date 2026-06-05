@@ -137,7 +137,7 @@ function GmvMaxSection() {
           <TableBody>{preview.rows.map((r, i) => (
             <TableRow key={`${r.advertiser_id}-${r.vid}-${r.stat_date}-${i}`}>
               <TableCell>{r.country ?? "—"}</TableCell>
-              <TableCell className="font-mono text-xs">{r.advertiser_id}</TableCell>
+              <TableCell className="text-xs"><div>{nameMap.get(r.advertiser_id) ?? r.advertiser_id}</div><div className="text-[10px] text-muted-foreground font-mono">{r.advertiser_id}</div></TableCell>
               <TableCell className="font-mono text-xs">{r.vid}</TableCell>
               <TableCell className="text-xs">{r.stat_date}</TableCell>
               <TableCell className="text-right">{Number(r.cost).toFixed(2)}</TableCell>
