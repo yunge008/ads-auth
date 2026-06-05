@@ -186,7 +186,7 @@ function AuthorizePage() {
   };
 
   const handleAuthorize = async () => {
-    const targets = materials.filter(
+    const targets = visibleMaterials.filter(
       (m) =>
         (m.status === "待授权" || m.status === "API错误") &&
         m.advertiser_id &&
