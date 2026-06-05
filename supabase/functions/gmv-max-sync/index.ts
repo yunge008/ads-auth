@@ -226,7 +226,7 @@ Deno.serve(async (req) => {
     const db = admin();
     const [{ data: conns, error: ce }, { data: acRows, error: ae }] = await Promise.all([
       db.from("tiktok_connections").select("*"),
-      db.from("advertiser_countries").select("advertiser_id, country, shop_id"),
+      db.from("advertiser_countries").select("advertiser_id, country, shop_id, advertiser_name"),
     ]);
     if (ce) throw new Error(ce.message);
     if (ae) throw new Error(ae.message);
@@ -237,6 +237,7 @@ Deno.serve(async (req) => {
         if (!tokenByAdv.has(id)) tokenByAdv.set(id, c.access_token);
     const countryByAdv = new Map<string, string>();
     const shopByAdv = new Map<string, string>();
+    const nameByAdv = new Map<string, string>();
     for (const r of (acRows ?? []) as { advertiser_id: string; country: string; shop_id: string | null }[]) {
       countryByAdv.set(r.advertiser_id, r.country);
       if (r.shop_id) shopByAdv.set(r.advertiser_id, r.shop_id);
