@@ -1,0 +1,1 @@
+ALTER TABLE public.advertiser_countries ADD COLUMN IF NOT EXISTS advertiser_name text;

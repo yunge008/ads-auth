@@ -17,6 +17,7 @@ export type Database = {
       advertiser_countries: {
         Row: {
           advertiser_id: string
+          advertiser_name: string | null
           country: string
           created_at: string
           shop_id: string | null
@@ -25,6 +26,7 @@ export type Database = {
         }
         Insert: {
           advertiser_id: string
+          advertiser_name?: string | null
           country: string
           created_at?: string
           shop_id?: string | null
@@ -33,6 +35,7 @@ export type Database = {
         }
         Update: {
           advertiser_id?: string
+          advertiser_name?: string | null
           country?: string
           created_at?: string
           shop_id?: string | null
