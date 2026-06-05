@@ -399,6 +399,21 @@ Deno.serve(async (req) => {
       const campaignMeta = new Map<string, CampaignInfo>();
       for (const c of campaigns) campaignMeta.set(c.id, c);
 
+      // Delete-then-insert: purge existing rows for (advertiser, campaigns, date-range)
+      // so stale records from prior pulls don't linger when a VID disappears.
+      if (campaignIds.length) {
+        for (const cidBatch of chunk(campaignIds, 100)) {
+          const { error } = await db
+            .from("gmv_max_vid_daily")
+            .delete()
+            .eq("advertiser_id", adv)
+            .in("campaign_id", cidBatch)
+            .gte("stat_date", start_date)
+            .lte("stat_date", end_date);
+          if (error) throw new Error(`delete stale: ${error.message}`);
+        }
+      }
+
       const groupCache = new Map<string, Set<string>>();
       let groupBatches = 0;
       let creativeCalls = 0;
