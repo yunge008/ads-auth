@@ -79,6 +79,8 @@ export async function fetchCampaigns(
 
 // Generic paged report fetch. filtering MUST be an object (not array),
 // always merged with gmv_max_promotion_types: ["PRODUCT"].
+// metrics is configurable: creative-level metrics (creative_delivery_status,
+// product_impressions, product_clicks) require item_id dimension.
 export async function fetchReport(
   token: string,
   advertiser_id: string,
@@ -87,6 +89,7 @@ export async function fetchReport(
   end: string,
   dimensions: string[],
   extraFilter: Record<string, unknown> = {},
+  metrics: string[] = ["cost", "orders", "gross_revenue"],
   _ttGet: typeof ttGet = ttGet,
 ): Promise<RawRow[]> {
   const out: RawRow[] = [];
@@ -101,14 +104,7 @@ export async function fetchReport(
       advertiser_id,
       store_ids: JSON.stringify([store_id]),
       dimensions: JSON.stringify(dimensions),
-      metrics: JSON.stringify([
-        "creative_delivery_status",
-        "cost",
-        "orders",
-        "gross_revenue",
-        "product_impressions",
-        "product_clicks",
-      ]),
+      metrics: JSON.stringify(metrics),
       start_date: start,
       end_date: end,
       page: String(page),
@@ -211,6 +207,7 @@ Deno.serve(async (req) => {
               const list = await fetchReport(tok, adv, shopId, s, e,
                 ["campaign_id", "item_group_id", "item_id", "stat_time_day"],
                 { campaign_ids: [cid], item_group_ids: [igid] },
+                ["creative_delivery_status", "cost", "orders", "gross_revenue", "product_impressions", "product_clicks"],
               );
               for (const r of list) {
                 const dims = (r.dimensions ?? {}) as Record<string, unknown>;

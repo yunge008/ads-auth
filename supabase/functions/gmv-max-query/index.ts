@@ -52,15 +52,25 @@ Deno.serve(async (req) => {
 
     const db = admin();
 
-    // 1) Load staff_vid_map (primary)
-    let mapQ = db.from("staff_vid_map").select("country, staff_name, vid, source_type, registered_sku");
-    if (body.countries?.length) mapQ = mapQ.in("country", body.countries);
-    if (body.staff_names?.length) mapQ = mapQ.in("staff_name", body.staff_names);
-    if (body.source_types?.length) mapQ = mapQ.in("source_type", body.source_types);
-    if (body.vids?.length) mapQ = mapQ.in("vid", body.vids);
-    const { data: mapRows, error: mapErr } = await mapQ;
-    if (mapErr) throw new Error(mapErr.message);
-    const staff = (mapRows ?? []) as StaffRow[];
+    // 1) Load staff_vid_map (primary) — paginate to bypass 1000-row default.
+    const staff: StaffRow[] = [];
+    {
+      const PAGE = 1000;
+      let from = 0;
+      for (;;) {
+        let mapQ = db.from("staff_vid_map").select("country, staff_name, vid, source_type, registered_sku");
+        if (body.countries?.length) mapQ = mapQ.in("country", body.countries);
+        if (body.staff_names?.length) mapQ = mapQ.in("staff_name", body.staff_names);
+        if (body.source_types?.length) mapQ = mapQ.in("source_type", body.source_types);
+        if (body.vids?.length) mapQ = mapQ.in("vid", body.vids);
+        const { data: mapRows, error: mapErr } = await mapQ.range(from, from + PAGE - 1);
+        if (mapErr) throw new Error(mapErr.message);
+        const rows = (mapRows ?? []) as StaffRow[];
+        staff.push(...rows);
+        if (rows.length < PAGE) break;
+        from += PAGE;
+      }
+    }
     const vidsInScope = Array.from(new Set(staff.map((s) => s.vid)));
 
     // 2) Load daily data for those vids in date range
@@ -68,18 +78,27 @@ Deno.serve(async (req) => {
     if (vidsInScope.length) {
       // Supabase limits .in() to ~1000 args, chunk if necessary.
       const CHUNK = 500;
+      const PAGE = 1000;
       for (let i = 0; i < vidsInScope.length; i += CHUNK) {
         const slice = vidsInScope.slice(i, i + CHUNK);
-        const { data, error } = await db
-          .from("gmv_max_vid_daily")
-          .select(
-            "country, advertiser_id, campaign_id, item_group_id, vid, stat_date, cost, gross_revenue, orders, product_impressions, product_clicks, creative_delivery_status",
-          )
-          .in("vid", slice)
-          .gte("stat_date", body.start_date)
-          .lte("stat_date", body.end_date);
-        if (error) throw new Error(error.message);
-        daily = daily.concat((data ?? []) as DailyRow[]);
+        // Paginate to bypass Supabase's default 1000-row limit.
+        let from = 0;
+        for (;;) {
+          const { data, error } = await db
+            .from("gmv_max_vid_daily")
+            .select(
+              "country, advertiser_id, campaign_id, item_group_id, vid, stat_date, cost, gross_revenue, orders, product_impressions, product_clicks, creative_delivery_status",
+            )
+            .in("vid", slice)
+            .gte("stat_date", body.start_date)
+            .lte("stat_date", body.end_date)
+            .range(from, from + PAGE - 1);
+          if (error) throw new Error(error.message);
+          const rows = (data ?? []) as DailyRow[];
+          daily = daily.concat(rows);
+          if (rows.length < PAGE) break;
+          from += PAGE;
+        }
       }
     }
 
