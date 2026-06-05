@@ -356,9 +356,9 @@ function MaterialPerformancePage() {
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableRow><TableCell colSpan={16} className="h-20 text-center text-sm text-muted-foreground">加载中…</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={18} className="h-20 text-center text-sm text-muted-foreground">加载中…</TableCell></TableRow>
                 ) : paged.length === 0 ? (
-                  <TableRow><TableCell colSpan={16} className="h-20 text-center text-sm text-muted-foreground">暂无数据</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={18} className="h-20 text-center text-sm text-muted-foreground">暂无数据</TableCell></TableRow>
                 ) : paged.map((r, i) => (
                   <TableRow key={`${r.country}-${r.staff_name}-${r.source_type}-${r.vid}-${r.item_group_id}-${r.advertiser_id}-${i}`}>
                     <TableCell>{r.country || "—"}</TableCell>
@@ -376,6 +376,8 @@ function MaterialPerformancePage() {
                     <TableCell className="text-right tabular-nums">{fmtNum(r.gross_revenue)}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmtPct(r.ctr)}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmtPct(r.cvr)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{fmtRoi(r.cpm)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{fmtRoi(r.cpa)}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmtNum(r.product_impressions)}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmtNum(r.product_clicks)}</TableCell>
                   </TableRow>
