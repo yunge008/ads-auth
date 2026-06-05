@@ -210,10 +210,7 @@ Deno.serve(async (req) => {
             try {
               const list = await fetchReport(tok, adv, shopId, s, e,
                 ["campaign_id", "item_group_id", "item_id", "stat_time_day"],
-                [
-                  { field_name: "campaign_ids", filter_type: "IN", filter_value: JSON.stringify([cid]) },
-                  { field_name: "item_group_ids", filter_type: "IN", filter_value: JSON.stringify([igid]) },
-                ],
+                { campaign_ids: [cid], item_group_ids: [igid] },
               );
               for (const r of list) {
                 const dims = (r.dimensions ?? {}) as Record<string, unknown>;
