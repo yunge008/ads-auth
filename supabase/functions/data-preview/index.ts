@@ -27,8 +27,10 @@ Deno.serve(async (req) => {
         ? "country,product_id,product_name,sku_id,merchant_sku,updated_at"
         : table === "gmv_max_vid_daily"
           ? "country,advertiser_id,vid,stat_date,cost,gross_revenue,orders,product_impressions,product_clicks,roi,ctr,cvr,updated_at"
-          : "comment_id,advertiser_id,country,vid,text,text_zh,like_count,reply_count,username,avatar_url,comment_type,parent_comment_id,comment_create_time,updated_at";
-    const orderCol = table === "gmv_max_vid_daily" ? "stat_date" : "updated_at";
+          : table === "advertiser_countries"
+            ? "advertiser_id,advertiser_name,country,shop_id,updated_at"
+            : "comment_id,advertiser_id,country,vid,text,text_zh,like_count,reply_count,username,avatar_url,comment_type,parent_comment_id,comment_create_time,updated_at";
+    const orderCol = table === "gmv_max_vid_daily" ? "stat_date" : table === "advertiser_countries" ? "advertiser_id" : "updated_at";
     const { data, error, count } = await db
       .from(table)
       .select(columns, { count: "exact" })
