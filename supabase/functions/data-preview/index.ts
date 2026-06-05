@@ -14,7 +14,7 @@ Deno.serve(async (req) => {
     };
     const table = (body.table ?? "").trim();
     if (!TABLES.has(table)) throw new Error("table 不支持");
-    await checkAdminPasscode(req, table === "tiktok_comments" ? "comments" : "feishu-data");
+    await checkAdminPasscode(req, table === "tiktok_comments" ? "comments" : table === "advertiser_countries" ? undefined : "feishu-data");
     const page = Math.max(1, Math.floor(Number(body.page ?? 1)) || 1);
     const pageSize = Math.min(2000, Math.max(20, Math.floor(Number(body.page_size ?? 100)) || 100));
     const from = (page - 1) * pageSize;
