@@ -331,3 +331,128 @@ function PreviewCard({ title, loading, reload, page, count, setPage, children }:
   const pageCount = Math.max(1, Math.ceil(count / 100));
   return <Card><CardHeader className="flex flex-row items-center justify-between space-y-0"><CardTitle className="text-base">{title}</CardTitle><Button size="sm" variant="outline" onClick={reload} disabled={loading}><RefreshCw className={`h-4 w-4 mr-1 ${loading ? "animate-spin" : ""}`} />刷新</Button></CardHeader><CardContent><div className="border rounded-md overflow-x-auto">{children}</div><div className="mt-3 flex items-center justify-end gap-2 text-xs text-muted-foreground"><Button size="sm" variant="outline" className="h-7" disabled={page <= 1} onClick={() => setPage(page - 1)}><ChevronLeft className="h-3.5 w-3.5" /></Button><span>{page} / {pageCount}</span><Button size="sm" variant="outline" className="h-7" disabled={page >= pageCount} onClick={() => setPage(page + 1)}><ChevronRight className="h-3.5 w-3.5" /></Button></div></CardContent></Card>;
 }
+
+type DailyReportRow = {
+  country: string | null;
+  advertiser_id: string;
+  advertiser_name: string | null;
+  stat_date: string;
+  row_count: number;
+  status_counts: Record<string, number>;
+};
+
+function GmvDailyReport({ advertisers, reportRef }: { advertisers: AdvertiserRow[]; reportRef: React.MutableRefObject<{ reload: () => void }> }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const ago7 = new Date(Date.now() - 7 * 86400 * 1000).toISOString().slice(0, 10);
+  const [start, setStart] = React.useState(ago7);
+  const [end, setEnd] = React.useState(today);
+  const [country, setCountry] = React.useState("");
+  const [vid, setVid] = React.useState("");
+  const [vidInput, setVidInput] = React.useState("");
+  const [page, setPage] = React.useState(1);
+  const [rows, setRows] = React.useState<DailyReportRow[]>([]);
+  const [count, setCount] = React.useState(0);
+  const [loading, setLoading] = React.useState(false);
+
+  const countryOptions = React.useMemo(() => {
+    const set = new Set<string>();
+    for (const a of advertisers) if (a.country) set.add(a.country);
+    return Array.from(set).sort();
+  }, [advertisers]);
+
+  const reload = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await invokeFn<{ rows: DailyReportRow[]; count: number }>("gmv-max-daily-report", {
+        start_date: start, end_date: end, country: country || undefined, vid: vid || undefined, page, page_size: 100,
+      });
+      setRows(r.rows ?? []);
+      setCount(r.count ?? 0);
+    } catch (e) { toast.error(`加载失败：${(e as Error).message}`); }
+    finally { setLoading(false); }
+  }, [start, end, country, vid, page]);
+
+  React.useEffect(() => { reload(); }, [reload]);
+  React.useEffect(() => { reportRef.current.reload = reload; }, [reload, reportRef]);
+
+  const pageCount = Math.max(1, Math.ceil(count / 100));
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0">
+        <CardTitle className="text-base">GMV Max 日报（{count} 条聚合）</CardTitle>
+        <Button size="sm" variant="outline" onClick={reload} disabled={loading}>
+          <RefreshCw className={`h-4 w-4 mr-1 ${loading ? "animate-spin" : ""}`} />刷新
+        </Button>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-wrap items-end gap-2 mb-3">
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-muted-foreground">起始</span>
+            <Input type="date" value={start} onChange={(e) => { setPage(1); setStart(e.target.value); }} className="h-8 w-36" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-muted-foreground">结束</span>
+            <Input type="date" value={end} onChange={(e) => { setPage(1); setEnd(e.target.value); }} className="h-8 w-36" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-muted-foreground">国家</span>
+            <select value={country} onChange={(e) => { setPage(1); setCountry(e.target.value); }} className="h-8 w-32 rounded-md border bg-background px-2 text-sm">
+              <option value="">全部</option>
+              {countryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-muted-foreground">VID查找</span>
+            <div className="flex gap-1">
+              <Input value={vidInput} onChange={(e) => setVidInput(e.target.value)} placeholder="输入VID" className="h-8 w-44 font-mono text-xs" />
+              <Button size="sm" className="h-8" onClick={() => { setPage(1); setVid(vidInput.trim()); }}>查找</Button>
+              {vid && <Button size="sm" variant="outline" className="h-8" onClick={() => { setVidInput(""); setVid(""); setPage(1); }}>清除</Button>}
+            </div>
+          </div>
+        </div>
+        <div className="border rounded-md overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>国家</TableHead>
+                <TableHead>广告户名称</TableHead>
+                <TableHead>日期</TableHead>
+                <TableHead className="text-right">数据行数</TableHead>
+                {DELIVERY_STATUSES.map((s) => (
+                  <TableHead key={s} className="text-right text-xs" title={s}>{STATUS_LABELS[s]}</TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r, i) => (
+                <TableRow key={`${r.advertiser_id}-${r.stat_date}-${i}`}>
+                  <TableCell>{r.country ?? "—"}</TableCell>
+                  <TableCell className="text-xs">
+                    <div>{r.advertiser_name ?? r.advertiser_id}</div>
+                    <div className="text-[10px] text-muted-foreground font-mono">{r.advertiser_id}</div>
+                  </TableCell>
+                  <TableCell className="text-xs">{r.stat_date}</TableCell>
+                  <TableCell className="text-right tabular-nums">{r.row_count}</TableCell>
+                  {DELIVERY_STATUSES.map((s) => {
+                    const v = r.status_counts?.[s] ?? 0;
+                    return <TableCell key={s} className={`text-right tabular-nums ${v ? "" : "text-muted-foreground/40"}`}>{v}</TableCell>;
+                  })}
+                </TableRow>
+              ))}
+              {!rows.length && !loading && (
+                <TableRow><TableCell colSpan={4 + DELIVERY_STATUSES.length} className="text-center text-xs text-muted-foreground py-6">暂无数据</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+        <div className="mt-3 flex items-center justify-end gap-2 text-xs text-muted-foreground">
+          <Button size="sm" variant="outline" className="h-7" disabled={page <= 1} onClick={() => setPage(page - 1)}><ChevronLeft className="h-3.5 w-3.5" /></Button>
+          <span>{page} / {pageCount}</span>
+          <Button size="sm" variant="outline" className="h-7" disabled={page >= pageCount} onClick={() => setPage(page + 1)}><ChevronRight className="h-3.5 w-3.5" /></Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
