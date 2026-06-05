@@ -23,11 +23,9 @@ type GmvRow = {
   creative_delivery_status: string | null;
   cost: number; orders: number; gross_revenue: number;
   product_impressions: number; product_clicks: number;
-  ad_video_view_rate_2s: number | null; ad_video_view_rate_6s: number | null;
-  ad_video_view_rate_p25: number | null; ad_video_view_rate_p50: number | null;
-  ad_video_view_rate_p75: number | null; ad_video_view_rate_p100: number | null;
 };
 const pct = (v: number | null | undefined) => v == null ? "—" : (Number(v) * 100).toFixed(2) + "%";
+const safeDiv = (a: number, b: number) => b > 0 ? a / b : null;
 
 function FeishuDataPage() {
   return (
