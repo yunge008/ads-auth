@@ -190,7 +190,7 @@ Deno.serve(async (req) => {
           try {
             const list = await fetchReport(tok, adv, shopId, s, e,
               ["campaign_id", "item_group_id", "stat_time_day"],
-              [{ field_name: "campaign_ids", filter_type: "IN", filter_value: JSON.stringify([cid]) }],
+              { campaign_ids: [cid] },
             );
             const set = groupsByCampaign.get(cid) ?? new Set<string>();
             for (const r of list) {
