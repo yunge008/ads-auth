@@ -64,6 +64,7 @@ for (const adv of ADVERTISERS) {
       "tok", adv, "shop", "2026-01-01", "2026-01-02",
       ["campaign_id", "item_group_id", "item_id", "stat_time_day"],
       { campaign_ids: [`${adv}_cid`], item_group_ids: [`${adv}_igid`] },
+      undefined,
       fn,
     );
     assertEquals(calls.length, TOTAL_PAGE);
