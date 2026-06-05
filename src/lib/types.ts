@@ -10,6 +10,7 @@ export type StaffSheet = {
   name: string;
   sheet_name: string;
   active: boolean;
+  role?: "BD" | "EDITOR";
 };
 
 export type BCAdvertiser = {
