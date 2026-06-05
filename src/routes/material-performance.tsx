@@ -64,6 +64,8 @@ const METRICS = [
   { key: "roi", label: "ROI", color: "#f59e0b", axis: "right" as const, defaultOn: true },
   { key: "ctr", label: "CTR", color: "#a855f7", axis: "right" as const, defaultOn: false },
   { key: "cvr", label: "CVR", color: "#ec4899", axis: "right" as const, defaultOn: false },
+  { key: "cpm", label: "CPM", color: "#14b8a6", axis: "left" as const, defaultOn: false },
+  { key: "cpa", label: "CPA", color: "#f97316", axis: "left" as const, defaultOn: false },
   { key: "product_impressions", label: "PV", color: "#6366f1", axis: "left" as const, defaultOn: false },
   { key: "product_clicks", label: "Click", color: "#06b6d4", axis: "right" as const, defaultOn: false },
 ];
