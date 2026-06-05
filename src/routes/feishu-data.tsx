@@ -171,7 +171,7 @@ function GmvMaxSection() {
               <TableCell className="text-right">{Number(r.gross_revenue).toFixed(2)}</TableCell>
               <TableCell className="text-right">{r.product_impressions}</TableCell>
               <TableCell className="text-right">{r.product_clicks}</TableCell>
-              <TableCell className="text-right">{r.roi == null ? "—" : Number(r.roi).toFixed(2)}</TableCell>
+              
               <TableCell className="text-right">{pct(r.ad_video_view_rate_2s)}</TableCell>
               <TableCell className="text-right">{pct(r.ad_video_view_rate_6s)}</TableCell>
               <TableCell className="text-right">{pct(r.ad_video_view_rate_p25)}</TableCell>
