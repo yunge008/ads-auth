@@ -55,9 +55,19 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     await checkAdminPasscode(req, "comments");
-    const { advertiser_ids: filterIds, max_pages = 5 } = (await req
+    const { advertiser_ids: filterIds, max_pages = 5, days = 30, start_date, end_date } = (await req
       .json()
-      .catch(() => ({}))) as { advertiser_ids?: string[]; max_pages?: number };
+      .catch(() => ({}))) as {
+      advertiser_ids?: string[];
+      max_pages?: number;
+      days?: number;
+      start_date?: string;
+      end_date?: string;
+    };
+
+    const endDate = end_date ?? fmtDate(new Date());
+    const startDate =
+      start_date ?? fmtDate(new Date(Date.now() - Math.max(1, days) * 86400 * 1000));
 
     const db = admin();
     const [{ data: conns, error: cErr }, { data: acRows, error: aErr }] = await Promise.all([
@@ -94,7 +104,7 @@ Deno.serve(async (req) => {
       const token = tokenByAdv.get(advId)!;
       try {
         for (let page = 1; page <= max_pages; page++) {
-          const j = await fetchPage(token, advId, page);
+          const j = await fetchPage(token, advId, page, startDate, endDate);
           if (j.code !== 0) {
             errors.push({ advertiser_id: advId, error: String(j.message ?? `code=${j.code}`) });
             break;
