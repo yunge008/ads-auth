@@ -148,7 +148,7 @@ function AuthorizePage() {
   );
 
 
-  const handleFetch = async () => {
+  const handleFetch = async (includeDone = false) => {
     const activeStaff = staff.filter((s) => s.active);
     if (activeStaff.length === 0) {
       toast.error("请先在「设置」中配置启用的人员");
@@ -158,6 +158,7 @@ function AuthorizePage() {
     try {
       const data = await invokeFn<{ materials: Material[]; missing_sheets?: string[] }>("feishu-read", {
         staff: activeStaff.map((s) => ({ name: s.name, sheet_name: s.sheet_name })),
+        include_done: includeDone,
       });
       const list = (data?.materials ?? []).map((m) => ({
         ...m,
