@@ -39,13 +39,23 @@ Deno.serve(async (req) => {
     const pageSize = Math.min(500, Math.max(20, Math.floor(Number(body.page_size ?? 100)) || 100));
 
     const db = admin();
+    // Require an explicit date window — never silently match the whole table
+    // when start_date / end_date is missing.
+    const today = new Date().toISOString().slice(0, 10);
+    const addDays = (d: string, n: number) => {
+      const t = new Date(d + "T00:00:00Z");
+      t.setUTCDate(t.getUTCDate() + n);
+      return t.toISOString().slice(0, 10);
+    };
+    const startDate = (body.start_date && body.start_date.trim()) || addDays(today, -7);
+    const endDate = (body.end_date && body.end_date.trim()) || today;
     const buildQuery = () => {
       let q = db
         .from("gmv_max_vid_daily")
         .select("country,advertiser_id,vid,stat_date,creative_delivery_status")
-        .order("stat_date", { ascending: false });
-      if (body.start_date) q = q.gte("stat_date", body.start_date);
-      if (body.end_date) q = q.lte("stat_date", body.end_date);
+        .order("stat_date", { ascending: false })
+        .gte("stat_date", startDate)
+        .lte("stat_date", endDate);
       if (body.country && body.country.trim()) q = q.eq("country", body.country.trim());
       if (body.vid && body.vid.trim()) q = q.eq("vid", body.vid.trim());
       return q;
