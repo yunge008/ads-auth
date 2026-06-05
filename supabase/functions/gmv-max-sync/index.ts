@@ -517,7 +517,6 @@ Deno.serve(async (req) => {
                   orders,
                   product_impressions: imps,
                   product_clicks: clks,
-                  pulled_at: nowIso,
                 });
               }
             } catch (err) {
