@@ -195,9 +195,13 @@ Deno.serve(async (req) => {
       advertiser_ids?: string[];
       mode?: "backfill" | "incremental" | "custom";
       batch_size?: number;
-      concurrency?: number;
+      max_runtime_ms?: number;
     };
-    const concurrency = Math.max(1, Math.min(16, Number(body.concurrency ?? 6)));
+    const startedAt = Date.now();
+    const maxRuntimeMs = Math.max(30000, Math.min(140000, Number(body.max_runtime_ms ?? 135000)));
+    const ensureTime = (stage: string) => {
+      if (Date.now() - startedAt > maxRuntimeMs) throw new TimeBudgetExceeded(stage);
+    };
     const mode = body.mode ?? "custom";
     const today = new Date().toISOString().slice(0, 10);
     let start_date = body.start_date ?? "";
@@ -252,7 +256,11 @@ Deno.serve(async (req) => {
       saturated: boolean;
     }[] = [];
 
+    const processedAdvertisers: string[] = [];
+    const stoppedBeforeTimeout: { reason: string; remaining_advertiser_ids: string[] } | null = null;
+
     const runAdvertiser = async (adv: string): Promise<void> => {
+      ensureTime(`advertiser ${adv} start`);
       const tok = tokenByAdv.get(adv)!;
       const shopId = shopByAdv.get(adv)!;
 
@@ -275,6 +283,7 @@ Deno.serve(async (req) => {
 
       const groupStart = addDays(end_date, -364);
       for (const batch of campaignBatches) {
+        ensureTime(`advertiser ${adv} group discovery`);
         groupBatches++;
         try {
           const groups = await fetchReport(
@@ -300,6 +309,7 @@ Deno.serve(async (req) => {
 
       for (const [s, e] of windows) {
         for (const cid of campaigns) {
+          ensureTime(`advertiser ${adv} creative fetch`);
           const groupIds = Array.from(campaignGroups.get(cid) ?? []);
           if (groupIds.length === 0) continue;
           for (const igidBatch of chunk(groupIds, 100)) {
