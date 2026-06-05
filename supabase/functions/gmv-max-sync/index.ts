@@ -220,7 +220,15 @@ Deno.serve(async (req) => {
     for (const id of skipped) errors.push({ advertiser_id: id, error: "缺少店铺ID（shop_id），已跳过" });
     const upsertRows: Record<string, unknown>[] = [];
     const nowIso = new Date().toISOString();
-    const batchStats: { advertiser_id: string; batches: number; rows_max_batch: number; saturated: boolean }[] = [];
+    const batchStats: {
+      advertiser_id: string;
+      campaigns: number;
+      group_batches: number;
+      creative_calls: number;
+      rows: number;
+      rows_max_batch: number;
+      saturated: boolean;
+    }[] = [];
 
     for (const adv of targets) {
       const tok = tokenByAdv.get(adv)!;
@@ -235,24 +243,57 @@ Deno.serve(async (req) => {
       }
       if (campaigns.length === 0) continue;
 
-      const batches = chunk(campaigns, batchSize);
-      let totalBatches = 0;
+      const campaignGroups = new Map<string, Set<string>>();
+      const campaignBatches = chunk(campaigns, batchSize);
+      let groupBatches = 0;
+      let creativeCalls = 0;
+      let totalRows = 0;
       let maxRows = 0;
       let saturated = false;
 
+      // Step 2: batch campaigns once to collect item_group_ids. No stat_time_day,
+      // use a wider 365-day lookback so creative-level calls can include both IDs.
+      const groupStart = addDays(end_date, -364);
+      for (const batch of campaignBatches) {
+        groupBatches++;
+        try {
+          const groups = await fetchReport(
+            tok, adv, shopId, groupStart, end_date,
+            ["campaign_id", "item_group_id"],
+            { campaign_ids: batch },
+          );
+          for (const r of groups) {
+            const dims = (r.dimensions ?? {}) as Record<string, unknown>;
+            const cid = String(dims.campaign_id ?? "");
+            const gid = String(dims.item_group_id ?? "");
+            if (!cid || !gid) continue;
+            if (!campaignGroups.has(cid)) campaignGroups.set(cid, new Set<string>());
+            campaignGroups.get(cid)!.add(gid);
+          }
+        } catch (err) {
+          errors.push({
+            advertiser_id: adv,
+            error: `group batch[${batch[0]}...x${batch.length}]: ${(err as Error).message}`,
+          });
+        }
+      }
+
       for (const [s, e] of windows) {
-        for (const batch of batches) {
-          totalBatches++;
-          try {
-            const list = await fetchReport(
-              tok, adv, shopId, s, e,
-              ["campaign_id", "item_group_id", "item_id", "stat_time_day"],
-              { campaign_ids: batch },
-              ["cost", "orders", "gross_revenue", "product_impressions", "product_clicks"],
-            );
-            if (list.length > maxRows) maxRows = list.length;
-            // 200 page_size * 100 max pages = 20000; warn if approaching
-            if (list.length >= 19500) saturated = true;
+        for (const cid of campaigns) {
+          const groupIds = Array.from(campaignGroups.get(cid) ?? []);
+          if (groupIds.length === 0) continue;
+          for (const igidBatch of chunk(groupIds, 100)) {
+            creativeCalls++;
+            try {
+              const list = await fetchReport(
+                tok, adv, shopId, s, e,
+                ["campaign_id", "item_group_id", "item_id", "stat_time_day"],
+                { campaign_ids: [cid], item_group_ids: igidBatch },
+              );
+              totalRows += list.length;
+              if (list.length > maxRows) maxRows = list.length;
+              // 1000 page_size * 100 max pages = 100000; warn if approaching
+              if (list.length >= 95000) saturated = true;
             for (const r of list) {
               const dims = (r.dimensions ?? {}) as Record<string, unknown>;
               const mets = (r.metrics ?? {}) as Record<string, unknown>;
