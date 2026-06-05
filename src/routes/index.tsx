@@ -335,10 +335,16 @@ function AuthorizePage() {
             从飞书拉取未授权素材，匹配广告户后批量授权并回写。
           </p>
         </div>
-        <Button onClick={handleFetch} disabled={loading}>
-          <RefreshCw className={cn("h-4 w-4 mr-1.5", loading && "animate-spin")} />
-          获取未授权素材
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => handleFetch(true)} disabled={loading}>
+            <Download className={cn("h-4 w-4 mr-1.5", loading && "animate-spin")} />
+            获取所有素材
+          </Button>
+          <Button onClick={() => handleFetch(false)} disabled={loading}>
+            <RefreshCw className={cn("h-4 w-4 mr-1.5", loading && "animate-spin")} />
+            获取未授权素材
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
