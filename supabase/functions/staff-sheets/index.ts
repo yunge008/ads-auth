@@ -9,6 +9,7 @@ type StaffRow = {
   name: string;
   sheet_name: string;
   active: boolean;
+  role?: "BD" | "EDITOR";
 };
 
 Deno.serve(async (req) => {
@@ -25,7 +26,7 @@ Deno.serve(async (req) => {
     if (action === "list") {
       const { data, error } = await db
         .from("staff_sheets")
-        .select("id,name,sheet_name,active,sort_order")
+        .select("id,name,sheet_name,active,role,sort_order")
         .order("sort_order", { ascending: true })
         .order("created_at", { ascending: true });
       if (error) throw new Error(error.message);
@@ -34,6 +35,7 @@ Deno.serve(async (req) => {
         name: r.name,
         sheet_name: r.sheet_name,
         active: r.active,
+        role: (r.role ?? "BD") as "BD" | "EDITOR",
       }));
       return new Response(JSON.stringify({ staff }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -53,6 +55,7 @@ Deno.serve(async (req) => {
           name: r.name,
           sheet_name: r.sheet_name,
           active: r.active,
+          role: r.role ?? "BD",
           sort_order: i,
         }));
         const { error: insErr } = await db.from("staff_sheets").insert(payload);
@@ -62,6 +65,7 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
 
     throw new Error(`未知 action: ${action}`);
   } catch (e) {
