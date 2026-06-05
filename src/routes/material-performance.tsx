@@ -64,7 +64,7 @@ const METRICS = [
   { key: "product_clicks", label: "Click", color: "#06b6d4", axis: "right" as const, defaultOn: false },
 ];
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 20;
 const fmtNum = (n: number) => (n ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
 const fmtPct = (n: number | null) => (n == null ? "—" : (n * 100).toFixed(2) + "%");
 const fmtRoi = (n: number | null) => (n == null ? "—" : n.toFixed(2));
