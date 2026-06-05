@@ -84,6 +84,7 @@ export function StaffTable() {
               <TableRow>
                 <TableHead>姓名</TableHead>
                 <TableHead>sheet名</TableHead>
+                <TableHead className="w-24">角色</TableHead>
                 <TableHead className="w-16">启用</TableHead>
                 <TableHead className="w-20 text-right">操作</TableHead>
               </TableRow>
@@ -91,11 +92,12 @@ export function StaffTable() {
             <TableBody>
               {rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="h-20 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={5} className="h-20 text-center text-sm text-muted-foreground">
                     暂无人员，点击「新增」添加
                   </TableCell>
                 </TableRow>
               ) : (
+
                 rows.map((row) => {
                   const isEditing = editingId === row.id;
                   return (
