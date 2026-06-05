@@ -8,14 +8,21 @@
 // - backfill:    last 30 days
 // - incremental: last 3 days
 // - custom:      requires start_date / end_date
-// Optimized: drops the intermediate item_group enumeration; batches campaign_ids
-// directly into the creative-level report. Adds QPS sleep + 429 retry.
+// Serial single-token sync. It stops before the Edge runtime hard timeout and
+// returns the remaining advertiser_ids so the caller can resume without a 504.
 import { corsHeaders } from "../_shared/feishu.ts";
 import { admin, checkAdminPasscode, type ConnRow } from "../_shared/auth.ts";
 
 const TT = "https://business-api.tiktok.com/open_api/v1.3";
 
 const sleep = (ms: number): Promise<void> => new Promise<void>((r) => setTimeout(() => r(), ms));
+
+class TimeBudgetExceeded extends Error {
+  constructor(stage: string) {
+    super(`time budget exceeded at ${stage}`);
+    this.name = "TimeBudgetExceeded";
+  }
+}
 
 function addDays(d: string, n: number): string {
   const t = new Date(d + "T00:00:00Z");
@@ -62,8 +69,21 @@ export async function ttGet(
   for (let attempt = 0; attempt < retries; attempt++) {
     const url = new URL(`${TT}${path}`);
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-    const res = await fetch(url, { headers: { "Access-Token": token } });
-    const j = await res.json().catch(() => ({}));
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
+    let j: Record<string, unknown>;
+    try {
+      const res = await fetch(url, { headers: { "Access-Token": token }, signal: controller.signal });
+      j = await res.json().catch(() => ({}));
+    } catch (err) {
+      if (attempt < retries - 1) {
+        await _sleep(1000 * Math.pow(2, attempt));
+        continue;
+      }
+      throw new Error(`${path}: network/timeout ${(err as Error).message}`);
+    } finally {
+      clearTimeout(timeoutId);
+    }
     if (j.code === 0) {
       await _sleep(300);
       return (j.data ?? {}) as Record<string, unknown>;
