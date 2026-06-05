@@ -35,18 +35,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   }, [account, location.pathname, visibleTabs, navigate]);
 
-  const handleSync = async () => {
-    setSyncing(true);
-    try {
-      await refreshAllSettings();
-      toast.success("已同步表格信息");
-    } catch (e) {
-      toast.error(`同步失败：${(e as Error).message}`);
-    } finally {
-      setSyncing(false);
-    }
-  };
-
   return (
     <div className="flex h-screen bg-muted/30">
       <aside className="w-56 shrink-0 border-r bg-card flex flex-col h-screen sticky top-0">
