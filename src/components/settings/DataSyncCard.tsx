@@ -117,6 +117,9 @@ export function DataSyncCard() {
         if (queue && queue.length) {
           reqBody.advertiser_ids = queue;
           for (const id of queue) updateRow(id, { status: "running" });
+        } else {
+          // First call: mark all seeded rows as running so user sees activity.
+          for (const id of seedIds) updateRow(id, { status: "running" });
         }
         const resp = await invokeFn<SyncResp>("gmv-max-sync", reqBody);
         mergeNames(resp.advertiser_names);
