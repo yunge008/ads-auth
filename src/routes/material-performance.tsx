@@ -279,8 +279,10 @@ function MaterialPerformancePage() {
                   <TableHead>同事</TableHead>
                   <TableHead>来源</TableHead>
                   <TableHead>VID</TableHead>
+                  <TableHead>登记SKU</TableHead>
                   <TableHead>商家SKU</TableHead>
                   <TableHead>商品ID</TableHead>
+
                   <TableHead className="text-right">订单</TableHead>
                   <TableHead className="text-right">ROI</TableHead>
                   <TableHead className="text-right">消耗</TableHead>
