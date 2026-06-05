@@ -1,6 +1,6 @@
 import * as React from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { RefreshCw, ChevronLeft, ChevronRight, Database, RotateCw } from "lucide-react";
+import { RefreshCw, ChevronLeft, ChevronRight, Database, RotateCw, CheckCircle2, XCircle, Clock, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,8 +24,31 @@ type GmvRow = {
   cost: number; orders: number; gross_revenue: number;
   product_impressions: number; product_clicks: number;
 };
+type AdvertiserRow = { advertiser_id: string; advertiser_name: string | null; country: string | null; shop_id?: string | null };
+type SyncResp = {
+  upserted: number;
+  advertisers: number;
+  processed_advertisers: number;
+  remaining_advertiser_ids: string[];
+  advertiser_names?: Record<string, string>;
+  batch_stats: Array<{ advertiser_id: string; campaigns: number; rows: number }>;
+  errors: Array<{ advertiser_id: string; error: string }>;
+};
+type CountryStatus = "pending" | "running" | "success" | "failed" | "skipped";
+type CountryProgressRow = {
+  advertiser_id: string;
+  country: string;
+  advertiser_name?: string;
+  status: CountryStatus;
+  rows?: number;
+  campaigns?: number;
+  days?: number;
+  error?: string;
+};
 const pct = (v: number | null | undefined) => v == null ? "—" : (Number(v) * 100).toFixed(2) + "%";
 const safeDiv = (a: number, b: number) => b > 0 ? a / b : null;
+const daysBetweenInclusive = (a: string, b: string) =>
+  Math.round((new Date(b + "T00:00:00Z").getTime() - new Date(a + "T00:00:00Z").getTime()) / 86400000) + 1;
 
 function FeishuDataPage() {
   return (
