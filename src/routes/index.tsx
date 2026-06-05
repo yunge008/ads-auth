@@ -576,7 +576,7 @@ function AuthorizePage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  visibleMaterials.map((m) => (
+                  pagedMaterials.map((m) => (
                     <MaterialRow
                       key={m.id}
                       m={m}
@@ -603,6 +603,22 @@ function AuthorizePage() {
               </TableBody>
             </Table>
           </div>
+          {visibleMaterials.length > PAGE_SIZE && (
+            <div className="flex items-center justify-between mt-3 text-xs text-muted-foreground">
+              <div>
+                第 {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, visibleMaterials.length)} / 共 {visibleMaterials.length} 条
+              </div>
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="outline" className="h-7" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </Button>
+                <span>{page} / {pageCount}</span>
+                <Button size="sm" variant="outline" className="h-7" disabled={page >= pageCount} onClick={() => setPage((p) => Math.min(pageCount, p + 1))}>
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
