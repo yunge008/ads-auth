@@ -130,11 +130,19 @@ export function DataSyncCard() {
         const processedThisRound = new Set<string>();
         for (const st of resp.batch_stats ?? []) {
           processedThisRound.add(st.advertiser_id);
-          updateRow(st.advertiser_id, {
-            status: "success",
-            rows: st.rows,
-            campaigns: st.campaigns,
-            days,
+          setResults((prev) => {
+            const next = new Map(prev);
+            const cur = next.get(st.advertiser_id) ?? { advertiser_id: st.advertiser_id, status: "pending" as AdvStatus };
+            next.set(st.advertiser_id, {
+              ...cur,
+              advertiser_name: nameOf(st.advertiser_id),
+              status: "success",
+              // Accumulate across resume rounds so big accounts show full totals.
+              rows: (cur.rows ?? 0) + (st.rows ?? 0),
+              campaigns: Math.max(cur.campaigns ?? 0, st.campaigns ?? 0),
+              days,
+            });
+            return next;
           });
         }
         for (const err of resp.errors ?? []) {
