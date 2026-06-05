@@ -207,7 +207,15 @@ function GmvMaxSection() {
             const stat = resp.batch_stats?.find((x) => x.advertiser_id === adv.advertiser_id);
             const err = resp.errors?.find((x) => x.advertiser_id === adv.advertiser_id);
             if (stat) {
-              updateCountryRow(adv.advertiser_id, { status: "success", rows: stat.rows, campaigns: stat.campaigns, days });
+              const noRowsWithError = (stat.rows ?? 0) === 0 && !!err;
+              updateCountryRow(adv.advertiser_id, {
+                status: noRowsWithError ? "failed" : "success",
+                rows: stat.rows,
+                campaigns: stat.campaigns,
+                days,
+                error: err?.error,
+              });
+              if (noRowsWithError) failed++;
               finished = true;
             } else if (err) {
               updateCountryRow(adv.advertiser_id, { status: err.error.includes("店铺ID") ? "skipped" : "failed", error: err.error, days });
