@@ -58,6 +58,7 @@ Deno.serve(async (req) => {
       vid: string;
       source_type: "BD";
       source_sheet: string;
+      registered_sku: string | null;
     }> = [];
     const missing: string[] = [];
 
@@ -67,7 +68,7 @@ Deno.serve(async (req) => {
         missing.push(t.sheet_name);
         continue;
       }
-      const data = await readRange(token, spreadsheetToken, `${sid}!A2:G`);
+      const data = await readRange(token, spreadsheetToken, `${sid}!A2:I`);
       for (const r of data) {
         const row = r ?? [];
         const country = cellText(row[2]);
@@ -80,15 +81,21 @@ Deno.serve(async (req) => {
           vid,
           source_type: "BD",
           source_sheet: t.sheet_name,
+          registered_sku: cellText(row[8]) || null,
         });
       }
     }
 
+    // Dedupe by unique key (country, staff_name, vid, source_type) — last wins
+    const dedup = new Map<string, (typeof rows)[number]>();
+    for (const r of rows) dedup.set(`${r.country}|${r.staff_name}|${r.vid}|${r.source_type}`, r);
+    const finalRows = Array.from(dedup.values());
+
     let upserted = 0;
-    if (rows.length) {
+    if (finalRows.length) {
       const CHUNK = 500;
-      for (let i = 0; i < rows.length; i += CHUNK) {
-        const batch = rows.slice(i, i + CHUNK);
+      for (let i = 0; i < finalRows.length; i += CHUNK) {
+        const batch = finalRows.slice(i, i + CHUNK);
         const { error: upErr } = await db
           .from("staff_vid_map")
           .upsert(batch, { onConflict: "country,staff_name,vid,source_type" });
@@ -96,6 +103,7 @@ Deno.serve(async (req) => {
         upserted += batch.length;
       }
     }
+
 
     return new Response(
       JSON.stringify({ upserted, missing_sheets: missing }),
