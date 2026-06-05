@@ -239,6 +239,27 @@ export type Database = {
         }
         Relationships: []
       }
+      tiktok_comment_sync_state: {
+        Row: {
+          advertiser_id: string
+          last_run_at: string
+          last_synced_until: string | null
+          updated_at: string
+        }
+        Insert: {
+          advertiser_id: string
+          last_run_at?: string
+          last_synced_until?: string | null
+          updated_at?: string
+        }
+        Update: {
+          advertiser_id?: string
+          last_run_at?: string
+          last_synced_until?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       tiktok_comments: {
         Row: {
           advertiser_id: string
