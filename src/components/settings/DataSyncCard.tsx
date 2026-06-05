@@ -56,6 +56,22 @@ export function DataSyncCard() {
   const [results, setResults] = React.useState<Map<string, AdvRow>>(new Map());
   const [progress, setProgress] = React.useState<{ iter: number; remaining: number; total: number } | null>(null);
   const [nameMap, setNameMap] = React.useState<Map<string, string>>(new Map());
+  const [allAdvs, setAllAdvs] = React.useState<{ advertiser_id: string; advertiser_name: string | null }[]>([]);
+
+  // Preload advertiser list so the status table can show all rows immediately.
+  React.useEffect(() => {
+    invokeFn<{ rows: { advertiser_id: string; advertiser_name: string | null }[] }>(
+      "data-preview", { table: "advertiser_countries", page: 1, page_size: 500 },
+    ).then((r) => {
+      const rows = r.rows ?? [];
+      setAllAdvs(rows);
+      setNameMap((prev) => {
+        const next = new Map(prev);
+        for (const a of rows) if (a.advertiser_name) next.set(a.advertiser_id, a.advertiser_name);
+        return next;
+      });
+    }).catch(() => {});
+  }, []);
 
   const mergeNames = (names?: Record<string, string>) => {
     if (!names) return;
