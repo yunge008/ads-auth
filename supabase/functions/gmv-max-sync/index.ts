@@ -196,7 +196,7 @@ export async function fetchReport(
     };
     let data: Record<string, unknown>;
     try {
-      data = await _ttGet(token, "/gmv_max/report/get/", params);
+      data = await _ttGet(token, "/gmv_max/report/get/", params, undefined, undefined, _ensureTime);
     } catch (err) {
       const msg = (err as Error).message ?? "";
       const m = msg.match(/Invalid metric\(s\):\s*'\[([^\]]+)\]'/);
