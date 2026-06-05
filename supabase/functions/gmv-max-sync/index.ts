@@ -406,9 +406,12 @@ Deno.serve(async (req) => {
       const campaignMeta = new Map<string, CampaignInfo>();
       for (const c of campaigns) campaignMeta.set(c.id, c);
 
-      // Delete-then-insert: purge existing rows for (advertiser, campaigns, date-range)
-      // so stale records from prior pulls don't linger when a VID disappears.
-      if (campaignIds.length) {
+      // Delete-then-insert: purge existing rows for this (advertiser, date-range)
+      // so stale records (incl. campaigns no longer in PRODUCT_GMV_MAX list, or
+      // rows from older buggy runs with NULL campaign_name) get cleaned.
+      // In resume mode (preset campaign_ids), only delete the targeted campaigns
+      // so we don't wipe already-written data from earlier resume rounds.
+      if (hasPresetCampaigns && campaignIds.length) {
         for (const cidBatch of chunk(campaignIds, 100)) {
           const { error } = await db
             .from("gmv_max_vid_daily")
@@ -419,6 +422,14 @@ Deno.serve(async (req) => {
             .lte("stat_date", end_date);
           if (error) throw new Error(`delete stale: ${error.message}`);
         }
+      } else {
+        const { error } = await db
+          .from("gmv_max_vid_daily")
+          .delete()
+          .eq("advertiser_id", adv)
+          .gte("stat_date", start_date)
+          .lte("stat_date", end_date);
+        if (error) throw new Error(`delete stale: ${error.message}`);
       }
 
       const groupCache = new Map<string, Set<string>>();
