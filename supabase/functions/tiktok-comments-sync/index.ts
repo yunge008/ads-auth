@@ -193,7 +193,10 @@ Deno.serve(async (req) => {
         if (debug) {
           const firstAdgroup = adgroups[0] ?? null;
           const [ws, we] = windows[0] ?? [advStart, endDate];
-          const sample = firstAdgroup ? await fetchPage(token, advId, firstAdgroup, 1, ws, we) : null;
+          const sample = firstAdgroup
+            ? await fetchPage(token, advId, firstAdgroup, 1, ws, we, 100, "ADGROUP_ID")
+            : null;
+          const advSample = await fetchPage(token, advId, advId, 1, ws, we, 100, "ADVERTISER_ID");
           return new Response(
             JSON.stringify({
               debug: true,
@@ -208,11 +211,13 @@ Deno.serve(async (req) => {
               windows,
               adgroup_count: adgroups.length,
               sample_adgroup_id: firstAdgroup,
-              sample_response: sample,
+              sample_response_by_adgroup: sample,
+              sample_response_by_advertiser: advSample,
             }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" } },
           );
         }
+
         for (const agId of adgroups) {
           for (const [ws, we] of windows) {
             for (let page = 1; page <= max_pages; page++) {
