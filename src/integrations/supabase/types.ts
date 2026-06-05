@@ -87,6 +87,8 @@ export type Database = {
           ad_video_view_rate_p75: number | null
           advertiser_id: string
           campaign_id: string
+          campaign_name: string | null
+          campaign_operation_status: string | null
           cost: number
           country: string
           created_at: string
@@ -115,6 +117,8 @@ export type Database = {
           ad_video_view_rate_p75?: number | null
           advertiser_id: string
           campaign_id?: string
+          campaign_name?: string | null
+          campaign_operation_status?: string | null
           cost?: number
           country?: string
           created_at?: string
@@ -143,6 +147,8 @@ export type Database = {
           ad_video_view_rate_p75?: number | null
           advertiser_id?: string
           campaign_id?: string
+          campaign_name?: string | null
+          campaign_operation_status?: string | null
           cost?: number
           country?: string
           created_at?: string

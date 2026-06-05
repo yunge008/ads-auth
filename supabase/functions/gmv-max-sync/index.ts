@@ -100,14 +100,17 @@ export async function ttGet(
   throw new Error(`${path}: max retries exceeded`);
 }
 
-// Step 1: list all GMV Max campaign IDs for an advertiser (PRODUCT_GMV_MAX).
+// Step 1: list all GMV Max campaigns for an advertiser (PRODUCT_GMV_MAX).
+// Returns id + name + operation_status (ENABLE/DISABLE).
+export type CampaignInfo = { id: string; name: string; operation_status: string };
 export async function fetchCampaigns(
   token: string,
   advertiser_id: string,
   _ttGet: typeof ttGet = ttGet,
   _ensureTime?: TimeBudgetChecker,
-): Promise<string[]> {
-  const ids: string[] = [];
+): Promise<CampaignInfo[]> {
+  const out: CampaignInfo[] = [];
+  const seen = new Set<string>();
   let page = 1;
   const page_size = 100;
   const filtering = JSON.stringify({ gmv_max_promotion_types: ["PRODUCT_GMV_MAX"] });
@@ -122,7 +125,15 @@ export async function fetchCampaigns(
     const list = (data.list ?? []) as Array<Record<string, unknown>>;
     for (const c of list) {
       const cid = c.campaign_id ?? c.id;
-      if (cid != null) ids.push(String(cid));
+      if (cid == null) continue;
+      const id = String(cid);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push({
+        id,
+        name: String(c.campaign_name ?? c.name ?? ""),
+        operation_status: String(c.operation_status ?? ""),
+      });
     }
     const pi = (data.page_info ?? {}) as Record<string, unknown>;
     const totalPage = Number(pi.total_page ?? 0);
@@ -132,7 +143,7 @@ export async function fetchCampaigns(
     if (!totalPage && total > 0 && page * page_size >= total) break;
     page++;
   }
-  return Array.from(new Set(ids));
+  return out;
 }
 
 // Generic paged report fetch. filtering MUST be an object (not array).
@@ -156,6 +167,7 @@ export async function fetchReport(
   const page_size = 1000;
   const selectedMetrics = metrics ?? (dimensions.includes("item_id")
     ? [
+        "tt_account_name", "tt_account_authorization_type", "shop_content_type",
         "creative_delivery_status", "cost", "orders", "gross_revenue",
         "product_impressions", "product_clicks", "currency",
         "ad_video_view_rate_2s", "ad_video_view_rate_6s",
@@ -163,6 +175,7 @@ export async function fetchReport(
         "ad_video_view_rate_p75", "ad_video_view_rate_p100",
       ]
     : ["cost", "orders", "gross_revenue"]);
+  let activeMetrics = [...selectedMetrics];
   const filtering = JSON.stringify({ ...extraFilter });
   for (let i = 0; i < 100; i++) {
     _ensureTime?.();
@@ -170,14 +183,29 @@ export async function fetchReport(
       advertiser_id,
       store_ids: JSON.stringify([store_id]),
       dimensions: JSON.stringify(dimensions),
-      metrics: JSON.stringify(selectedMetrics),
+      metrics: JSON.stringify(activeMetrics),
       start_date: start,
       end_date: end,
       page: String(page),
       page_size: String(page_size),
       filtering,
     };
-    const data = await _ttGet(token, "/gmv_max/report/get/", params);
+    let data: Record<string, unknown>;
+    try {
+      data = await _ttGet(token, "/gmv_max/report/get/", params);
+    } catch (err) {
+      const msg = (err as Error).message ?? "";
+      const m = msg.match(/Invalid metric\(s\):\s*'\[([^\]]+)\]'/);
+      if (m) {
+        const bad = m[1].split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+        const next = activeMetrics.filter((x) => !bad.includes(x));
+        if (next.length && next.length < activeMetrics.length) {
+          activeMetrics = next;
+          continue; // retry same page with reduced metrics
+        }
+      }
+      throw err;
+    }
     const list = (data.list ?? []) as RawRow[];
     for (const row of list) {
       const key = JSON.stringify((row.dimensions ?? row) as Record<string, unknown>);
@@ -317,7 +345,7 @@ Deno.serve(async (req) => {
 
     // Phase 1: fetch campaigns for all advertisers first, then sort small → large
     // so big accounts go last and don't starve smaller ones on timeout.
-    const campaignsByAdv = new Map<string, string[]>();
+    const campaignsByAdv = new Map<string, CampaignInfo[]>();
     const phase1Failed = new Set<string>();
     let phase1Stopped = false;
     for (const adv of targets) {
@@ -353,10 +381,12 @@ Deno.serve(async (req) => {
       const tok = tokenByAdv.get(adv)!;
       const shopId = shopByAdv.get(adv)!;
       const campaigns = campaignsByAdv.get(adv) ?? [];
-
+      const campaignIds = campaigns.map((c) => c.id);
+      const campaignMeta = new Map<string, CampaignInfo>();
+      for (const c of campaigns) campaignMeta.set(c.id, c);
 
       const campaignGroups = new Map<string, Set<string>>();
-      const campaignBatches = chunk(campaigns, batchSize);
+      const campaignBatches = chunk(campaignIds, batchSize);
       let groupBatches = 0;
       let creativeCalls = 0;
       let totalRows = 0;
@@ -394,7 +424,7 @@ Deno.serve(async (req) => {
       }
 
       for (const [s, e] of windows) {
-        for (const cid of campaigns) {
+        for (const cid of campaignIds) {
           ensureTime(`advertiser ${adv} creative fetch`);
           const groupIds = Array.from(campaignGroups.get(cid) ?? []);
           if (groupIds.length === 0) continue;
@@ -423,19 +453,24 @@ Deno.serve(async (req) => {
                 const vid = String(dims.item_id ?? "");
                 if (!vid) continue;
                 const numOrNull = (k: string) => mets[k] == null ? null : Number(mets[k]);
+                const strOrNull = (k: string) => mets[k] == null ? null : String(mets[k]);
+                const rowCid = String(dims.campaign_id ?? "");
+                const meta = campaignMeta.get(rowCid);
                 upsertRows.push({
                   country: countryByAdv.get(adv) ?? "",
                   advertiser_id: adv,
-                  campaign_id: String(dims.campaign_id ?? ""),
+                  campaign_id: rowCid,
+                  campaign_name: meta?.name ?? null,
+                  campaign_operation_status: meta?.operation_status ?? null,
                   item_group_id: String(dims.item_group_id ?? ""),
                   vid,
                   item_id: vid,
                   stat_date: String(dims.stat_time_day ?? "").slice(0, 10),
-                  creative_delivery_status: mets.creative_delivery_status == null ? null : String(mets.creative_delivery_status),
-                  currency: mets.currency == null ? null : String(mets.currency),
-                  tt_account_name: null,
-                  tt_account_authorization_type: null,
-                  shop_content_type: null,
+                  creative_delivery_status: strOrNull("creative_delivery_status"),
+                  currency: strOrNull("currency"),
+                  tt_account_name: strOrNull("tt_account_name"),
+                  tt_account_authorization_type: strOrNull("tt_account_authorization_type"),
+                  shop_content_type: strOrNull("shop_content_type"),
                   ad_video_view_rate_2s: numOrNull("ad_video_view_rate_2s"),
                   ad_video_view_rate_6s: numOrNull("ad_video_view_rate_6s"),
                   ad_video_view_rate_p25: numOrNull("ad_video_view_rate_p25"),
