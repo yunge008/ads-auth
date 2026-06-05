@@ -233,33 +233,6 @@ function MaterialPerformancePage() {
         </div>
       </div>
 
-      <Card>
-        <CardHeader className="pb-3 space-y-3">
-          <CardTitle className="text-base">筛选当前结果</CardTitle>
-          <div className="flex flex-wrap items-end gap-2">
-            <MultiSelect label="国家" options={countries} value={fCountry} onChange={setFCountry} />
-            <MultiSelect label="同事" options={staffs} value={fStaff} onChange={setFStaff} />
-            <MultiSelect label="来源" options={sources} value={fSource} onChange={setFSource} />
-            <div className="flex flex-col gap-1">
-              <span className="text-xs text-muted-foreground">VID</span>
-              <Input value={fVid} onChange={(e) => setFVid(e.target.value)} placeholder="可多个，逗号分隔" className="h-8 w-48" />
-            </div>
-            <div className="flex flex-col gap-1">
-              <span className="text-xs text-muted-foreground">商家SKU</span>
-              <Input value={fSku} onChange={(e) => setFSku(e.target.value)} placeholder="可多个" className="h-8 w-40" />
-            </div>
-            <div className="flex flex-col gap-1">
-              <span className="text-xs text-muted-foreground">商品ID</span>
-              <Input value={fPid} onChange={(e) => setFPid(e.target.value)} placeholder="可多个" className="h-8 w-40" />
-            </div>
-            {(fCountry.length || fStaff.length || fSource.length || fVid || fSku || fPid) ? (
-              <Button size="sm" variant="ghost" onClick={() => { setFCountry([]); setFStaff([]); setFSource([]); setFVid(""); setFSku(""); setFPid(""); }}>
-                清空筛选
-              </Button>
-            ) : null}
-          </div>
-        </CardHeader>
-      </Card>
 
       <Card>
         <CardHeader className="pb-3 space-y-2">
