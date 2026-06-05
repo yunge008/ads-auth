@@ -72,9 +72,11 @@ Deno.serve(async (req) => {
       for (const r of data) {
         const row = r ?? [];
         const country = cellText(row[2]);
-        if (!COUNTRY_RE.test(country)) continue;
+        // 允许国家为空；只在有内容但格式非法时跳过
+        if (country && !COUNTRY_RE.test(country)) continue;
         const vid = cellText(row[6]);
         if (!vid || !VID_RE.test(vid)) continue;
+
         rows.push({
           country,
           staff_name: t.name,
