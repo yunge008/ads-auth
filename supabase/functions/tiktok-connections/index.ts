@@ -81,22 +81,49 @@ Deno.serve(async (req) => {
       });
     }
 
-    // default: list connections + country mapping
+    if (body.op === "set_shop") {
+      const aid = (body.advertiser_id ?? "").trim();
+      if (!aid) throw new Error("advertiser_id 必填");
+      const shop_id = (body.shop_id ?? "").trim();
+      const shop_name = (body.shop_name ?? "").trim();
+      // Upsert; if row doesn't exist we need country too — but country is NOT NULL.
+      // Read existing row, otherwise require country to be set first.
+      const { data: existing } = await admin()
+        .from("advertiser_countries")
+        .select("country")
+        .eq("advertiser_id", aid)
+        .maybeSingle();
+      if (!existing) {
+        throw new Error("请先设置该广告户的国家，再设置店铺信息");
+      }
+      const { error } = await admin()
+        .from("advertiser_countries")
+        .update({ shop_id: shop_id || null, shop_name: shop_name || null })
+        .eq("advertiser_id", aid);
+      if (error) throw new Error(error.message);
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // default: list connections + country/shop mapping
     const [{ data: conns, error: e1 }, { data: countries, error: e2 }] = await Promise.all([
       admin()
         .from("tiktok_connections")
         .select("id, label, bc_id, advertiser_ids, expires_at, created_at, updated_at")
         .order("created_at", { ascending: false }),
-      admin().from("advertiser_countries").select("advertiser_id, country"),
+      admin().from("advertiser_countries").select("advertiser_id, country, shop_id, shop_name"),
     ]);
     if (e1) throw new Error(e1.message);
     if (e2) throw new Error(e2.message);
     const countryMap: Record<string, string> = {};
-    for (const r of (countries ?? []) as { advertiser_id: string; country: string }[]) {
+    const shopMap: Record<string, { shop_id: string | null; shop_name: string | null }> = {};
+    for (const r of (countries ?? []) as { advertiser_id: string; country: string; shop_id: string | null; shop_name: string | null }[]) {
       countryMap[r.advertiser_id] = r.country;
+      shopMap[r.advertiser_id] = { shop_id: r.shop_id, shop_name: r.shop_name };
     }
     return new Response(
-      JSON.stringify({ connections: conns ?? [], countries: countryMap }),
+      JSON.stringify({ connections: conns ?? [], countries: countryMap, shops: shopMap }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {
