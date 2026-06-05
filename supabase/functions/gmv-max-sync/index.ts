@@ -398,8 +398,7 @@ Deno.serve(async (req) => {
       const campaignMeta = new Map<string, CampaignInfo>();
       for (const c of campaigns) campaignMeta.set(c.id, c);
 
-      const campaignGroups = new Map<string, Set<string>>();
-      const campaignBatches = chunk(campaignIds, batchSize);
+      const groupCache = new Map<string, Set<string>>();
       let groupBatches = 0;
       let creativeCalls = 0;
       let totalRows = 0;
@@ -407,38 +406,40 @@ Deno.serve(async (req) => {
       let saturated = false;
 
       const groupStart = addDays(end_date, -364);
-      for (const batch of campaignBatches) {
-        ensureTime(`advertiser ${adv} group discovery`);
-        groupBatches++;
-        try {
-          const groups = await fetchReport(
-            tok, adv, shopId, groupStart, end_date,
-            ["campaign_id", "item_group_id"],
-            { campaign_ids: batch },
-            undefined,
-            ttGet,
-            () => ensureTime(`advertiser ${adv} group pages`),
-          );
-          for (const r of groups) {
-            const dims = (r.dimensions ?? {}) as Record<string, unknown>;
-            const cid = String(dims.campaign_id ?? "");
-            const gid = String(dims.item_group_id ?? "");
-            if (!cid || !gid) continue;
-            if (!campaignGroups.has(cid)) campaignGroups.set(cid, new Set<string>());
-            campaignGroups.get(cid)!.add(gid);
-          }
-        } catch (err) {
-          if (err instanceof TimeBudgetExceeded) throw err;
-          errors.push({
-            advertiser_id: adv,
-            error: `group batch[${batch[0]}...x${batch.length}]: ${(err as Error).message}`,
-          });
-        }
-      }
-
-      // Campaign-centric creative fetch so we can resume per-campaign on timeout.
+      // Campaign-centric group discovery + creative fetch so timeout resume can
+      // advance by completed campaign instead of repeating the whole country.
       for (const cid of campaignIds) {
-        const groupIds = Array.from(campaignGroups.get(cid) ?? []);
+        let groupIds = Array.from(groupCache.get(cid) ?? []);
+        if (!groupCache.has(cid)) {
+          ensureTime(`advertiser ${adv} group discovery`);
+          groupBatches++;
+          try {
+            const groups = await fetchReport(
+              tok, adv, shopId, groupStart, end_date,
+              ["campaign_id", "item_group_id"],
+              { campaign_ids: [cid] },
+              undefined,
+              ttGet,
+              () => ensureTime(`advertiser ${adv} group pages`),
+            );
+            const set = new Set<string>();
+            for (const r of groups) {
+              const dims = (r.dimensions ?? {}) as Record<string, unknown>;
+              const gid = String(dims.item_group_id ?? "");
+              if (gid) set.add(gid);
+            }
+            groupCache.set(cid, set);
+            groupIds = Array.from(set);
+          } catch (err) {
+            if (err instanceof TimeBudgetExceeded) throw err;
+            errors.push({
+              advertiser_id: adv,
+              error: `group campaign[${cid}]: ${(err as Error).message}`,
+            });
+            processedCampaigns.add(cid);
+            continue;
+          }
+        }
         if (groupIds.length === 0) {
           processedCampaigns.add(cid);
           continue;
