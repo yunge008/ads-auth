@@ -42,8 +42,8 @@ function CommentsPage() {
   const [fAdv, setFAdv] = React.useState<string[]>([]);
   const [page, setPage] = React.useState(1);
   const today = new Date().toISOString().slice(0, 10);
-  const ago30 = new Date(Date.now() - 30 * 86400 * 1000).toISOString().slice(0, 10);
-  const [startDate, setStartDate] = React.useState(ago30);
+  const ago90 = new Date(Date.now() - 90 * 86400 * 1000).toISOString().slice(0, 10);
+  const [startDate, setStartDate] = React.useState(ago90);
   const [endDate, setEndDate] = React.useState(today);
   const PAGE_SIZE = 50;
 

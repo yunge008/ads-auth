@@ -42,6 +42,9 @@ async function fetchPage(
   url.searchParams.set("page_size", String(page_size));
   url.searchParams.set("start_time", start_time);
   url.searchParams.set("end_time", end_time);
+  url.searchParams.set("search_field", "COMMENT_TIME");
+  url.searchParams.set("sort_field", "COMMENT_TIME");
+  url.searchParams.set("sort_type", "DESC");
   const res = await fetch(url, { headers: { "Access-Token": token } });
   const j = await res.json().catch(() => ({}));
   return j;

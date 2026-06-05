@@ -13,15 +13,11 @@ import { accountStore, type CurrentAccount } from "@/lib/account";
 import { toast } from "sonner";
 
 export function PasscodeGate({ children }: { children: ReactNode }) {
+  const [mounted, setMounted] = useState(false);
   const [unlocked, setUnlocked] = useState(false);
   const [name, setName] = useState("");
   const [val, setVal] = useState("");
-  // Only show the "checking" screen when we actually have a stored passcode
-  // to validate. Without it (e.g. after logout), go straight to login.
-  const [checking, setChecking] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return !!window.localStorage.getItem("tt_admin_passcode");
-  });
+  const [checking, setChecking] = useState(false);
 
   const login = async () => {
     const { account } = await invokeFn<{ account: CurrentAccount }>(
@@ -33,23 +29,23 @@ export function PasscodeGate({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    setMounted(true);
     let cancelled = false;
     const code = getPasscode();
-    if (!code) {
-      setChecking(false);
-      return;
+    if (code) {
+      setChecking(true);
+      login()
+        .catch(() => {
+          if (!cancelled) {
+            setPasscode("");
+            setAdminName("");
+            accountStore.set(null);
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setChecking(false);
+        });
     }
-    login()
-      .catch(() => {
-        if (!cancelled) {
-          setPasscode("");
-          setAdminName("");
-          accountStore.set(null);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setChecking(false);
-      });
 
     const onInvalid = () => {
       setUnlocked(false);
@@ -84,10 +80,10 @@ export function PasscodeGate({ children }: { children: ReactNode }) {
     }
   };
 
-  if (checking) {
+  if (!mounted || checking) {
     return (
       <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
-        正在校验访问权限…
+        {checking ? "正在校验访问权限…" : ""}
       </div>
     );
   }
