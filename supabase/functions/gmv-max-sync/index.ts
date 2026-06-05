@@ -95,10 +95,12 @@ export async function fetchReport(
   const out: RawRow[] = [];
   let page = 1;
   const page_size = 200;
-  const filtering = JSON.stringify({
-    gmv_max_promotion_types: ["PRODUCT"],
-    ...extraFilter,
-  });
+  // Creative-level (item_id) dimension does NOT support gmv_max_promotion_types filter.
+  const filterObj: Record<string, unknown> = { ...extraFilter };
+  if (!dimensions.includes("item_id")) {
+    filterObj.gmv_max_promotion_types = ["PRODUCT"];
+  }
+  const filtering = JSON.stringify(filterObj);
   for (let i = 0; i < 50; i++) {
     const params: Record<string, string> = {
       advertiser_id,
