@@ -264,18 +264,24 @@ function GmvMaxSection() {
               <Input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className="h-8 w-40" />
             </div>
             <DateRangeQuickSelect onPick={(s, e) => { setStart(s); setEnd(e); }} />
-            <Button size="sm" disabled={!!busy} onClick={() => run("GMV Max 回溯", start, end)}>
-              <Database className={`h-4 w-4 mr-1.5 ${busy === "GMV Max 回溯" ? "animate-spin" : ""}`} />
-              开始回溯
-            </Button>
-            <Button size="sm" variant="outline" disabled={!!busy} onClick={() => {
-              const e2 = today;
-              const s2 = new Date(Date.now() - 3 * 86400 * 1000).toISOString().slice(0, 10);
-              run("拉取最近3天", s2, e2);
-            }}>
-              <RotateCw className={`h-4 w-4 mr-1.5 ${busy === "拉取最近3天" ? "animate-spin" : ""}`} />
-              最近3天
-            </Button>
+            {busy ? (
+              <Button size="sm" variant="destructive" onClick={stopRun}>
+                <StopCircle className="h-4 w-4 mr-1.5" />停止
+              </Button>
+            ) : (
+              <>
+                <Button size="sm" onClick={() => run("GMV Max 回溯", start, end)}>
+                  <Database className="h-4 w-4 mr-1.5" />开始回溯
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => {
+                  const e2 = today;
+                  const s2 = new Date(Date.now() - 3 * 86400 * 1000).toISOString().slice(0, 10);
+                  run("拉取最近3天", s2, e2);
+                }}>
+                  <RotateCw className="h-4 w-4 mr-1.5" />最近3天
+                </Button>
+              </>
+            )}
           </div>
           {progress && (
             <div className="mt-3 text-xs text-muted-foreground">
@@ -308,6 +314,7 @@ function GmvMaxSection() {
                         {r.status === "success" && <span className="inline-flex items-center gap-1 text-xs text-foreground"><CheckCircle2 className="h-3.5 w-3.5" />成功</span>}
                         {r.status === "failed" && <span className="inline-flex items-center gap-1 text-xs text-destructive"><XCircle className="h-3.5 w-3.5" />失败</span>}
                         {r.status === "skipped" && <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Clock className="h-3.5 w-3.5" />跳过</span>}
+                        {r.status === "stopped" && <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><StopCircle className="h-3.5 w-3.5" />已停止</span>}
                         {r.status === "pending" && <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Clock className="h-3.5 w-3.5" />排队</span>}
                         {r.status === "running" && <span className="inline-flex items-center gap-1 text-xs text-primary"><Loader2 className="h-3.5 w-3.5 animate-spin" />抓取中</span>}
                       </TableCell>
