@@ -84,6 +84,7 @@ export type Database = {
           created_at: string
           creative_delivery_status: string | null
           ctr: number | null
+          currency: string | null
           cvr: number | null
           gross_revenue: number
           id: string
@@ -92,7 +93,6 @@ export type Database = {
           product_clicks: number
           product_impressions: number
           pulled_at: string
-          raw_payload: Json | null
           roi: number | null
           stat_date: string
           updated_at: string
@@ -107,6 +107,7 @@ export type Database = {
           created_at?: string
           creative_delivery_status?: string | null
           ctr?: number | null
+          currency?: string | null
           cvr?: number | null
           gross_revenue?: number
           id?: string
@@ -115,7 +116,6 @@ export type Database = {
           product_clicks?: number
           product_impressions?: number
           pulled_at?: string
-          raw_payload?: Json | null
           roi?: number | null
           stat_date: string
           updated_at?: string
@@ -130,6 +130,7 @@ export type Database = {
           created_at?: string
           creative_delivery_status?: string | null
           ctr?: number | null
+          currency?: string | null
           cvr?: number | null
           gross_revenue?: number
           id?: string
@@ -138,7 +139,6 @@ export type Database = {
           product_clicks?: number
           product_impressions?: number
           pulled_at?: string
-          raw_payload?: Json | null
           roi?: number | null
           stat_date?: string
           updated_at?: string
