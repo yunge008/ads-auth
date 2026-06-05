@@ -153,40 +153,82 @@ Deno.serve(async (req) => {
     for (const adv of targets) {
       const tok = tokenByAdv.get(adv)!;
       const shopId = shopByAdv.get(adv)!;
+
+      // Step 1: pull all campaign IDs for this advertiser
+      let campaigns: string[] = [];
+      try {
+        campaigns = await fetchCampaigns(tok, adv);
+      } catch (err) {
+        errors.push({ advertiser_id: adv, error: `campaign/get: ${(err as Error).message}` });
+        continue;
+      }
+      if (campaigns.length === 0) continue;
+
       for (const [s, e] of windows) {
-        try {
-          const list = await fetchReport(tok, adv, shopId, s, e);
-          for (const r of list) {
-            const dims = (r.dimensions ?? {}) as Record<string, unknown>;
-            const mets = (r.metrics ?? {}) as Record<string, unknown>;
-            const cost = Number(mets.cost ?? 0) || 0;
-            const rev = Number(mets.gross_revenue ?? 0) || 0;
-            const orders = Number(mets.orders ?? 0) || 0;
-            const imps = Number(mets.product_impressions ?? 0) || 0;
-            const clks = Number(mets.product_clicks ?? 0) || 0;
-            upsertRows.push({
-              country: countryByAdv.get(adv) ?? "",
-              advertiser_id: adv,
-              campaign_id: String(dims.campaign_id ?? ""),
-              item_group_id: String(dims.item_group_id ?? ""),
-              vid: String(dims.item_id ?? ""),
-              stat_date: String(dims.stat_time_day ?? "").slice(0, 10),
-              creative_delivery_status: (mets.creative_delivery_status as string) ?? null,
-              cost,
-              gross_revenue: rev,
-              orders,
-              product_impressions: imps,
-              product_clicks: clks,
-              roi: safeDiv(rev, cost),
-              ctr: safeDiv(clks, imps),
-              cvr: safeDiv(orders, clks),
-              cpm: safeDiv(cost, imps) === null ? null : (cost / imps) * 1000,
-              raw_payload: r,
-              pulled_at: nowIso,
-            });
+        // Step 2: per campaign, pull item_group_ids via report (item group level)
+        const groupsByCampaign = new Map<string, Set<string>>();
+        for (const cid of campaigns) {
+          try {
+            const list = await fetchReport(tok, adv, shopId, s, e,
+              ["campaign_id", "item_group_id", "stat_time_day"],
+              [{ field_name: "campaign_ids", filter_type: "IN", filter_value: JSON.stringify([cid]) }],
+            );
+            const set = groupsByCampaign.get(cid) ?? new Set<string>();
+            for (const r of list) {
+              const dims = (r.dimensions ?? {}) as Record<string, unknown>;
+              const igid = String(dims.item_group_id ?? "");
+              if (igid) set.add(igid);
+            }
+            groupsByCampaign.set(cid, set);
+          } catch (err) {
+            errors.push({ advertiser_id: adv, window: `${s}~${e}`, error: `group ${cid}: ${(err as Error).message}` });
           }
-        } catch (err) {
-          errors.push({ advertiser_id: adv, window: `${s}~${e}`, error: (err as Error).message });
+        }
+
+        // Step 3: per (campaign, item_group) pull creative-level VIDs
+        for (const [cid, gset] of groupsByCampaign) {
+          for (const igid of gset) {
+            try {
+              const list = await fetchReport(tok, adv, shopId, s, e,
+                ["campaign_id", "item_group_id", "item_id", "stat_time_day"],
+                [
+                  { field_name: "campaign_ids", filter_type: "IN", filter_value: JSON.stringify([cid]) },
+                  { field_name: "item_group_ids", filter_type: "IN", filter_value: JSON.stringify([igid]) },
+                ],
+              );
+              for (const r of list) {
+                const dims = (r.dimensions ?? {}) as Record<string, unknown>;
+                const mets = (r.metrics ?? {}) as Record<string, unknown>;
+                const cost = Number(mets.cost ?? 0) || 0;
+                const rev = Number(mets.gross_revenue ?? 0) || 0;
+                const orders = Number(mets.orders ?? 0) || 0;
+                const imps = Number(mets.product_impressions ?? 0) || 0;
+                const clks = Number(mets.product_clicks ?? 0) || 0;
+                upsertRows.push({
+                  country: countryByAdv.get(adv) ?? "",
+                  advertiser_id: adv,
+                  campaign_id: String(dims.campaign_id ?? cid),
+                  item_group_id: String(dims.item_group_id ?? igid),
+                  vid: String(dims.item_id ?? ""),
+                  stat_date: String(dims.stat_time_day ?? "").slice(0, 10),
+                  creative_delivery_status: (mets.creative_delivery_status as string) ?? null,
+                  cost,
+                  gross_revenue: rev,
+                  orders,
+                  product_impressions: imps,
+                  product_clicks: clks,
+                  roi: safeDiv(rev, cost),
+                  ctr: safeDiv(clks, imps),
+                  cvr: safeDiv(orders, clks),
+                  cpm: safeDiv(cost, imps) === null ? null : (cost / imps) * 1000,
+                  raw_payload: r,
+                  pulled_at: nowIso,
+                });
+              }
+            } catch (err) {
+              errors.push({ advertiser_id: adv, window: `${s}~${e}`, error: `creative ${cid}/${igid}: ${(err as Error).message}` });
+            }
+          }
         }
       }
     }
