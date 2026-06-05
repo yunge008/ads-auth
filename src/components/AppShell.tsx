@@ -12,7 +12,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { location } = useRouterState();
   const navigate = useNavigate();
   const account = useCurrentAccount();
-  const [syncing, setSyncing] = useState(false);
 
   const visibleTabs = useMemo(
     () =>
