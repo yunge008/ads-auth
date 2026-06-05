@@ -170,6 +170,48 @@ export type Database = {
         }
         Relationships: []
       }
+      gmv_max_vid_meta: {
+        Row: {
+          advertiser_id: string | null
+          campaign_id: string | null
+          created_at: string
+          item_group_id: string | null
+          pulled_at: string
+          shop_content_type: string | null
+          title: string | null
+          tt_account_authorization_type: string | null
+          tt_account_name: string | null
+          updated_at: string
+          vid: string
+        }
+        Insert: {
+          advertiser_id?: string | null
+          campaign_id?: string | null
+          created_at?: string
+          item_group_id?: string | null
+          pulled_at?: string
+          shop_content_type?: string | null
+          title?: string | null
+          tt_account_authorization_type?: string | null
+          tt_account_name?: string | null
+          updated_at?: string
+          vid: string
+        }
+        Update: {
+          advertiser_id?: string | null
+          campaign_id?: string | null
+          created_at?: string
+          item_group_id?: string | null
+          pulled_at?: string
+          shop_content_type?: string | null
+          title?: string | null
+          tt_account_authorization_type?: string | null
+          tt_account_name?: string | null
+          updated_at?: string
+          vid?: string
+        }
+        Relationships: []
+      }
       sku_product_map: {
         Row: {
           country: string
