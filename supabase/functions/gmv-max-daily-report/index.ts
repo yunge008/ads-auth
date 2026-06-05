@@ -53,13 +53,15 @@ Deno.serve(async (req) => {
     if (error) throw new Error(error.message);
     const rows = (data ?? []) as RawRow[];
 
-    // Aggregate by country+advertiser+date
+    // Aggregate by country+advertiser+date with DISTINCT VID counts.
+    // row_count = distinct VID for that day/advertiser/country
+    // status_counts[X] = distinct VID whose creative_delivery_status = X
     const groups = new Map<string, {
       country: string | null;
       advertiser_id: string;
       stat_date: string;
-      row_count: number;
-      status_counts: Record<StatusKey, number>;
+      vids: Set<string>;
+      vidsByStatus: Map<StatusKey, Set<string>>;
     }>();
     for (const r of rows) {
       const key = `${r.country ?? ""}|${r.advertiser_id}|${r.stat_date}`;
@@ -69,15 +71,17 @@ Deno.serve(async (req) => {
           country: r.country,
           advertiser_id: r.advertiser_id,
           stat_date: r.stat_date,
-          row_count: 0,
-          status_counts: Object.fromEntries(STATUS_KEYS.map((k) => [k, 0])) as Record<StatusKey, number>,
+          vids: new Set<string>(),
+          vidsByStatus: new Map(STATUS_KEYS.map((k) => [k, new Set<string>()])),
         };
         groups.set(key, g);
       }
-      g.row_count += 1;
+      const vid = (r.vid ?? "").trim();
+      if (!vid) continue;
+      g.vids.add(vid);
       const s = (r.creative_delivery_status ?? "").trim();
       if (s && (STATUS_KEYS as readonly string[]).includes(s)) {
-        g.status_counts[s as StatusKey] += 1;
+        g.vidsByStatus.get(s as StatusKey)!.add(vid);
       }
     }
 
