@@ -9,7 +9,6 @@ import {
 import { RefreshCw, Languages, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { invokeFn } from "@/lib/api";
-import { supabase } from "@/integrations/supabase/client";
 import { MultiSelect } from "@/components/MultiSelect";
 import { DateRangeQuickSelect } from "@/components/DateRangeQuickSelect";
 
@@ -51,13 +50,8 @@ function CommentsPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("tiktok_comments" as never)
-        .select("comment_id, advertiser_id, country, vid, text, text_zh, like_count, reply_count, username, avatar_url, comment_type, parent_comment_id, comment_create_time")
-        .order("comment_create_time", { ascending: false })
-        .limit(2000);
-      if (error) throw error;
-      setRows((data ?? []) as Row[]);
+      const data = await invokeFn<{ rows: Row[] }>("data-preview", { table: "tiktok_comments", page_size: 2000 });
+      setRows(data.rows ?? []);
     } catch (e) {
       toast.error(`加载失败：${(e as Error).message}`);
     } finally { setLoading(false); }

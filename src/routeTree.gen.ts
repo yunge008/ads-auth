@@ -11,7 +11,9 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as MaterialPerformanceRouteImport } from './routes/material-performance'
+import { Route as FeishuDataRouteImport } from './routes/feishu-data'
 import { Route as CommentsRouteImport } from './routes/comments'
+import { Route as ApiTestRouteImport } from './routes/api-test'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as OauthTiktokCallbackRouteImport } from './routes/oauth.tiktok.callback'
 
@@ -25,9 +27,19 @@ const MaterialPerformanceRoute = MaterialPerformanceRouteImport.update({
   path: '/material-performance',
   getParentRoute: () => rootRouteImport,
 } as any)
+const FeishuDataRoute = FeishuDataRouteImport.update({
+  id: '/feishu-data',
+  path: '/feishu-data',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CommentsRoute = CommentsRouteImport.update({
   id: '/comments',
   path: '/comments',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTestRoute = ApiTestRouteImport.update({
+  id: '/api-test',
+  path: '/api-test',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -43,14 +55,18 @@ const OauthTiktokCallbackRoute = OauthTiktokCallbackRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/api-test': typeof ApiTestRoute
   '/comments': typeof CommentsRoute
+  '/feishu-data': typeof FeishuDataRoute
   '/material-performance': typeof MaterialPerformanceRoute
   '/settings': typeof SettingsRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/api-test': typeof ApiTestRoute
   '/comments': typeof CommentsRoute
+  '/feishu-data': typeof FeishuDataRoute
   '/material-performance': typeof MaterialPerformanceRoute
   '/settings': typeof SettingsRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
@@ -58,7 +74,9 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/api-test': typeof ApiTestRoute
   '/comments': typeof CommentsRoute
+  '/feishu-data': typeof FeishuDataRoute
   '/material-performance': typeof MaterialPerformanceRoute
   '/settings': typeof SettingsRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
@@ -67,21 +85,27 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/api-test'
     | '/comments'
+    | '/feishu-data'
     | '/material-performance'
     | '/settings'
     | '/oauth/tiktok/callback'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/api-test'
     | '/comments'
+    | '/feishu-data'
     | '/material-performance'
     | '/settings'
     | '/oauth/tiktok/callback'
   id:
     | '__root__'
     | '/'
+    | '/api-test'
     | '/comments'
+    | '/feishu-data'
     | '/material-performance'
     | '/settings'
     | '/oauth/tiktok/callback'
@@ -89,7 +113,9 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ApiTestRoute: typeof ApiTestRoute
   CommentsRoute: typeof CommentsRoute
+  FeishuDataRoute: typeof FeishuDataRoute
   MaterialPerformanceRoute: typeof MaterialPerformanceRoute
   SettingsRoute: typeof SettingsRoute
   OauthTiktokCallbackRoute: typeof OauthTiktokCallbackRoute
@@ -111,11 +137,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MaterialPerformanceRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/feishu-data': {
+      id: '/feishu-data'
+      path: '/feishu-data'
+      fullPath: '/feishu-data'
+      preLoaderRoute: typeof FeishuDataRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/comments': {
       id: '/comments'
       path: '/comments'
       fullPath: '/comments'
       preLoaderRoute: typeof CommentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api-test': {
+      id: '/api-test'
+      path: '/api-test'
+      fullPath: '/api-test'
+      preLoaderRoute: typeof ApiTestRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -137,7 +177,9 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ApiTestRoute: ApiTestRoute,
   CommentsRoute: CommentsRoute,
+  FeishuDataRoute: FeishuDataRoute,
   MaterialPerformanceRoute: MaterialPerformanceRoute,
   SettingsRoute: SettingsRoute,
   OauthTiktokCallbackRoute: OauthTiktokCallbackRoute,

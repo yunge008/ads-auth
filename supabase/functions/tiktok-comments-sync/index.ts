@@ -110,6 +110,7 @@ Deno.serve(async (req) => {
       start_date,
       end_date,
       incremental = true,
+      debug = false,
     } = (await req.json().catch(() => ({}))) as {
       advertiser_ids?: string[];
       max_pages?: number;
@@ -117,6 +118,7 @@ Deno.serve(async (req) => {
       start_date?: string;
       end_date?: string;
       incremental?: boolean;
+      debug?: boolean;
     };
 
     const endDate = end_date ?? fmtDate(new Date());
@@ -152,6 +154,12 @@ Deno.serve(async (req) => {
     const targets = (filterIds && filterIds.length ? filterIds : [...tokenByAdv.keys()]).filter(
       (id) => tokenByAdv.has(id),
     );
+    const { data: existingCommentRows } = targets.length
+      ? await db.from("tiktok_comments").select("advertiser_id").in("advertiser_id", targets)
+      : { data: [] };
+    const hasStoredComments = new Set(
+      ((existingCommentRows ?? []) as { advertiser_id: string }[]).map((r) => r.advertiser_id),
+    );
 
     const errors: { advertiser_id: string; error: string }[] = [];
     const nowIso = new Date().toISOString();
@@ -161,20 +169,46 @@ Deno.serve(async (req) => {
       const token = tokenByAdv.get(advId)!;
       // Incremental: bump window start if we already synced past it
       let advStart = reqStartDate;
-      if (incremental) {
+      if (incremental && hasStoredComments.has(advId)) {
         const last = lastByAdv.get(advId);
-        if (last && daysBetween(last, advStart) < 0) advStart = last;
+        const nextAfterLast = last ? addDays(last, 1) : "";
+        if (nextAfterLast && daysBetween(nextAfterLast, advStart) < 0) advStart = nextAfterLast;
       }
       const windows = splitWindows(advStart, endDate, 30);
 
       const advRows: CommentRow[] = [];
+      let advHadError = false;
       try {
         const adgroups = await fetchAdgroups(token, advId);
+        if (debug) {
+          const firstAdgroup = adgroups[0] ?? null;
+          const [ws, we] = windows[0] ?? [advStart, endDate];
+          const sample = firstAdgroup ? await fetchPage(token, advId, firstAdgroup, 1, ws, we) : null;
+          return new Response(
+            JSON.stringify({
+              debug: true,
+              advertiser_id: advId,
+              country: countryByAdv.get(advId) ?? null,
+              requested_start_date: reqStartDate,
+              effective_start_date: advStart,
+              end_date: endDate,
+              incremental,
+              has_stored_comments: hasStoredComments.has(advId),
+              stored_last_synced_until: lastByAdv.get(advId) ?? null,
+              windows,
+              adgroup_count: adgroups.length,
+              sample_adgroup_id: firstAdgroup,
+              sample_response: sample,
+            }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
         for (const agId of adgroups) {
           for (const [ws, we] of windows) {
             for (let page = 1; page <= max_pages; page++) {
               const j = await fetchPage(token, advId, agId, page, ws, we);
               if (j.code !== 0) {
+                advHadError = true;
                 errors.push({
                   advertiser_id: advId,
                   error: `adgroup ${agId} ${ws}~${we}: ${j.message ?? `code=${j.code}`}`,
@@ -219,6 +253,7 @@ Deno.serve(async (req) => {
           await sleep(120);
         }
       } catch (e) {
+        advHadError = true;
         errors.push({ advertiser_id: advId, error: (e as Error).message });
       }
 
@@ -233,11 +268,14 @@ Deno.serve(async (req) => {
           totalUpserted += batch.length;
         }
       }
-      // Update sync state to endDate (use end-of-day)
-      await db.from("tiktok_comment_sync_state").upsert(
-        { advertiser_id: advId, last_synced_until: `${endDate}T23:59:59Z`, last_run_at: nowIso },
-        { onConflict: "advertiser_id" },
-      );
+      // Only advance sync cursor when this advertiser had no API errors and produced rows,
+      // otherwise a failed/empty first run can incorrectly skip the historical backfill.
+      if (!advHadError && advRows.length > 0) {
+        await db.from("tiktok_comment_sync_state").upsert(
+          { advertiser_id: advId, last_synced_until: `${endDate}T23:59:59Z`, last_run_at: nowIso },
+          { onConflict: "advertiser_id" },
+        );
+      }
 
       await sleep(300);
     }
