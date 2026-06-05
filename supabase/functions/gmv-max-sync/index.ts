@@ -175,7 +175,9 @@ Deno.serve(async (req) => {
       advertiser_ids?: string[];
       mode?: "backfill" | "incremental" | "custom";
       batch_size?: number;
+      concurrency?: number;
     };
+    const concurrency = Math.max(1, Math.min(16, Number(body.concurrency ?? 6)));
     const mode = body.mode ?? "custom";
     const today = new Date().toISOString().slice(0, 10);
     let start_date = body.start_date ?? "";
