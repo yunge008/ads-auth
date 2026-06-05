@@ -40,6 +40,8 @@ type Row = {
   roi: number | null;
   ctr: number | null;
   cvr: number | null;
+  cpm: number | null;
+  cpa: number | null;
 };
 type SeriesPoint = {
   stat_date: string;
@@ -51,6 +53,8 @@ type SeriesPoint = {
   roi: number | null;
   ctr: number | null;
   cvr: number | null;
+  cpm: number | null;
+  cpa: number | null;
 };
 
 const METRICS = [
