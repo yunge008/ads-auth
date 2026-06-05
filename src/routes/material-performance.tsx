@@ -27,6 +27,8 @@ type Row = {
   source_type: string;
   vid: string;
   item_group_id: string;
+  advertiser_id: string;
+  advertiser_name: string;
   registered_sku: string;
   merchant_sku: string;
   product_id: string;
