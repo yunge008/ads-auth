@@ -64,6 +64,7 @@ Deno.serve(async (req) => {
       vid: string;
       source_type: "EDITOR";
       source_sheet: string;
+      registered_sku: string | null;
     }> = [];
     const missing: string[] = [];
 
@@ -76,25 +77,33 @@ Deno.serve(async (req) => {
       const data = await readRange(token, spreadsheetToken, `${sid}!A2:H`);
       for (const r of data) {
         const row = r ?? [];
-        const staff = cellText(row[1]) || t.name;
-        const country = cellText(row[3]);
+        const staff = cellText(row[1]);
+        // Only rows where B 列同事 = 表对应同事姓名
+        if (!staff || staff !== t.name) continue;
         const vid = cellText(row[6]);
         if (!vid || !VID_RE.test(vid)) continue;
+        const country = cellText(row[3]);
         rows.push({
           country,
           staff_name: staff,
           vid,
           source_type: "EDITOR",
           source_sheet: t.sheet_name,
+          registered_sku: cellText(row[5]) || null,
         });
       }
     }
 
+    // Dedupe by unique key (country, staff_name, vid, source_type) — last wins
+    const dedup = new Map<string, (typeof rows)[number]>();
+    for (const r of rows) dedup.set(`${r.country}|${r.staff_name}|${r.vid}|${r.source_type}`, r);
+    const finalRows = Array.from(dedup.values());
+
     let upserted = 0;
-    if (rows.length) {
+    if (finalRows.length) {
       const CHUNK = 500;
-      for (let i = 0; i < rows.length; i += CHUNK) {
-        const batch = rows.slice(i, i + CHUNK);
+      for (let i = 0; i < finalRows.length; i += CHUNK) {
+        const batch = finalRows.slice(i, i + CHUNK);
         const { error } = await db
           .from("staff_vid_map")
           .upsert(batch, { onConflict: "country,staff_name,vid,source_type" });
@@ -102,6 +111,7 @@ Deno.serve(async (req) => {
         upserted += batch.length;
       }
     }
+
 
     return new Response(
       JSON.stringify({ upserted, missing_sheets: missing }),
