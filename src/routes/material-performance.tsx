@@ -242,7 +242,7 @@ function MaterialPerformancePage() {
           <Button size="sm" variant="outline" disabled={!!busy} onClick={() => {
             const end = today;
             const start = new Date(Date.now() - 3 * 86400 * 1000).toISOString().slice(0, 10);
-            doSync("gmv-max-sync", { start_date: start, end_date: end }, "拉取最近3天");
+            syncLoop("拉取最近3天", start, end);
           }}>
             <Database className={`h-4 w-4 mr-1.5 ${busy === "拉取最近3天" ? "animate-spin" : ""}`} />拉取最近3天
           </Button>
