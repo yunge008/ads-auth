@@ -203,10 +203,10 @@ function GmvMaxSection() {
               start_date: s,
               end_date: e,
               advertiser_ids: [adv.advertiser_id],
-              max_runtime_ms: 60000,
+              max_runtime_ms: 110000,
             };
             if (campaignQueue?.length) reqBody.campaign_ids = campaignQueue;
-            const resp = await invokeFn<SyncResp>("gmv-max-sync", reqBody, { signal: controller.signal, timeout: 70000 });
+            const resp = await invokeFn<SyncResp>("gmv-max-sync", reqBody, { signal: controller.signal, timeout: 120000 });
             if (abortRef.current === controller) abortRef.current = null;
             mergeNames(resp.advertiser_names);
             upserted += resp.upserted ?? 0;
