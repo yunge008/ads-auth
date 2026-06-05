@@ -409,16 +409,18 @@ function GmvDailyReport({ advertisers, reportRef }: { advertisers: AdvertiserRow
   }, [advertisers]);
 
   const reload = React.useCallback(async () => {
+    const s = (start || ago7).trim();
+    const e = (end || today).trim();
     setLoading(true);
     try {
       const r = await invokeFn<{ rows: DailyReportRow[]; count: number }>("gmv-max-daily-report", {
-        start_date: start, end_date: end, country: country || undefined, vid: vid || undefined, page, page_size: 100,
+        start_date: s, end_date: e, country: country || undefined, vid: vid || undefined, page, page_size: 100,
       });
       setRows(r.rows ?? []);
       setCount(r.count ?? 0);
     } catch (e) { toast.error(`加载失败：${(e as Error).message}`); }
     finally { setLoading(false); }
-  }, [start, end, country, vid, page]);
+  }, [start, end, country, vid, page, ago7, today]);
 
   React.useEffect(() => { reload(); }, [reload]);
   React.useEffect(() => { reportRef.current.reload = reload; }, [reload, reportRef]);
