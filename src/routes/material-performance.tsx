@@ -337,9 +337,9 @@ function MaterialPerformancePage() {
               </TableBody>
             </Table>
           </div>
-          {rows.length > PAGE_SIZE && (
+          {filteredRows.length > PAGE_SIZE && (
             <div className="flex items-center justify-between mt-3 text-xs text-muted-foreground">
-              <div>第 {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, rows.length)} / 共 {rows.length} 行</div>
+              <div>第 {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, filteredRows.length)} / 共 {filteredRows.length} 行</div>
               <div className="flex items-center gap-2">
                 <Button size="sm" variant="outline" className="h-7" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}><ChevronLeft className="h-3.5 w-3.5" /></Button>
                 <span>{page} / {pageCount}</span>
