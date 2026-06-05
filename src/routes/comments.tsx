@@ -103,7 +103,15 @@ function CommentsPage() {
           <h2 className="text-xl font-semibold tracking-tight">评论内容</h2>
           <p className="text-sm text-muted-foreground mt-1">同步广告户评论并翻译成中文</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-end gap-2">
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-muted-foreground">起始</span>
+            <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-8 w-36" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-muted-foreground">结束</span>
+            <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-8 w-36" />
+          </div>
           <Button onClick={handleSync} disabled={!!busy}>
             <RefreshCw className={`h-4 w-4 mr-1.5 ${busy === "sync" ? "animate-spin" : ""}`} />
             同步评论
