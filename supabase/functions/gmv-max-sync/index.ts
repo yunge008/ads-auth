@@ -198,7 +198,7 @@ Deno.serve(async (req) => {
       max_runtime_ms?: number;
     };
     const startedAt = Date.now();
-    const maxRuntimeMs = Math.max(30000, Math.min(140000, Number(body.max_runtime_ms ?? 135000)));
+    const maxRuntimeMs = Math.max(30000, Math.min(120000, Number(body.max_runtime_ms ?? 110000)));
     const ensureTime = (stage: string) => {
       if (Date.now() - startedAt > maxRuntimeMs) throw new TimeBudgetExceeded(stage);
     };
@@ -257,7 +257,7 @@ Deno.serve(async (req) => {
     }[] = [];
 
     const processedAdvertisers: string[] = [];
-    const stoppedBeforeTimeout: { reason: string; remaining_advertiser_ids: string[] } | null = null;
+    let stoppedBeforeTimeout: { reason: string; remaining_advertiser_ids: string[] } | null = null;
 
     const runAdvertiser = async (adv: string): Promise<void> => {
       ensureTime(`advertiser ${adv} start`);
@@ -375,17 +375,22 @@ Deno.serve(async (req) => {
       });
     };
 
-    // Concurrency pool: process up to `concurrency` advertisers in parallel.
-    // TikTok rate limits are per advertiser_id, so cross-account parallelism is safe.
-    let cursor = 0;
-    const workers = Array.from({ length: Math.min(concurrency, targets.length) }, async () => {
-      while (true) {
-        const i = cursor++;
-        if (i >= targets.length) return;
-        await runAdvertiser(targets[i]);
+    for (let i = 0; i < targets.length; i++) {
+      const adv = targets[i];
+      try {
+        await runAdvertiser(adv);
+        processedAdvertisers.push(adv);
+      } catch (err) {
+        if (err instanceof TimeBudgetExceeded) {
+          stoppedBeforeTimeout = {
+            reason: err.message,
+            remaining_advertiser_ids: targets.slice(i),
+          };
+          break;
+        }
+        errors.push({ advertiser_id: adv, error: (err as Error).message });
       }
-    });
-    await Promise.all(workers);
+    }
 
     let upserted = 0;
     if (upsertRows.length) {
@@ -409,8 +414,11 @@ Deno.serve(async (req) => {
         end_date,
         windows: windows.length,
         advertisers: targets.length,
+        processed_advertisers: processedAdvertisers.length,
+        remaining_advertiser_ids: stoppedBeforeTimeout?.remaining_advertiser_ids ?? [],
         batch_size: batchSize,
-        concurrency,
+        max_runtime_ms: maxRuntimeMs,
+        stopped_before_timeout: stoppedBeforeTimeout,
         upserted,
         batch_stats: batchStats,
         errors,
