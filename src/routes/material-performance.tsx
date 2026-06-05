@@ -143,10 +143,41 @@ function MaterialPerformancePage() {
 
   React.useEffect(() => { setPage(1); }, [filteredRows.length]);
 
-  const paged = filteredRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  const pageCount = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  const sortedRows = React.useMemo(() => {
+    if (!sortKey) return filteredRows;
+    const arr = [...filteredRows];
+    const dir = sortDir === "asc" ? 1 : -1;
+    arr.sort((a, b) => {
+      const av = a[sortKey] as unknown;
+      const bv = b[sortKey] as unknown;
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === "number" && typeof bv === "number") return (av - bv) * dir;
+      return String(av).localeCompare(String(bv)) * dir;
+    });
+    return arr;
+  }, [filteredRows, sortKey, sortDir]);
 
-  // Sync is now driven by an hourly cron job; manual trigger removed.
+  const totals = React.useMemo(() => {
+    const t = { cost: 0, gross_revenue: 0, orders: 0, product_impressions: 0, product_clicks: 0 };
+    for (const r of filteredRows) {
+      t.cost += r.cost ?? 0;
+      t.gross_revenue += r.gross_revenue ?? 0;
+      t.orders += r.orders ?? 0;
+      t.product_impressions += r.product_impressions ?? 0;
+      t.product_clicks += r.product_clicks ?? 0;
+    }
+    const roi = t.cost > 0 ? t.gross_revenue / t.cost : null;
+    const ctr = t.product_impressions > 0 ? t.product_clicks / t.product_impressions : null;
+    const cvr = t.product_clicks > 0 ? t.orders / t.product_clicks : null;
+    const cpm = t.product_impressions > 0 ? (t.cost / t.product_impressions) * 1000 : null;
+    const cpa = t.orders > 0 ? t.cost / t.orders : null;
+    return { ...t, roi, ctr, cvr, cpm, cpa };
+  }, [filteredRows]);
+
+  const paged = sortedRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const pageCount = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE));
 
 
   const exportCsv = () => {
