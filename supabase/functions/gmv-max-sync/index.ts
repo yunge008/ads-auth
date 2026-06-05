@@ -658,7 +658,6 @@ Deno.serve(async (req) => {
                 tt_account_name: s("tt_account_name"),
                 tt_account_authorization_type: s("tt_account_authorization_type"),
                 shop_content_type: s("shop_content_type"),
-                pulled_at: nowIso,
               });
             }
           } catch (err) {
