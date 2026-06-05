@@ -41,6 +41,10 @@ function CommentsPage() {
   const [fCountry, setFCountry] = React.useState<string[]>([]);
   const [fAdv, setFAdv] = React.useState<string[]>([]);
   const [page, setPage] = React.useState(1);
+  const today = new Date().toISOString().slice(0, 10);
+  const ago30 = new Date(Date.now() - 30 * 86400 * 1000).toISOString().slice(0, 10);
+  const [startDate, setStartDate] = React.useState(ago30);
+  const [endDate, setEndDate] = React.useState(today);
   const PAGE_SIZE = 50;
 
   const load = async () => {
