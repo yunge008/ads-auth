@@ -167,6 +167,7 @@ export async function fetchReport(
   const page_size = 1000;
   const selectedMetrics = metrics ?? (dimensions.includes("item_id")
     ? [
+        "tt_account_name", "tt_account_authorization_type", "shop_content_type",
         "creative_delivery_status", "cost", "orders", "gross_revenue",
         "product_impressions", "product_clicks", "currency",
         "ad_video_view_rate_2s", "ad_video_view_rate_6s",
@@ -174,6 +175,7 @@ export async function fetchReport(
         "ad_video_view_rate_p75", "ad_video_view_rate_p100",
       ]
     : ["cost", "orders", "gross_revenue"]);
+  let activeMetrics = [...selectedMetrics];
   const filtering = JSON.stringify({ ...extraFilter });
   for (let i = 0; i < 100; i++) {
     _ensureTime?.();
