@@ -291,38 +291,72 @@ function MaterialPerformancePage() {
       </Card>
 
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader className="pb-3 space-y-3">
           <CardTitle className="text-base">
             汇总表 <span className="text-xs font-normal text-muted-foreground ml-1">（筛选后 {filteredRows.length} / 共 {rows.length} 行）</span>
           </CardTitle>
+          <div className="flex flex-wrap items-end gap-2">
+            <MultiSelect label="国家" options={countries} value={fCountry} onChange={setFCountry} />
+            <MultiSelect label="同事" options={staffs} value={fStaff} onChange={setFStaff} />
+            <MultiSelect label="来源" options={sources} value={fSource} onChange={setFSource} />
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">VID</span>
+              <Input value={fVid} onChange={(e) => setFVid(e.target.value)} placeholder="可多个，逗号分隔" className="h-8 w-48" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">商家SKU</span>
+              <Input value={fSku} onChange={(e) => setFSku(e.target.value)} placeholder="可多个" className="h-8 w-40" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">商品ID</span>
+              <Input value={fPid} onChange={(e) => setFPid(e.target.value)} placeholder="可多个" className="h-8 w-40" />
+            </div>
+            {(fCountry.length || fStaff.length || fSource.length || fVid || fSku || fPid) ? (
+              <Button size="sm" variant="ghost" onClick={() => { setFCountry([]); setFStaff([]); setFSource([]); setFVid(""); setFSku(""); setFPid(""); }}>
+                清空筛选
+              </Button>
+            ) : null}
+          </div>
         </CardHeader>
         <CardContent>
           <div className="border rounded-md overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>国家</TableHead>
-                  <TableHead>广告户</TableHead>
-                  <TableHead>同事</TableHead>
-                  <TableHead>来源</TableHead>
-                  <TableHead>VID</TableHead>
-                  <TableHead>登记SKU</TableHead>
-                  <TableHead>商家SKU</TableHead>
-                  <TableHead>商品ID</TableHead>
-
-                  <TableHead className="text-right">订单</TableHead>
-                  <TableHead className="text-right">ROI</TableHead>
-                  <TableHead className="text-right">消耗</TableHead>
-                  <TableHead className="text-right">收入</TableHead>
-                  <TableHead className="text-right">CTR</TableHead>
-                  <TableHead className="text-right">CVR</TableHead>
-                  <TableHead className="text-right">CPM</TableHead>
-                  <TableHead className="text-right">CPA</TableHead>
-                  <TableHead className="text-right">展现</TableHead>
-                  <TableHead className="text-right">点击</TableHead>
+                  <SortTH k="country" label="国家" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="advertiser_name" label="广告户" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="staff_name" label="同事" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="source_type" label="来源" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="vid" label="VID" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="registered_sku" label="登记SKU" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="merchant_sku" label="商家SKU" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="item_group_id" label="商品ID" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="orders" label="订单" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="roi" label="ROI" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="cost" label="消耗" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="gross_revenue" label="收入" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="ctr" label="CTR" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="cvr" label="CVR" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="cpm" label="CPM" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="cpa" label="CPA" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="product_impressions" label="展现" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="product_clicks" label="点击" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                 </TableRow>
               </TableHeader>
               <TableBody>
+                <TableRow className="bg-muted/40 font-medium sticky top-0">
+                  <TableCell colSpan={8} className="text-xs">汇总（{filteredRows.length} 行）</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtNum(totals.orders)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtRoi(totals.roi)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtNum(totals.cost)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtNum(totals.gross_revenue)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtPct(totals.ctr)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtPct(totals.cvr)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtRoi(totals.cpm)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtRoi(totals.cpa)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtNum(totals.product_impressions)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtNum(totals.product_clicks)}</TableCell>
+                </TableRow>
                 {loading ? (
                   <TableRow><TableCell colSpan={18} className="h-20 text-center text-sm text-muted-foreground">加载中…</TableCell></TableRow>
                 ) : paged.length === 0 ? (
