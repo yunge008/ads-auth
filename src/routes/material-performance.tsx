@@ -71,8 +71,6 @@ function MaterialPerformancePage() {
   const ago30 = new Date(Date.now() - 30 * 86400 * 1000).toISOString().slice(0, 10);
   const [startDate, setStartDate] = React.useState(ago30);
   const [endDate, setEndDate] = React.useState(today);
-  const [backfillStart, setBackfillStart] = React.useState(ago30);
-  const [backfillEnd, setBackfillEnd] = React.useState(today);
 
   const [rows, setRows] = React.useState<Row[]>([]);
   const [series, setSeries] = React.useState<SeriesPoint[]>([]);
@@ -166,15 +164,6 @@ function MaterialPerformancePage() {
           <p className="text-sm text-muted-foreground mt-1">GMV Max VID 维度数据 · 关联剪辑/BD 飞书表与 SKU 匹配表</p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
-          <Button size="sm" variant="outline" disabled={!!busy} onClick={() => doSync("feishu-read-editors", {}, "同步剪辑表")}>
-            <Scissors className={`h-4 w-4 mr-1.5 ${busy === "同步剪辑表" ? "animate-spin" : ""}`} />同步剪辑表
-          </Button>
-          <Button size="sm" variant="outline" disabled={!!busy} onClick={() => doSync("feishu-read-bd-vids", {}, "同步BD表")}>
-            <RotateCw className={`h-4 w-4 mr-1.5 ${busy === "同步BD表" ? "animate-spin" : ""}`} />同步BD表VID
-          </Button>
-          <Button size="sm" variant="outline" disabled={!!busy} onClick={() => doSync("feishu-read-sku", {}, "同步SKU匹配表")}>
-            <Package className={`h-4 w-4 mr-1.5 ${busy === "同步SKU匹配表" ? "animate-spin" : ""}`} />同步SKU匹配表
-          </Button>
           <Button size="sm" variant="outline" disabled={!!busy} onClick={() => {
             const end = today;
             const start = new Date(Date.now() - 3 * 86400 * 1000).toISOString().slice(0, 10);
@@ -182,6 +171,7 @@ function MaterialPerformancePage() {
           }}>
             <Database className={`h-4 w-4 mr-1.5 ${busy === "拉取最近3天" ? "animate-spin" : ""}`} />拉取最近3天
           </Button>
+          <p className="text-xs text-muted-foreground self-center">完整同步/回溯请到「设置 → 数据同步」</p>
         </div>
       </div>
 
