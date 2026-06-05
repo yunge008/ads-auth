@@ -7,7 +7,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
-import { RotateCw, ChevronLeft, ChevronRight, Download } from "lucide-react";
+import { RotateCw, ChevronLeft, ChevronRight, Download, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import { toast } from "sonner";
 import { invokeFn } from "@/lib/api";
 import { MultiSelect } from "@/components/MultiSelect";
@@ -75,6 +75,32 @@ const fmtNum = (n: number) => (n ?? 0).toLocaleString(undefined, { maximumFracti
 const fmtPct = (n: number | null) => (n == null ? "—" : (n * 100).toFixed(2) + "%");
 const fmtRoi = (n: number | null) => (n == null ? "—" : n.toFixed(2));
 
+function SortTH({
+  k, label, align = "left", sortKey, sortDir, onSort,
+}: {
+  k: keyof Row;
+  label: string;
+  align?: "left" | "right";
+  sortKey: keyof Row | null;
+  sortDir: "asc" | "desc";
+  onSort: (k: keyof Row) => void;
+}) {
+  const active = sortKey === k;
+  const Icon = !active ? ArrowUpDown : sortDir === "asc" ? ArrowUp : ArrowDown;
+  return (
+    <TableHead className={align === "right" ? "text-right" : ""}>
+      <button
+        type="button"
+        onClick={() => onSort(k)}
+        className={`inline-flex items-center gap-1 hover:text-foreground ${active ? "text-foreground" : ""} ${align === "right" ? "flex-row-reverse" : ""}`}
+      >
+        <span>{label}</span>
+        <Icon className={`h-3 w-3 ${active ? "opacity-100" : "opacity-40"}`} />
+      </button>
+    </TableHead>
+  );
+}
+
 function MaterialPerformancePage() {
   const today = new Date().toISOString().slice(0, 10);
   const ago30 = new Date(Date.now() - 30 * 86400 * 1000).toISOString().slice(0, 10);
@@ -97,6 +123,12 @@ function MaterialPerformancePage() {
     METRICS.filter((m) => m.defaultOn).map((m) => m.key),
   );
   const [page, setPage] = React.useState(1);
+  const [sortKey, setSortKey] = React.useState<keyof Row | null>(null);
+  const [sortDir, setSortDir] = React.useState<"asc" | "desc">("desc");
+  const toggleSort = (k: keyof Row) => {
+    if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(k); setSortDir("desc"); }
+  };
 
   const runQuery = React.useCallback(async () => {
     setLoading(true);
@@ -137,10 +169,41 @@ function MaterialPerformancePage() {
 
   React.useEffect(() => { setPage(1); }, [filteredRows.length]);
 
-  const paged = filteredRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  const pageCount = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  const sortedRows = React.useMemo(() => {
+    if (!sortKey) return filteredRows;
+    const arr = [...filteredRows];
+    const dir = sortDir === "asc" ? 1 : -1;
+    arr.sort((a, b) => {
+      const av = a[sortKey] as unknown;
+      const bv = b[sortKey] as unknown;
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === "number" && typeof bv === "number") return (av - bv) * dir;
+      return String(av).localeCompare(String(bv)) * dir;
+    });
+    return arr;
+  }, [filteredRows, sortKey, sortDir]);
 
-  // Sync is now driven by an hourly cron job; manual trigger removed.
+  const totals = React.useMemo(() => {
+    const t = { cost: 0, gross_revenue: 0, orders: 0, product_impressions: 0, product_clicks: 0 };
+    for (const r of filteredRows) {
+      t.cost += r.cost ?? 0;
+      t.gross_revenue += r.gross_revenue ?? 0;
+      t.orders += r.orders ?? 0;
+      t.product_impressions += r.product_impressions ?? 0;
+      t.product_clicks += r.product_clicks ?? 0;
+    }
+    const roi = t.cost > 0 ? t.gross_revenue / t.cost : null;
+    const ctr = t.product_impressions > 0 ? t.product_clicks / t.product_impressions : null;
+    const cvr = t.product_clicks > 0 ? t.orders / t.product_clicks : null;
+    const cpm = t.product_impressions > 0 ? (t.cost / t.product_impressions) * 1000 : null;
+    const cpa = t.orders > 0 ? t.cost / t.orders : null;
+    return { ...t, roi, ctr, cvr, cpm, cpa };
+  }, [filteredRows]);
+
+  const paged = sortedRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const pageCount = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE));
 
 
   const exportCsv = () => {
@@ -196,33 +259,6 @@ function MaterialPerformancePage() {
         </div>
       </div>
 
-      <Card>
-        <CardHeader className="pb-3 space-y-3">
-          <CardTitle className="text-base">筛选当前结果</CardTitle>
-          <div className="flex flex-wrap items-end gap-2">
-            <MultiSelect label="国家" options={countries} value={fCountry} onChange={setFCountry} />
-            <MultiSelect label="同事" options={staffs} value={fStaff} onChange={setFStaff} />
-            <MultiSelect label="来源" options={sources} value={fSource} onChange={setFSource} />
-            <div className="flex flex-col gap-1">
-              <span className="text-xs text-muted-foreground">VID</span>
-              <Input value={fVid} onChange={(e) => setFVid(e.target.value)} placeholder="可多个，逗号分隔" className="h-8 w-48" />
-            </div>
-            <div className="flex flex-col gap-1">
-              <span className="text-xs text-muted-foreground">商家SKU</span>
-              <Input value={fSku} onChange={(e) => setFSku(e.target.value)} placeholder="可多个" className="h-8 w-40" />
-            </div>
-            <div className="flex flex-col gap-1">
-              <span className="text-xs text-muted-foreground">商品ID</span>
-              <Input value={fPid} onChange={(e) => setFPid(e.target.value)} placeholder="可多个" className="h-8 w-40" />
-            </div>
-            {(fCountry.length || fStaff.length || fSource.length || fVid || fSku || fPid) ? (
-              <Button size="sm" variant="ghost" onClick={() => { setFCountry([]); setFStaff([]); setFSource([]); setFVid(""); setFSku(""); setFPid(""); }}>
-                清空筛选
-              </Button>
-            ) : null}
-          </div>
-        </CardHeader>
-      </Card>
 
       <Card>
         <CardHeader className="pb-3 space-y-2">
@@ -281,38 +317,72 @@ function MaterialPerformancePage() {
       </Card>
 
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader className="pb-3 space-y-3">
           <CardTitle className="text-base">
             汇总表 <span className="text-xs font-normal text-muted-foreground ml-1">（筛选后 {filteredRows.length} / 共 {rows.length} 行）</span>
           </CardTitle>
+          <div className="flex flex-wrap items-end gap-2">
+            <MultiSelect label="国家" options={countries} value={fCountry} onChange={setFCountry} />
+            <MultiSelect label="同事" options={staffs} value={fStaff} onChange={setFStaff} />
+            <MultiSelect label="来源" options={sources} value={fSource} onChange={setFSource} />
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">VID</span>
+              <Input value={fVid} onChange={(e) => setFVid(e.target.value)} placeholder="可多个，逗号分隔" className="h-8 w-48" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">商家SKU</span>
+              <Input value={fSku} onChange={(e) => setFSku(e.target.value)} placeholder="可多个" className="h-8 w-40" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">商品ID</span>
+              <Input value={fPid} onChange={(e) => setFPid(e.target.value)} placeholder="可多个" className="h-8 w-40" />
+            </div>
+            {(fCountry.length || fStaff.length || fSource.length || fVid || fSku || fPid) ? (
+              <Button size="sm" variant="ghost" onClick={() => { setFCountry([]); setFStaff([]); setFSource([]); setFVid(""); setFSku(""); setFPid(""); }}>
+                清空筛选
+              </Button>
+            ) : null}
+          </div>
         </CardHeader>
         <CardContent>
           <div className="border rounded-md overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>国家</TableHead>
-                  <TableHead>广告户</TableHead>
-                  <TableHead>同事</TableHead>
-                  <TableHead>来源</TableHead>
-                  <TableHead>VID</TableHead>
-                  <TableHead>登记SKU</TableHead>
-                  <TableHead>商家SKU</TableHead>
-                  <TableHead>商品ID</TableHead>
-
-                  <TableHead className="text-right">订单</TableHead>
-                  <TableHead className="text-right">ROI</TableHead>
-                  <TableHead className="text-right">消耗</TableHead>
-                  <TableHead className="text-right">收入</TableHead>
-                  <TableHead className="text-right">CTR</TableHead>
-                  <TableHead className="text-right">CVR</TableHead>
-                  <TableHead className="text-right">CPM</TableHead>
-                  <TableHead className="text-right">CPA</TableHead>
-                  <TableHead className="text-right">展现</TableHead>
-                  <TableHead className="text-right">点击</TableHead>
+                  <SortTH k="country" label="国家" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="advertiser_name" label="广告户" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="staff_name" label="同事" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="source_type" label="来源" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="vid" label="VID" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="registered_sku" label="登记SKU" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="merchant_sku" label="商家SKU" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="item_group_id" label="商品ID" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="orders" label="订单" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="roi" label="ROI" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="cost" label="消耗" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="gross_revenue" label="收入" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="ctr" label="CTR" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="cvr" label="CVR" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="cpm" label="CPM" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="cpa" label="CPA" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="product_impressions" label="展现" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTH k="product_clicks" label="点击" align="right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                 </TableRow>
               </TableHeader>
               <TableBody>
+                <TableRow className="bg-muted/40 font-medium sticky top-0">
+                  <TableCell colSpan={8} className="text-xs">汇总（{filteredRows.length} 行）</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtNum(totals.orders)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtRoi(totals.roi)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtNum(totals.cost)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtNum(totals.gross_revenue)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtPct(totals.ctr)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtPct(totals.cvr)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtRoi(totals.cpm)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtRoi(totals.cpa)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtNum(totals.product_impressions)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtNum(totals.product_clicks)}</TableCell>
+                </TableRow>
                 {loading ? (
                   <TableRow><TableCell colSpan={18} className="h-20 text-center text-sm text-muted-foreground">加载中…</TableCell></TableRow>
                 ) : paged.length === 0 ? (
