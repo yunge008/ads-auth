@@ -2,7 +2,7 @@
 import { corsHeaders } from "../_shared/feishu.ts";
 import { admin, checkAdminPasscode } from "../_shared/auth.ts";
 
-const TABLES = new Set(["staff_vid_map", "sku_product_map", "tiktok_comments", "gmv_max_vid_daily"]);
+const TABLES = new Set(["staff_vid_map", "sku_product_map", "tiktok_comments", "gmv_max_vid_daily", "advertiser_countries"]);
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
