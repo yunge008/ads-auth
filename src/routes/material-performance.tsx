@@ -101,12 +101,13 @@ function MaterialPerformancePage() {
   const runQuery = React.useCallback(async () => {
     setLoading(true);
     try {
-      const r = await invokeFn<{ rows: Row[]; series: SeriesPoint[] }>("gmv-max-query", {
+      const r = await invokeFn<{ rows: Row[]; series: SeriesPoint[]; last_synced_at: string | null }>("gmv-max-query", {
         start_date: startDate,
         end_date: endDate,
       });
       setRows(r.rows ?? []);
       setSeries(r.series ?? []);
+      setLastSyncedAt(r.last_synced_at ?? null);
       setPage(1);
     } catch (e) {
       toast.error(`查询失败：${(e as Error).message}`);
