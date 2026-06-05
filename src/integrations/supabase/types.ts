@@ -211,6 +211,7 @@ export type Database = {
           country: string
           created_at: string
           id: string
+          registered_sku: string | null
           source_sheet: string | null
           source_type: string
           staff_name: string
@@ -221,6 +222,7 @@ export type Database = {
           country?: string
           created_at?: string
           id?: string
+          registered_sku?: string | null
           source_sheet?: string | null
           source_type: string
           staff_name: string
@@ -231,6 +233,7 @@ export type Database = {
           country?: string
           created_at?: string
           id?: string
+          registered_sku?: string | null
           source_sheet?: string | null
           source_type?: string
           staff_name?: string
