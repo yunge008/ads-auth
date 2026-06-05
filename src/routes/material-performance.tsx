@@ -11,6 +11,7 @@ import { RotateCw, ChevronLeft, ChevronRight, Download, Scissors, Package, Datab
 import { toast } from "sonner";
 import { invokeFn } from "@/lib/api";
 import { MultiSelect } from "@/components/MultiSelect";
+import { DateRangeQuickSelect } from "@/components/DateRangeQuickSelect";
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, Legend, CartesianGrid,
 } from "recharts";
@@ -185,26 +186,6 @@ function MaterialPerformancePage() {
       </div>
 
       <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">首次回溯拉取（GMV Max）</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-wrap items-end gap-2">
-          <div className="flex flex-col gap-1">
-            <span className="text-xs text-muted-foreground">起始日期</span>
-            <Input type="date" value={backfillStart} onChange={(e) => setBackfillStart(e.target.value)} className="h-8 w-40" />
-          </div>
-          <div className="flex flex-col gap-1">
-            <span className="text-xs text-muted-foreground">结束日期</span>
-            <Input type="date" value={backfillEnd} onChange={(e) => setBackfillEnd(e.target.value)} className="h-8 w-40" />
-          </div>
-          <Button size="sm" disabled={!!busy} onClick={() => doSync("gmv-max-sync", { start_date: backfillStart, end_date: backfillEnd }, "首次回溯拉取")}>
-            <Database className={`h-4 w-4 mr-1.5 ${busy === "首次回溯拉取" ? "animate-spin" : ""}`} />开始回溯
-          </Button>
-          <p className="text-xs text-muted-foreground ml-2">超过 30 天自动按 30 天窗口拆分。</p>
-        </CardContent>
-      </Card>
-
-      <Card>
         <CardHeader className="pb-3 space-y-3">
           <CardTitle className="text-base">筛选与查询</CardTitle>
           <div className="flex flex-wrap items-end gap-2">
@@ -216,6 +197,7 @@ function MaterialPerformancePage() {
               <span className="text-xs text-muted-foreground">结束</span>
               <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-8 w-40" />
             </div>
+            <DateRangeQuickSelect onPick={(s, e) => { setStartDate(s); setEndDate(e); }} />
             <MultiSelect label="国家" options={countries} value={fCountry} onChange={setFCountry} />
             <MultiSelect label="同事" options={staffs} value={fStaff} onChange={setFStaff} />
             <MultiSelect label="来源" options={sources} value={fSource} onChange={setFSource} />
