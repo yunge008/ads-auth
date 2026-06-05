@@ -496,12 +496,14 @@ function AuthorizePage() {
                 options={staff.map((s) => s.name)}
                 value={fStaff}
                 onChange={setFStaff}
+                counts={staffCounts}
               />
               <MultiSelect
                 label="国家"
                 options={countriesInData}
                 value={fCountry}
                 onChange={setFCountry}
+                counts={countryCounts}
               />
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-muted-foreground">VID</span>
