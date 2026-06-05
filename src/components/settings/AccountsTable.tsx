@@ -30,7 +30,7 @@ import { invokeFn } from "@/lib/api";
 
 export function AccountsTable() {
   const { advertisers } = useBCAdvertisers();
-  const { connections: conns, countries, setCountries } = useConnections();
+  const { connections: conns, countries, shops, setCountries, setShops } = useConnections();
   const [connectOpen, setConnectOpen] = useState(false);
   const [connectLabel, setConnectLabel] = useState("");
   const [connecting, setConnecting] = useState(false);
@@ -38,6 +38,9 @@ export function AccountsTable() {
   const [editingConnLabel, setEditingConnLabel] = useState("");
   const [editingCountryAdv, setEditingCountryAdv] = useState<string | null>(null);
   const [editingCountryVal, setEditingCountryVal] = useState("");
+  const [editingShopAdv, setEditingShopAdv] = useState<string | null>(null);
+  const [editingShopId, setEditingShopId] = useState("");
+  const [editingShopName, setEditingShopName] = useState("");
 
   // Handle OAuth callback flag (new connection just added)
   useEffect(() => {
