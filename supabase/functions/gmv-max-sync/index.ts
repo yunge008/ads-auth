@@ -95,9 +95,17 @@ export async function fetchReport(
   const out: RawRow[] = [];
   let page = 1;
   const page_size = 200;
-  // Creative-level (item_id) dimension does NOT support gmv_max_promotion_types filter.
+  // gmv_max_promotion_types is NOT supported when the request is already scoped
+  // to specific campaigns/item_groups, nor at creative (item_id) level. Only
+  // include it for broad queries with no narrowing filters.
   const filterObj: Record<string, unknown> = { ...extraFilter };
-  if (!dimensions.includes("item_id")) {
+  const alreadyScoped =
+    dimensions.includes("item_id") ||
+    dimensions.includes("item_group_id") ||
+    "campaign_ids" in filterObj ||
+    "item_group_ids" in filterObj ||
+    "item_ids" in filterObj;
+  if (!alreadyScoped) {
     filterObj.gmv_max_promotion_types = ["PRODUCT"];
   }
   const filtering = JSON.stringify(filterObj);
