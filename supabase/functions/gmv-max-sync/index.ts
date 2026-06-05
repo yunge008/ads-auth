@@ -100,14 +100,17 @@ export async function ttGet(
   throw new Error(`${path}: max retries exceeded`);
 }
 
-// Step 1: list all GMV Max campaign IDs for an advertiser (PRODUCT_GMV_MAX).
+// Step 1: list all GMV Max campaigns for an advertiser (PRODUCT_GMV_MAX).
+// Returns id + name + operation_status (ENABLE/DISABLE).
+export type CampaignInfo = { id: string; name: string; operation_status: string };
 export async function fetchCampaigns(
   token: string,
   advertiser_id: string,
   _ttGet: typeof ttGet = ttGet,
   _ensureTime?: TimeBudgetChecker,
-): Promise<string[]> {
-  const ids: string[] = [];
+): Promise<CampaignInfo[]> {
+  const out: CampaignInfo[] = [];
+  const seen = new Set<string>();
   let page = 1;
   const page_size = 100;
   const filtering = JSON.stringify({ gmv_max_promotion_types: ["PRODUCT_GMV_MAX"] });
@@ -122,7 +125,15 @@ export async function fetchCampaigns(
     const list = (data.list ?? []) as Array<Record<string, unknown>>;
     for (const c of list) {
       const cid = c.campaign_id ?? c.id;
-      if (cid != null) ids.push(String(cid));
+      if (cid == null) continue;
+      const id = String(cid);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push({
+        id,
+        name: String(c.campaign_name ?? c.name ?? ""),
+        operation_status: String(c.operation_status ?? ""),
+      });
     }
     const pi = (data.page_info ?? {}) as Record<string, unknown>;
     const totalPage = Number(pi.total_page ?? 0);
@@ -132,7 +143,7 @@ export async function fetchCampaigns(
     if (!totalPage && total > 0 && page * page_size >= total) break;
     page++;
   }
-  return Array.from(new Set(ids));
+  return out;
 }
 
 // Generic paged report fetch. filtering MUST be an object (not array).
