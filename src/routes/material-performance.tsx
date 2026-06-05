@@ -83,8 +83,8 @@ function MaterialPerformancePage() {
 
   const [rows, setRows] = React.useState<Row[]>([]);
   const [series, setSeries] = React.useState<SeriesPoint[]>([]);
+  const [lastSyncedAt, setLastSyncedAt] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
-  const [busy, setBusy] = React.useState<string | null>(null);
 
   const [fCountry, setFCountry] = React.useState<string[]>([]);
   const [fStaff, setFStaff] = React.useState<string[]>([]);
