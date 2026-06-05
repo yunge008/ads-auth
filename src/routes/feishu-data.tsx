@@ -17,13 +17,8 @@ export const Route = createFileRoute("/feishu-data")({
 
 type StaffVidRow = { country: string | null; staff_name: string | null; vid: string; source_type: string; source_sheet: string | null; updated_at: string };
 type SkuRow = { country: string | null; product_id: string; product_name: string | null; sku_id: string | null; merchant_sku: string | null; updated_at: string };
-type GmvRow = {
-  country: string | null; advertiser_id: string; vid: string; stat_date: string;
-  tt_account_name: string | null; tt_account_authorization_type: string | null; shop_content_type: string | null;
-  creative_delivery_status: string | null;
-  cost: number; orders: number; gross_revenue: number;
-  product_impressions: number; product_clicks: number;
-};
+
+
 type AdvertiserRow = { advertiser_id: string; advertiser_name: string | null; country: string | null; shop_id?: string | null };
 type SyncResp = {
   upserted: number;
