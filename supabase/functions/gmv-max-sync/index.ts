@@ -330,7 +330,7 @@ Deno.serve(async (req) => {
     const errors: { advertiser_id: string; window?: string; error: string }[] = [];
     for (const id of skipped) errors.push({ advertiser_id: id, error: "缺少店铺ID（shop_id），已跳过" });
     const upsertRows: Record<string, unknown>[] = [];
-    const nowIso = new Date().toISOString();
+    
     const batchStats: {
       advertiser_id: string;
       campaigns: number;
