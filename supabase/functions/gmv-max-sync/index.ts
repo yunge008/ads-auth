@@ -104,7 +104,11 @@ async function fetchReport(
       page: String(page),
       page_size: String(page_size),
     };
-    if (filtering && filtering.length) params.filtering = JSON.stringify(filtering);
+    const mergedFiltering = [
+      { field_name: "gmv_max_promotion_types", filter_type: "IN", filter_value: JSON.stringify(["PRODUCT"]) },
+      ...(filtering ?? []),
+    ];
+    params.filtering = JSON.stringify(mergedFiltering);
     const data = await ttGet(token, "/gmv_max/report/get/", params);
     const list = (data.list ?? []) as RawRow[];
     out.push(...list);
