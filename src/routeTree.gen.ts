@@ -10,12 +10,18 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as CommentsRouteImport } from './routes/comments'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as OauthTiktokCallbackRouteImport } from './routes/oauth.tiktok.callback'
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CommentsRoute = CommentsRouteImport.update({
+  id: '/comments',
+  path: '/comments',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -31,30 +37,34 @@ const OauthTiktokCallbackRoute = OauthTiktokCallbackRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/comments': typeof CommentsRoute
   '/settings': typeof SettingsRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/comments': typeof CommentsRoute
   '/settings': typeof SettingsRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/comments': typeof CommentsRoute
   '/settings': typeof SettingsRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/settings' | '/oauth/tiktok/callback'
+  fullPaths: '/' | '/comments' | '/settings' | '/oauth/tiktok/callback'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/settings' | '/oauth/tiktok/callback'
-  id: '__root__' | '/' | '/settings' | '/oauth/tiktok/callback'
+  to: '/' | '/comments' | '/settings' | '/oauth/tiktok/callback'
+  id: '__root__' | '/' | '/comments' | '/settings' | '/oauth/tiktok/callback'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  CommentsRoute: typeof CommentsRoute
   SettingsRoute: typeof SettingsRoute
   OauthTiktokCallbackRoute: typeof OauthTiktokCallbackRoute
 }
@@ -66,6 +76,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/comments': {
+      id: '/comments'
+      path: '/comments'
+      fullPath: '/comments'
+      preLoaderRoute: typeof CommentsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -87,9 +104,20 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  CommentsRoute: CommentsRoute,
   SettingsRoute: SettingsRoute,
   OauthTiktokCallbackRoute: OauthTiktokCallbackRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
