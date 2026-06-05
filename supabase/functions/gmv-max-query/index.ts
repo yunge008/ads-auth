@@ -191,7 +191,14 @@ Deno.serve(async (req) => {
     // 5) Daily series (aggregated)
     const dayMap = new Map<
       string,
-      { stat_date: string; cost: number; gross_revenue: number; orders: number }
+      {
+        stat_date: string;
+        cost: number;
+        gross_revenue: number;
+        orders: number;
+        product_impressions: number;
+        product_clicks: number;
+      }
     >();
     const staffVidSet = new Set(staff.map((s) => s.vid));
     for (const d of daily) {
@@ -201,15 +208,25 @@ Deno.serve(async (req) => {
         cost: 0,
         gross_revenue: 0,
         orders: 0,
+        product_impressions: 0,
+        product_clicks: 0,
       };
       e.cost += d.cost;
       e.gross_revenue += d.gross_revenue;
       e.orders += d.orders;
+      e.product_impressions += d.product_impressions;
+      e.product_clicks += d.product_clicks;
       dayMap.set(d.stat_date, e);
     }
     const series = Array.from(dayMap.values())
       .sort((a, b) => a.stat_date.localeCompare(b.stat_date))
-      .map((d) => ({ ...d, roi: safeDiv(d.gross_revenue, d.cost) }));
+      .map((d) => ({
+        ...d,
+        roi: safeDiv(d.gross_revenue, d.cost),
+        ctr: safeDiv(d.product_clicks, d.product_impressions),
+        cvr: safeDiv(d.orders, d.product_clicks),
+      }));
+
 
     return new Response(JSON.stringify({ rows, series }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
