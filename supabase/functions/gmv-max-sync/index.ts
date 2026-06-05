@@ -123,29 +123,23 @@ export async function fetchReport(
   end: string,
   dimensions: string[],
   extraFilter: Record<string, unknown> = {},
-  metrics: string[] = ["cost", "orders", "gross_revenue"],
+  metrics?: string[],
   _ttGet: typeof ttGet = ttGet,
 ): Promise<RawRow[]> {
   const out: RawRow[] = [];
+  const seen = new Set<string>();
   let page = 1;
-  const page_size = 200;
-  const filterObj: Record<string, unknown> = { ...extraFilter };
-  const alreadyScoped =
-    dimensions.includes("item_id") ||
-    dimensions.includes("item_group_id") ||
-    "campaign_ids" in filterObj ||
-    "item_group_ids" in filterObj ||
-    "item_ids" in filterObj;
-  if (!alreadyScoped) {
-    filterObj.gmv_max_promotion_types = ["PRODUCT"];
-  }
-  const filtering = JSON.stringify(filterObj);
+  const page_size = 1000;
+  const selectedMetrics = metrics ?? (dimensions.includes("item_id")
+    ? ["creative_delivery_status", "cost", "orders", "gross_revenue", "product_impressions", "product_clicks"]
+    : ["cost", "orders", "gross_revenue"]);
+  const filtering = JSON.stringify({ ...extraFilter });
   for (let i = 0; i < 100; i++) {
     const params: Record<string, string> = {
       advertiser_id,
       store_ids: JSON.stringify([store_id]),
       dimensions: JSON.stringify(dimensions),
-      metrics: JSON.stringify(metrics),
+      metrics: JSON.stringify(selectedMetrics),
       start_date: start,
       end_date: end,
       page: String(page),
@@ -154,7 +148,12 @@ export async function fetchReport(
     };
     const data = await _ttGet(token, "/gmv_max/report/get/", params);
     const list = (data.list ?? []) as RawRow[];
-    out.push(...list);
+    for (const row of list) {
+      const key = JSON.stringify((row.dimensions ?? row) as Record<string, unknown>);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(row);
+    }
     const pi = (data.page_info ?? {}) as Record<string, unknown>;
     const totalPage = Number(pi.total_page ?? 0);
     const total = Number(pi.total_number ?? 0);
