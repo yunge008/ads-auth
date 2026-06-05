@@ -1,10 +1,9 @@
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
-import { LogOut, RefreshCw, User } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { LogOut, User } from "lucide-react";
+import { useEffect, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { APP_VERSION } from "@/lib/version";
 import { setPasscode } from "@/lib/api";
-import { refreshAllSettings } from "@/lib/store";
 import { accountStore, useCurrentAccount, hasTab } from "@/lib/account";
 import { TABS, tabByPath } from "@/lib/tabs";
 import { toast } from "sonner";
@@ -13,7 +12,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { location } = useRouterState();
   const navigate = useNavigate();
   const account = useCurrentAccount();
-  const [syncing, setSyncing] = useState(false);
 
   const visibleTabs = useMemo(
     () =>
@@ -36,18 +34,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       navigate({ to: target });
     }
   }, [account, location.pathname, visibleTabs, navigate]);
-
-  const handleSync = async () => {
-    setSyncing(true);
-    try {
-      await refreshAllSettings();
-      toast.success("已同步表格信息");
-    } catch (e) {
-      toast.error(`同步失败：${(e as Error).message}`);
-    } finally {
-      setSyncing(false);
-    }
-  };
 
   return (
     <div className="flex h-screen bg-muted/30">
@@ -134,17 +120,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-12 border-b bg-card flex items-center justify-end gap-3 px-6">
-          {account?.isAdmin && (
-            <button
-              onClick={handleSync}
-              disabled={syncing}
-              className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-3 py-1.5 text-xs text-foreground transition-colors hover:bg-accent disabled:opacity-60"
-            >
-              <RefreshCw className={cn("h-3.5 w-3.5", syncing && "animate-spin")} />
-              同步表格信息
-            </button>
-          )}
+        <header className="h-12 border-b bg-card flex items-center justify-end px-6">
           <span className="text-xs text-muted-foreground font-mono">
             v{APP_VERSION}
           </span>

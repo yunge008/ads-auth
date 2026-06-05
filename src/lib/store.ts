@@ -174,22 +174,6 @@ export function useConnections() {
   return { ...state, setCountries, setShops };
 }
 
-// ============== Global "sync settings" ==============
-export async function refreshAllSettings() {
-  await Promise.all([
-    refreshStaff().catch((e) => {
-      throw new Error(`人员表：${(e as Error).message}`);
-    }),
-    refreshConnections().catch((e) => {
-      throw new Error(`授权连接：${(e as Error).message}`);
-    }),
-  ]);
-  // BC advertisers (TikTok side) — best-effort, don't block
-  refreshBCAdvertisers().catch((e) =>
-    console.warn("sync BC advertisers", (e as Error).message),
-  );
-}
-
 // ============== Global materials store ==============
 let _materials: Material[] = [];
 const _listeners = new Set<() => void>();
