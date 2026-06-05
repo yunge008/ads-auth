@@ -15,7 +15,7 @@ export const TABS: TabDef[] = [
   { key: "home", label: "执行授权", to: "/", icon: Zap },
   { key: "comments", label: "评论内容", to: "/comments", icon: MessageSquare },
   { key: "material-performance", label: "素材成效", to: "/material-performance", icon: TrendingUp },
-  { key: "feishu-data", label: "飞书已获取数据", to: "/feishu-data", icon: Database },
+  { key: "feishu-data", label: "已获取数据查阅", to: "/feishu-data", icon: Database },
   { key: "settings", label: "设置", to: "/settings", icon: Settings },
   { key: "api-test", label: "API测试", to: "/api-test", icon: TerminalSquare, position: "bottom" },
 ];
