@@ -380,6 +380,7 @@ Deno.serve(async (req) => {
                   vid,
                   stat_date: String(dims.stat_time_day ?? "").slice(0, 10),
                   creative_delivery_status: mets.creative_delivery_status == null ? null : String(mets.creative_delivery_status),
+                  currency: mets.currency == null ? null : String(mets.currency),
                   cost,
                   gross_revenue: rev,
                   orders,
@@ -389,7 +390,6 @@ Deno.serve(async (req) => {
                   ctr: safeDiv(clks, imps),
                   cvr: safeDiv(orders, clks),
                   cpm: safeDiv(cost, imps) === null ? null : (cost / imps) * 1000,
-                  raw_payload: r,
                   pulled_at: nowIso,
                 });
               }
