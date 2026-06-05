@@ -66,12 +66,15 @@ export async function ttGet(
   params: Record<string, string>,
   retries = 5,
   _sleep: (ms: number) => Promise<void> = sleep,
+  _ensureTime?: TimeBudgetChecker,
 ): Promise<Record<string, unknown>> {
   for (let attempt = 0; attempt < retries; attempt++) {
+    _ensureTime?.();
     const url = new URL(`${TT}${path}`);
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 25000);
+    // Lower per-request HTTP timeout so a stuck call can't eat the whole budget.
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
     let j: Record<string, unknown>;
     try {
       const res = await fetch(url, { headers: { "Access-Token": token }, signal: controller.signal });
@@ -92,6 +95,8 @@ export async function ttGet(
     const msg = String(j.message ?? "");
     const isRate = msg.includes("Too many requests") || msg.includes("Request too frequent") || msg.toLowerCase().includes("frequent") || j.code === 40100 || j.code === 50002;
     if (isRate && attempt < retries - 1) {
+      // Check budget BEFORE long backoff so we bail rather than get platform-killed.
+      _ensureTime?.();
       await _sleep(3000 * Math.pow(2, attempt));
       continue;
     }
