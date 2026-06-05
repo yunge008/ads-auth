@@ -37,10 +37,12 @@ export function StaffTable() {
       name: "",
       sheet_name: "",
       active: true,
+      role: "BD",
     };
     setDrafts([...(drafts ?? staff), next]);
     setEditingId(next.id);
   };
+
 
   const updateRow = (id: string, patch: Partial<StaffSheet>) => {
     const base = drafts ?? staff;
