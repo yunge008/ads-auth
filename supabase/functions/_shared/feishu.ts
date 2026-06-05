@@ -16,8 +16,8 @@ export async function getTenantAccessToken(): Promise<string> {
   return json.tenant_access_token as string;
 }
 
-export function getSpreadsheetToken(): string {
-  const raw = Deno.env.get("FEISHU_SPREADSHEET_TOKEN") ?? "";
+export function getSpreadsheetToken(envName = "FEISHU_SPREADSHEET_TOKEN"): string {
+  const raw = Deno.env.get(envName) ?? "";
   // Accept either raw token or full URL like https://xxx.feishu.cn/sheets/<token>?sheet=...
   const m = raw.match(/\/sheets\/([A-Za-z0-9]+)/);
   return (m?.[1] ?? raw).trim();

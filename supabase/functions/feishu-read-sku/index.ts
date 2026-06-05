@@ -34,7 +34,7 @@ Deno.serve(async (req) => {
     };
     const db = admin();
     const token = await getTenantAccessToken();
-    const spreadsheetToken = getSpreadsheetToken();
+    const spreadsheetToken = getSpreadsheetToken("FEISHU_SKU_SPREADSHEET_TOKEN");
     const sheets = await listSheets(token, spreadsheetToken);
     const sid = sheets.find((s) => s.title === sheet_name)?.sheet_id;
     if (!sid) throw new Error(`未找到 sheet：${sheet_name}`);

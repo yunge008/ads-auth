@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
     }
 
     const token = await getTenantAccessToken();
-    const spreadsheetToken = getSpreadsheetToken();
+    const spreadsheetToken = getSpreadsheetToken("FEISHU_EDITOR_SPREADSHEET_TOKEN");
     const all = await listSheets(token, spreadsheetToken);
     const byName = new Map(all.map((s) => [s.title, s.sheet_id]));
 
