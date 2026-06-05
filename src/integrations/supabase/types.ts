@@ -19,18 +19,24 @@ export type Database = {
           advertiser_id: string
           country: string
           created_at: string
+          shop_id: string | null
+          shop_name: string | null
           updated_at: string
         }
         Insert: {
           advertiser_id: string
           country: string
           created_at?: string
+          shop_id?: string | null
+          shop_name?: string | null
           updated_at?: string
         }
         Update: {
           advertiser_id?: string
           country?: string
           created_at?: string
+          shop_id?: string | null
+          shop_name?: string | null
           updated_at?: string
         }
         Relationships: []
