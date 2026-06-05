@@ -79,8 +79,9 @@ function CommentsPage() {
   const handleSync = async () => {
     setBusy("sync");
     try {
-      const r = await invokeFn<{ upserted: number; errors: unknown[] }>("tiktok-comments-sync", {});
+      const r = await invokeFn<{ upserted: number; errors: { advertiser_id: string; error: string }[] }>("tiktok-comments-sync", { start_date: startDate, end_date: endDate });
       toast.success(`已同步 ${r.upserted} 条评论`);
+      if (r.errors?.length) toast.warning(`${r.errors.length} 个广告户出错：${r.errors[0].error}`);
       await load();
     } catch (e) { toast.error(`同步失败：${(e as Error).message}`); }
     finally { setBusy(null); }
