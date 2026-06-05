@@ -28,6 +28,7 @@ type SyncResp = {
     rows_max_batch: number;
     saturated: boolean;
   }>;
+  advertiser_names?: Record<string, string>;
   errors: Array<{ advertiser_id: string; window?: string; error: string }>;
   stopped_before_timeout?: { reason: string; remaining_advertiser_ids: string[] } | null;
 };
