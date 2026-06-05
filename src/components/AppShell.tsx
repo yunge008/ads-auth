@@ -1,10 +1,9 @@
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
-import { LogOut, RefreshCw, User } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { LogOut, User } from "lucide-react";
+import { useEffect, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { APP_VERSION } from "@/lib/version";
 import { setPasscode } from "@/lib/api";
-import { refreshAllSettings } from "@/lib/store";
 import { accountStore, useCurrentAccount, hasTab } from "@/lib/account";
 import { TABS, tabByPath } from "@/lib/tabs";
 import { toast } from "sonner";
