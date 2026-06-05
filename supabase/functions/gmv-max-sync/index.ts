@@ -55,7 +55,7 @@ export async function fetchCampaigns(
   const page_size = 100;
   const filtering = JSON.stringify({ gmv_max_promotion_types: ["PRODUCT_GMV_MAX"] });
   for (let i = 0; i < 50; i++) {
-    const data = await ttGet(token, "/gmv_max/campaign/get/", {
+    const data = await _ttGet(token, "/gmv_max/campaign/get/", {
       advertiser_id,
       filtering,
       page: String(page),
