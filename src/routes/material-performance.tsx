@@ -138,16 +138,17 @@ function MaterialPerformancePage() {
 
   const exportCsv = () => {
     const headers = [
-      "国家", "同事", "来源", "VID", "商品ID", "商家SKU",
+      "国家", "同事", "来源", "VID", "商品ID", "登记SKU", "商家SKU",
       "消耗", "收入", "订单", "展现", "点击", "ROI", "CTR", "CVR",
     ];
     const csv = [headers.join(",")]
       .concat(rows.map((r) => [
-        r.country, r.staff_name, r.source_type, r.vid, r.item_group_id, r.merchant_sku,
+        r.country, r.staff_name, r.source_type, r.vid, r.item_group_id, r.registered_sku, r.merchant_sku,
         r.cost, r.gross_revenue, r.orders, r.product_impressions, r.product_clicks,
         r.roi ?? "", r.ctr ?? "", r.cvr ?? "",
       ].map((x) => `"${String(x ?? "").replace(/"/g, '""')}"`).join(",")))
       .join("\n");
+
     const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
