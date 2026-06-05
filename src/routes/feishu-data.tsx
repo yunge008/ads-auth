@@ -168,13 +168,11 @@ function GmvMaxSection() {
               <TableCell className="text-right">{Number(r.gross_revenue).toFixed(2)}</TableCell>
               <TableCell className="text-right">{r.product_impressions}</TableCell>
               <TableCell className="text-right">{r.product_clicks}</TableCell>
-              
-              <TableCell className="text-right">{pct(r.ad_video_view_rate_2s)}</TableCell>
-              <TableCell className="text-right">{pct(r.ad_video_view_rate_6s)}</TableCell>
-              <TableCell className="text-right">{pct(r.ad_video_view_rate_p25)}</TableCell>
-              <TableCell className="text-right">{pct(r.ad_video_view_rate_p50)}</TableCell>
-              <TableCell className="text-right">{pct(r.ad_video_view_rate_p75)}</TableCell>
-              <TableCell className="text-right">{pct(r.ad_video_view_rate_p100)}</TableCell>
+              <TableCell className="text-right">{pct(safeDiv(r.product_clicks, r.product_impressions))}</TableCell>
+              <TableCell className="text-right">{pct(safeDiv(r.orders, r.product_clicks))}</TableCell>
+              <TableCell className="text-right">{r.product_impressions > 0 ? ((Number(r.cost) / r.product_impressions) * 1000).toFixed(2) : "—"}</TableCell>
+              <TableCell className="text-right">{r.orders > 0 ? (Number(r.cost) / r.orders).toFixed(2) : "—"}</TableCell>
+              <TableCell className="text-right">{Number(r.cost) > 0 ? (Number(r.gross_revenue) / Number(r.cost)).toFixed(2) : "—"}</TableCell>
             </TableRow>
           ))}</TableBody>
         </Table>
