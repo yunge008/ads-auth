@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as MaterialPerformanceRouteImport } from './routes/material-performance'
+import { Route as FeishuDataRouteImport } from './routes/feishu-data'
 import { Route as CommentsRouteImport } from './routes/comments'
 import { Route as ApiTestRouteImport } from './routes/api-test'
 import { Route as IndexRouteImport } from './routes/index'
@@ -24,6 +25,11 @@ const SettingsRoute = SettingsRouteImport.update({
 const MaterialPerformanceRoute = MaterialPerformanceRouteImport.update({
   id: '/material-performance',
   path: '/material-performance',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FeishuDataRoute = FeishuDataRouteImport.update({
+  id: '/feishu-data',
+  path: '/feishu-data',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CommentsRoute = CommentsRouteImport.update({
@@ -51,6 +57,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/api-test': typeof ApiTestRoute
   '/comments': typeof CommentsRoute
+  '/feishu-data': typeof FeishuDataRoute
   '/material-performance': typeof MaterialPerformanceRoute
   '/settings': typeof SettingsRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
@@ -59,6 +66,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/api-test': typeof ApiTestRoute
   '/comments': typeof CommentsRoute
+  '/feishu-data': typeof FeishuDataRoute
   '/material-performance': typeof MaterialPerformanceRoute
   '/settings': typeof SettingsRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
@@ -68,6 +76,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/api-test': typeof ApiTestRoute
   '/comments': typeof CommentsRoute
+  '/feishu-data': typeof FeishuDataRoute
   '/material-performance': typeof MaterialPerformanceRoute
   '/settings': typeof SettingsRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
@@ -78,6 +87,7 @@ export interface FileRouteTypes {
     | '/'
     | '/api-test'
     | '/comments'
+    | '/feishu-data'
     | '/material-performance'
     | '/settings'
     | '/oauth/tiktok/callback'
@@ -86,6 +96,7 @@ export interface FileRouteTypes {
     | '/'
     | '/api-test'
     | '/comments'
+    | '/feishu-data'
     | '/material-performance'
     | '/settings'
     | '/oauth/tiktok/callback'
@@ -94,6 +105,7 @@ export interface FileRouteTypes {
     | '/'
     | '/api-test'
     | '/comments'
+    | '/feishu-data'
     | '/material-performance'
     | '/settings'
     | '/oauth/tiktok/callback'
@@ -103,6 +115,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ApiTestRoute: typeof ApiTestRoute
   CommentsRoute: typeof CommentsRoute
+  FeishuDataRoute: typeof FeishuDataRoute
   MaterialPerformanceRoute: typeof MaterialPerformanceRoute
   SettingsRoute: typeof SettingsRoute
   OauthTiktokCallbackRoute: typeof OauthTiktokCallbackRoute
@@ -122,6 +135,13 @@ declare module '@tanstack/react-router' {
       path: '/material-performance'
       fullPath: '/material-performance'
       preLoaderRoute: typeof MaterialPerformanceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/feishu-data': {
+      id: '/feishu-data'
+      path: '/feishu-data'
+      fullPath: '/feishu-data'
+      preLoaderRoute: typeof FeishuDataRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/comments': {
@@ -159,6 +179,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ApiTestRoute: ApiTestRoute,
   CommentsRoute: CommentsRoute,
+  FeishuDataRoute: FeishuDataRoute,
   MaterialPerformanceRoute: MaterialPerformanceRoute,
   SettingsRoute: SettingsRoute,
   OauthTiktokCallbackRoute: OauthTiktokCallbackRoute,

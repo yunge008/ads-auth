@@ -7,7 +7,6 @@ const TABLES = new Set(["staff_vid_map", "sku_product_map", "tiktok_comments"]);
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    await checkAdminPasscode(req, "feishu-data");
     const body = (await req.json().catch(() => ({}))) as {
       table?: string;
       page?: number;
