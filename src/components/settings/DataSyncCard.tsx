@@ -97,8 +97,14 @@ export function DataSyncCard() {
   // Run a sync loop until remaining is empty (max 10 iterations).
   const runLoop = async (label: string, s: string, e: string, initialIds?: string[]) => {
     setBusy(label);
-    setResults(new Map());
-    setProgress({ iter: 0, remaining: 0, total: 0 });
+    // Pre-populate all advertisers as "pending" so the table shows immediately.
+    const initialMap = new Map<string, AdvRow>();
+    const seedIds = initialIds && initialIds.length ? initialIds : allAdvs.map((a) => a.advertiser_id);
+    for (const id of seedIds) {
+      initialMap.set(id, { advertiser_id: id, advertiser_name: nameOf(id), status: "pending" });
+    }
+    setResults(initialMap);
+    setProgress({ iter: 0, remaining: seedIds.length, total: seedIds.length });
     const days = daysBetween(s, e);
     let queue = initialIds ? [...initialIds] : undefined; // undefined = first call syncs all
     let iter = 0;
