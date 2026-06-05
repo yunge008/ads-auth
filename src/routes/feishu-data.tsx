@@ -212,7 +212,7 @@ function GmvMaxSection() {
         setProgress({ label, current: country, done: i + 1, total: targets.length, attempt: 0 });
       }
       toast.success(`${label} 完成：${targets.length} 个国家 / 写入 ${upserted} 行${failed ? ` / ${failed} 个失败` : ""}`);
-      preview.reload();
+      reportRef.current.reload();
     } catch (e) {
       toast.error(`${label} 失败：${(e as Error).message}`);
     } finally {
