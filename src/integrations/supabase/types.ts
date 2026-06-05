@@ -68,12 +68,118 @@ export type Database = {
         }
         Relationships: []
       }
+      gmv_max_vid_daily: {
+        Row: {
+          advertiser_id: string
+          campaign_id: string
+          cost: number
+          country: string
+          cpm: number | null
+          created_at: string
+          creative_delivery_status: string | null
+          ctr: number | null
+          cvr: number | null
+          gross_revenue: number
+          id: string
+          item_group_id: string
+          orders: number
+          product_clicks: number
+          product_impressions: number
+          pulled_at: string
+          raw_payload: Json | null
+          roi: number | null
+          stat_date: string
+          updated_at: string
+          vid: string
+        }
+        Insert: {
+          advertiser_id: string
+          campaign_id?: string
+          cost?: number
+          country?: string
+          cpm?: number | null
+          created_at?: string
+          creative_delivery_status?: string | null
+          ctr?: number | null
+          cvr?: number | null
+          gross_revenue?: number
+          id?: string
+          item_group_id?: string
+          orders?: number
+          product_clicks?: number
+          product_impressions?: number
+          pulled_at?: string
+          raw_payload?: Json | null
+          roi?: number | null
+          stat_date: string
+          updated_at?: string
+          vid?: string
+        }
+        Update: {
+          advertiser_id?: string
+          campaign_id?: string
+          cost?: number
+          country?: string
+          cpm?: number | null
+          created_at?: string
+          creative_delivery_status?: string | null
+          ctr?: number | null
+          cvr?: number | null
+          gross_revenue?: number
+          id?: string
+          item_group_id?: string
+          orders?: number
+          product_clicks?: number
+          product_impressions?: number
+          pulled_at?: string
+          raw_payload?: Json | null
+          roi?: number | null
+          stat_date?: string
+          updated_at?: string
+          vid?: string
+        }
+        Relationships: []
+      }
+      sku_product_map: {
+        Row: {
+          country: string
+          created_at: string
+          id: string
+          merchant_sku: string
+          product_id: string
+          product_name: string | null
+          sku_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          country?: string
+          created_at?: string
+          id?: string
+          merchant_sku?: string
+          product_id: string
+          product_name?: string | null
+          sku_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          country?: string
+          created_at?: string
+          id?: string
+          merchant_sku?: string
+          product_id?: string
+          product_name?: string | null
+          sku_id?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       staff_sheets: {
         Row: {
           active: boolean
           created_at: string
           id: string
           name: string
+          role: string
           sheet_name: string
           sort_order: number
           updated_at: string
@@ -83,6 +189,7 @@ export type Database = {
           created_at?: string
           id?: string
           name: string
+          role?: string
           sheet_name: string
           sort_order?: number
           updated_at?: string
@@ -92,9 +199,103 @@ export type Database = {
           created_at?: string
           id?: string
           name?: string
+          role?: string
           sheet_name?: string
           sort_order?: number
           updated_at?: string
+        }
+        Relationships: []
+      }
+      staff_vid_map: {
+        Row: {
+          country: string
+          created_at: string
+          id: string
+          source_sheet: string | null
+          source_type: string
+          staff_name: string
+          updated_at: string
+          vid: string
+        }
+        Insert: {
+          country?: string
+          created_at?: string
+          id?: string
+          source_sheet?: string | null
+          source_type: string
+          staff_name: string
+          updated_at?: string
+          vid: string
+        }
+        Update: {
+          country?: string
+          created_at?: string
+          id?: string
+          source_sheet?: string | null
+          source_type?: string
+          staff_name?: string
+          updated_at?: string
+          vid?: string
+        }
+        Relationships: []
+      }
+      tiktok_comments: {
+        Row: {
+          advertiser_id: string
+          avatar_url: string | null
+          comment_create_time: string | null
+          comment_id: string
+          comment_type: string | null
+          country: string | null
+          created_at: string
+          id: string
+          like_count: number
+          parent_comment_id: string | null
+          pulled_at: string
+          reply_count: number
+          text: string | null
+          text_zh: string | null
+          updated_at: string
+          username: string | null
+          vid: string | null
+        }
+        Insert: {
+          advertiser_id: string
+          avatar_url?: string | null
+          comment_create_time?: string | null
+          comment_id: string
+          comment_type?: string | null
+          country?: string | null
+          created_at?: string
+          id?: string
+          like_count?: number
+          parent_comment_id?: string | null
+          pulled_at?: string
+          reply_count?: number
+          text?: string | null
+          text_zh?: string | null
+          updated_at?: string
+          username?: string | null
+          vid?: string | null
+        }
+        Update: {
+          advertiser_id?: string
+          avatar_url?: string | null
+          comment_create_time?: string | null
+          comment_id?: string
+          comment_type?: string | null
+          country?: string | null
+          created_at?: string
+          id?: string
+          like_count?: number
+          parent_comment_id?: string | null
+          pulled_at?: string
+          reply_count?: number
+          text?: string | null
+          text_zh?: string | null
+          updated_at?: string
+          username?: string | null
+          vid?: string | null
         }
         Relationships: []
       }
