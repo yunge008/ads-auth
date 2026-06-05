@@ -1,35 +1,40 @@
 import * as React from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
+import { RefreshCw, ChevronLeft, ChevronRight, Database, RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { invokeFn } from "@/lib/api";
 import { toast } from "sonner";
+import { DateRangeQuickSelect } from "@/components/DateRangeQuickSelect";
 
 export const Route = createFileRoute("/feishu-data")({
-  head: () => ({ meta: [{ title: "飞书已获取数据 - TikTok授权工具" }] }),
+  head: () => ({ meta: [{ title: "已获取数据查阅 - TikTok授权工具" }] }),
   component: FeishuDataPage,
 });
 
 type StaffVidRow = { country: string | null; staff_name: string | null; vid: string; source_type: string; source_sheet: string | null; updated_at: string };
 type SkuRow = { country: string | null; product_id: string; product_name: string | null; sku_id: string | null; merchant_sku: string | null; updated_at: string };
+type GmvRow = { country: string | null; advertiser_id: string; vid: string; stat_date: string; cost: number; gross_revenue: number; orders: number; product_impressions: number; product_clicks: number; roi: number | null; ctr: number | null; cvr: number | null };
 
 function FeishuDataPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-xl font-semibold tracking-tight">飞书已获取数据</h2>
-        <p className="text-sm text-muted-foreground mt-1">查看已同步到数据库的 BD、剪辑素材与 SKU 匹配数据。</p>
+        <h2 className="text-xl font-semibold tracking-tight">已获取数据查阅</h2>
+        <p className="text-sm text-muted-foreground mt-1">查看已同步到数据库的 BD、剪辑素材、SKU 匹配与 GMV Max 数据。</p>
       </div>
       <Tabs defaultValue="vids" className="space-y-4">
         <TabsList>
           <TabsTrigger value="vids">BD+剪辑素材表</TabsTrigger>
           <TabsTrigger value="sku">SKU匹配表</TabsTrigger>
+          <TabsTrigger value="gmv">GMV Max</TabsTrigger>
         </TabsList>
         <TabsContent value="vids"><StaffVidPreview /></TabsContent>
         <TabsContent value="sku"><SkuPreview /></TabsContent>
+        <TabsContent value="gmv" className="space-y-4"><GmvMaxSection /></TabsContent>
       </Tabs>
     </div>
   );
@@ -56,6 +61,86 @@ function SkuPreview() {
         <TableBody>{rows.map((r, i) => <TableRow key={`${r.product_id}-${r.merchant_sku}-${i}`}><TableCell>{r.country ?? "—"}</TableCell><TableCell className="font-mono text-xs">{r.product_id}</TableCell><TableCell>{r.product_name ?? "—"}</TableCell><TableCell className="font-mono text-xs">{r.sku_id ?? "—"}</TableCell><TableCell>{r.merchant_sku ?? "—"}</TableCell><TableCell className="text-xs">{r.updated_at?.slice(0, 19).replace("T", " ")}</TableCell></TableRow>)}</TableBody>
       </Table>
     </PreviewCard>
+  );
+}
+
+function GmvMaxSection() {
+  const today = new Date().toISOString().slice(0, 10);
+  const ago30 = new Date(Date.now() - 30 * 86400 * 1000).toISOString().slice(0, 10);
+  const [start, setStart] = React.useState(ago30);
+  const [end, setEnd] = React.useState(today);
+  const [busy, setBusy] = React.useState<string | null>(null);
+  const preview = usePreview<GmvRow>("gmv_max_vid_daily");
+
+  const run = async (label: string, work: () => Promise<unknown>) => {
+    setBusy(label);
+    try {
+      const r = (await work()) as Record<string, unknown>;
+      const summary = Object.entries(r).filter(([k]) => k !== "errors").map(([k, v]) => `${k}=${typeof v === "number" ? v : JSON.stringify(v)}`).join(" / ");
+      toast.success(`${label} 完成：${summary}`);
+      const errs = (r as { errors?: { error: string }[] }).errors;
+      if (errs?.length) toast.warning(`${errs.length} 条错误：${errs[0].error}`);
+      preview.reload();
+    } catch (e) {
+      toast.error(`${label} 失败：${(e as Error).message}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <>
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">GMV Max 回溯</CardTitle>
+          <p className="text-xs text-muted-foreground">仅拉取在「设置 / 授权」中填写了店铺ID（shop_id）的广告户；超过 30 天自动按窗口拆分。</p>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">起始</span>
+              <Input type="date" value={start} onChange={(e) => setStart(e.target.value)} className="h-8 w-40" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">结束</span>
+              <Input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className="h-8 w-40" />
+            </div>
+            <DateRangeQuickSelect onPick={(s, e) => { setStart(s); setEnd(e); }} />
+            <Button size="sm" disabled={!!busy} onClick={() => run("GMV Max 回溯", () => invokeFn<Record<string, unknown>>("gmv-max-sync", { start_date: start, end_date: end }))}>
+              <Database className={`h-4 w-4 mr-1.5 ${busy === "GMV Max 回溯" ? "animate-spin" : ""}`} />
+              开始回溯
+            </Button>
+            <Button size="sm" variant="outline" disabled={!!busy} onClick={() => {
+              const e2 = today;
+              const s2 = new Date(Date.now() - 3 * 86400 * 1000).toISOString().slice(0, 10);
+              run("拉取最近3天", () => invokeFn<Record<string, unknown>>("gmv-max-sync", { start_date: s2, end_date: e2 }));
+            }}>
+              <RotateCw className={`h-4 w-4 mr-1.5 ${busy === "拉取最近3天" ? "animate-spin" : ""}`} />
+              最近3天
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+      <PreviewCard title={`GMV Max 日报（${preview.count} 条）`} loading={preview.loading} reload={preview.reload} page={preview.page} count={preview.count} setPage={preview.setPage}>
+        <Table>
+          <TableHeader><TableRow><TableHead>国家</TableHead><TableHead>广告户</TableHead><TableHead>VID</TableHead><TableHead>日期</TableHead><TableHead className="text-right">花费</TableHead><TableHead className="text-right">GMV</TableHead><TableHead className="text-right">订单</TableHead><TableHead className="text-right">展示</TableHead><TableHead className="text-right">点击</TableHead><TableHead className="text-right">ROI</TableHead></TableRow></TableHeader>
+          <TableBody>{preview.rows.map((r, i) => (
+            <TableRow key={`${r.advertiser_id}-${r.vid}-${r.stat_date}-${i}`}>
+              <TableCell>{r.country ?? "—"}</TableCell>
+              <TableCell className="font-mono text-xs">{r.advertiser_id}</TableCell>
+              <TableCell className="font-mono text-xs">{r.vid}</TableCell>
+              <TableCell className="text-xs">{r.stat_date}</TableCell>
+              <TableCell className="text-right">{Number(r.cost).toFixed(2)}</TableCell>
+              <TableCell className="text-right">{Number(r.gross_revenue).toFixed(2)}</TableCell>
+              <TableCell className="text-right">{r.orders}</TableCell>
+              <TableCell className="text-right">{r.product_impressions}</TableCell>
+              <TableCell className="text-right">{r.product_clicks}</TableCell>
+              <TableCell className="text-right">{r.roi == null ? "—" : Number(r.roi).toFixed(2)}</TableCell>
+            </TableRow>
+          ))}</TableBody>
+        </Table>
+      </PreviewCard>
+    </>
   );
 }
 

@@ -30,7 +30,7 @@ import { invokeFn } from "@/lib/api";
 
 export function AccountsTable() {
   const { advertisers } = useBCAdvertisers();
-  const { connections: conns, countries, setCountries } = useConnections();
+  const { connections: conns, countries, shops, setCountries, setShops } = useConnections();
   const [connectOpen, setConnectOpen] = useState(false);
   const [connectLabel, setConnectLabel] = useState("");
   const [connecting, setConnecting] = useState(false);
@@ -38,6 +38,9 @@ export function AccountsTable() {
   const [editingConnLabel, setEditingConnLabel] = useState("");
   const [editingCountryAdv, setEditingCountryAdv] = useState<string | null>(null);
   const [editingCountryVal, setEditingCountryVal] = useState("");
+  const [editingShopAdv, setEditingShopAdv] = useState<string | null>(null);
+  const [editingShopId, setEditingShopId] = useState("");
+  const [editingShopName, setEditingShopName] = useState("");
 
   // Handle OAuth callback flag (new connection just added)
   useEffect(() => {
@@ -119,6 +122,19 @@ export function AccountsTable() {
     }
   };
 
+  const handleSaveShop = async (advertiser_id: string) => {
+    const shop_id = editingShopId.trim();
+    const shop_name = editingShopName.trim();
+    try {
+      await invokeFn("tiktok-connections", { op: "set_shop", advertiser_id, shop_id, shop_name });
+      toast.success("已保存店铺信息");
+      setEditingShopAdv(null);
+      setShops((prev) => ({ ...prev, [advertiser_id]: { shop_id: shop_id || null, shop_name: shop_name || null } }));
+    } catch (e) {
+      toast.error(`保存失败：${(e as Error).message}`);
+    }
+  };
+
   const advNameById = new Map(advertisers.map((a) => [a.advertiser_id, a.advertiser_name]));
   const flatRows = conns.flatMap((c) =>
     (c.advertiser_ids.length ? c.advertiser_ids : [""]).map((aid, idx) => ({
@@ -127,6 +143,8 @@ export function AccountsTable() {
       advertiser_id: aid,
       advertiser_name: aid ? (advNameById.get(aid) ?? aid) : "—",
       country: aid ? (countries[aid] ?? "") : "",
+      shop_id: aid ? (shops[aid]?.shop_id ?? "") : "",
+      shop_name: aid ? (shops[aid]?.shop_name ?? "") : "",
       created_at: c.created_at,
       is_first: idx === 0,
     })),
@@ -161,6 +179,8 @@ export function AccountsTable() {
                   <TableHead>账户名</TableHead>
                   <TableHead className="w-44">账户ID</TableHead>
                   <TableHead className="w-32">国家</TableHead>
+                  <TableHead className="w-48">店铺名</TableHead>
+                  <TableHead className="w-44">店铺ID</TableHead>
                   <TableHead className="w-40">授权时间</TableHead>
                   <TableHead className="w-16 text-right">操作</TableHead>
                 </TableRow>
@@ -168,7 +188,7 @@ export function AccountsTable() {
               <TableBody>
                 {flatRows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="h-16 text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={8} className="h-16 text-center text-sm text-muted-foreground">
                       尚无连接，点「连接 TikTok」开始首次授权
                     </TableCell>
                   </TableRow>
@@ -246,6 +266,71 @@ export function AccountsTable() {
                             }}
                           >
                             {r.country || <span className="text-muted-foreground">点击设置</span>}
+                            <Pencil className="h-3 w-3 text-muted-foreground" />
+                          </button>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {!r.advertiser_id ? (
+                          <span className="text-muted-foreground">—</span>
+                        ) : editingShopAdv === r.advertiser_id ? (
+                          <div className="flex items-center gap-1">
+                            <Input
+                              value={editingShopName}
+                              onChange={(e) => setEditingShopName(e.target.value)}
+                              placeholder="店铺名"
+                              className="h-7 w-32"
+                              autoFocus
+                            />
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 hover:underline"
+                            onClick={() => {
+                              setEditingShopAdv(r.advertiser_id);
+                              setEditingShopName(r.shop_name);
+                              setEditingShopId(r.shop_id);
+                            }}
+                          >
+                            {r.shop_name || <span className="text-muted-foreground">点击设置</span>}
+                            <Pencil className="h-3 w-3 text-muted-foreground" />
+                          </button>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {!r.advertiser_id ? (
+                          <span className="text-muted-foreground">—</span>
+                        ) : editingShopAdv === r.advertiser_id ? (
+                          <div className="flex items-center gap-1">
+                            <Input
+                              value={editingShopId}
+                              onChange={(e) => setEditingShopId(e.target.value)}
+                              placeholder="店铺ID"
+                              className="h-7 w-32 font-mono text-xs"
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") handleSaveShop(r.advertiser_id);
+                                if (e.key === "Escape") setEditingShopAdv(null);
+                              }}
+                            />
+                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => handleSaveShop(r.advertiser_id)}>
+                              <Check className="h-4 w-4" />
+                            </Button>
+                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setEditingShopAdv(null)}>
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 hover:underline font-mono text-xs"
+                            onClick={() => {
+                              setEditingShopAdv(r.advertiser_id);
+                              setEditingShopName(r.shop_name);
+                              setEditingShopId(r.shop_id);
+                            }}
+                          >
+                            {r.shop_id || <span className="text-muted-foreground font-sans">点击设置</span>}
                             <Pencil className="h-3 w-3 text-muted-foreground" />
                           </button>
                         )}
