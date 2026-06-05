@@ -238,15 +238,58 @@ Deno.serve(async (req) => {
     const countryByAdv = new Map<string, string>();
     const shopByAdv = new Map<string, string>();
     const nameByAdv = new Map<string, string>();
-    for (const r of (acRows ?? []) as { advertiser_id: string; country: string; shop_id: string | null }[]) {
+    for (const r of (acRows ?? []) as { advertiser_id: string; country: string; shop_id: string | null; advertiser_name: string | null }[]) {
       countryByAdv.set(r.advertiser_id, r.country);
       if (r.shop_id) shopByAdv.set(r.advertiser_id, r.shop_id);
+      if (r.advertiser_name) nameByAdv.set(r.advertiser_id, r.advertiser_name);
     }
 
     const requested = filterIds && filterIds.length ? filterIds : [...tokenByAdv.keys()];
     const targets = requested.filter((id) => tokenByAdv.has(id) && shopByAdv.has(id));
     const skipped = requested.filter((id) => tokenByAdv.has(id) && !shopByAdv.has(id));
     const windows = splitWindows(start_date, end_date, 30);
+
+    // Phase 0: fetch & upsert missing advertiser_name (one /advertiser/info/ call per token).
+    const missingNameByToken = new Map<string, string[]>();
+    for (const adv of targets) {
+      if (nameByAdv.has(adv)) continue;
+      const tok = tokenByAdv.get(adv)!;
+      const arr = missingNameByToken.get(tok) ?? [];
+      arr.push(adv);
+      missingNameByToken.set(tok, arr);
+    }
+    if (missingNameByToken.size > 0) {
+      const nameUpserts: { advertiser_id: string; advertiser_name: string; country: string }[] = [];
+      for (const [tok, ids] of missingNameByToken) {
+        for (let i = 0; i < ids.length; i += 100) {
+          const batch = ids.slice(i, i + 100);
+          try {
+            const data = await ttGet(tok, "/advertiser/info/", {
+              advertiser_ids: JSON.stringify(batch),
+              fields: JSON.stringify(["advertiser_id", "name", "company"]),
+            });
+            const list = (data.list ?? data) as Array<Record<string, unknown>> | Record<string, unknown>;
+            const arr = Array.isArray(list) ? list : [];
+            for (const it of arr) {
+              const id = String(it.advertiser_id ?? it.id ?? "");
+              if (!id) continue;
+              const nm = String(it.advertiser_name ?? it.name ?? it.company ?? id);
+              nameByAdv.set(id, nm);
+              nameUpserts.push({ advertiser_id: id, advertiser_name: nm, country: countryByAdv.get(id) ?? "" });
+            }
+          } catch (err) {
+            console.error("advertiser/info", (err as Error).message);
+          }
+        }
+      }
+      if (nameUpserts.length) {
+        const { error } = await db
+          .from("advertiser_countries")
+          .upsert(nameUpserts, { onConflict: "advertiser_id" });
+        if (error) console.error("upsert advertiser_name", error.message);
+      }
+    }
+
 
     const errors: { advertiser_id: string; window?: string; error: string }[] = [];
     for (const id of skipped) errors.push({ advertiser_id: id, error: "缺少店铺ID（shop_id），已跳过" });
