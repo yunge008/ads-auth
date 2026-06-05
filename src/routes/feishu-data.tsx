@@ -241,14 +241,14 @@ function GmvMaxSection() {
               <Input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className="h-8 w-40" />
             </div>
             <DateRangeQuickSelect onPick={(s, e) => { setStart(s); setEnd(e); }} />
-            <Button size="sm" disabled={!!busy} onClick={() => run("GMV Max 回溯", () => invokeFn<Record<string, unknown>>("gmv-max-sync", { start_date: start, end_date: end }))}>
+            <Button size="sm" disabled={!!busy} onClick={() => run("GMV Max 回溯", start, end)}>
               <Database className={`h-4 w-4 mr-1.5 ${busy === "GMV Max 回溯" ? "animate-spin" : ""}`} />
               开始回溯
             </Button>
             <Button size="sm" variant="outline" disabled={!!busy} onClick={() => {
               const e2 = today;
               const s2 = new Date(Date.now() - 3 * 86400 * 1000).toISOString().slice(0, 10);
-              run("拉取最近3天", () => invokeFn<Record<string, unknown>>("gmv-max-sync", { start_date: s2, end_date: e2 }));
+              run("拉取最近3天", s2, e2);
             }}>
               <RotateCw className={`h-4 w-4 mr-1.5 ${busy === "拉取最近3天" ? "animate-spin" : ""}`} />
               最近3天
