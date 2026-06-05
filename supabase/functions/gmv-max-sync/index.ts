@@ -15,7 +15,7 @@ import { admin, checkAdminPasscode, type ConnRow } from "../_shared/auth.ts";
 
 const TT = "https://business-api.tiktok.com/open_api/v1.3";
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number): Promise<void> => new Promise<void>((r) => setTimeout(() => r(), ms));
 
 function addDays(d: string, n: number): string {
   const t = new Date(d + "T00:00:00Z");
