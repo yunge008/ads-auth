@@ -3,11 +3,11 @@
 // Column mapping (1-indexed):
 //   A=序号  B=登记日期  C=国家  D=达人名称  E-F=其他  G=VID  H=授权码
 //   I=产品  ...  P=投放日期(状态/回写日期)  Q=回写状态+错误
+//   Also supports current source rows where F=视频CODE, G=授权码, H=产品/SKU.
 // Filtering rules (all must pass):
 //   - B is a recognizable date (string parseable OR Excel serial number)
 //   - C is country: length<=10, only Chinese/English letters/space
-//   - G matches /^7\d{18}$/
-//   - H matches /^#[A-Za-z0-9+/]{63}=$/
+//   - 授权码 is valid in H (old layout) or G (current layout)
 //   - P is empty AND there exists an earlier row in same sheet with non-empty P
 
 import {
@@ -23,7 +23,6 @@ type StaffIn = { name: string; sheet_name: string };
 
 
 
-const VID_RE = /^7\d{18}$/;
 const CODE_RE = /^#[A-Za-z0-9+/]{63}=$/;
 const COUNTRY_RE = /^[\u4e00-\u9fa5A-Za-z0-9\-\s]{1,10}$/;
 
@@ -136,11 +135,13 @@ Deno.serve(async (req) => {
         const country = cellText(r[2]);
         if (!COUNTRY_RE.test(country)) continue;
         const creator = cellText(r[3]);
-        const vid = cellText(r[6]);
-        if (vid && !VID_RE.test(vid)) continue;
-        const authCode = cellText(r[7]);
+        const colF = cellText(r[5]);
+        const colG = cellText(r[6]);
+        const colH = cellText(r[7]);
+        const authCode = CODE_RE.test(colH) ? colH : CODE_RE.test(colG) ? colG : "";
         if (!CODE_RE.test(authCode)) continue;
-        const product = cellText(r[8]);
+        const vid = authCode === colG ? colF : colG;
+        const product = authCode === colG ? colH : cellText(r[8]);
         const pCell = cellText(r[15]);
         if (!include_done && pCell) continue;
 
