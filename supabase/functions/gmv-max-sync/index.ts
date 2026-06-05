@@ -407,6 +407,7 @@ Deno.serve(async (req) => {
       batchStats.push({
         advertiser_id: adv,
         campaigns: campaigns.length,
+        campaigns_rank: rankByAdv.get(adv) ?? 0,
         group_batches: groupBatches,
         creative_calls: creativeCalls,
         rows: totalRows,
@@ -415,20 +416,22 @@ Deno.serve(async (req) => {
       });
     };
 
-    for (let i = 0; i < targets.length; i++) {
-      const adv = targets[i];
-      try {
-        await runAdvertiser(adv);
-        processedAdvertisers.push(adv);
-      } catch (err) {
-        if (err instanceof TimeBudgetExceeded) {
-          stoppedBeforeTimeout = {
-            reason: err.message,
-            remaining_advertiser_ids: targets.slice(i),
-          };
-          break;
+    if (!phase1Stopped) {
+      for (let i = 0; i < sortedTargets.length; i++) {
+        const adv = sortedTargets[i];
+        try {
+          await runAdvertiser(adv);
+          processedAdvertisers.push(adv);
+        } catch (err) {
+          if (err instanceof TimeBudgetExceeded) {
+            stoppedBeforeTimeout = {
+              reason: err.message,
+              remaining_advertiser_ids: sortedTargets.slice(i),
+            };
+            break;
+          }
+          errors.push({ advertiser_id: adv, error: (err as Error).message });
         }
-        errors.push({ advertiser_id: adv, error: (err as Error).message });
       }
     }
 
