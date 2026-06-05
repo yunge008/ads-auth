@@ -47,21 +47,25 @@ export async function verifyPasscode(
   requiredTab?: string,
 ): Promise<AppAccount> {
   const got = (req.headers.get("x-admin-passcode") ?? "").trim();
+  const gotName = (req.headers.get("x-admin-name") ?? "").trim();
   if (!got) throw unauthorized();
 
-  // Root env passcode (always admin; survives empty DB)
+  // Root env passcode (always admin; survives empty DB). Name is ignored.
   const envCode = Deno.env.get("ADMIN_PASSCODE");
-  if (envCode && got === envCode) return { ...ROOT_ACCOUNT };
+  if (envCode && got === envCode) {
+    return { ...ROOT_ACCOUNT, name: gotName || ROOT_ACCOUNT.name };
+  }
 
   const hash = await sha256Hex(got);
   const db = admin();
-  const { data, error } = await db
+  let q = db
     .from("app_accounts")
     .select("id,name,is_admin,tab_permissions,active")
-    .eq("passcode_hash", hash)
-    .maybeSingle();
+    .eq("passcode_hash", hash);
+  if (gotName) q = q.eq("name", gotName);
+  const { data, error } = await q.maybeSingle();
   if (error) throw new Error(error.message);
-  if (!data) throw unauthorized();
+  if (!data) throw unauthorized("用户名或密码错误");
   if (!data.active) throw forbidden("账号已停用");
 
   const acc: AppAccount = {

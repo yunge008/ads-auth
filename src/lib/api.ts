@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 
 export const PASSCODE_KEY = "tt_admin_passcode";
+export const NAME_KEY = "tt_admin_name";
 
 export function getPasscode(): string {
   if (typeof window === "undefined") return "";
@@ -13,13 +14,27 @@ export function setPasscode(v: string) {
   else window.localStorage.removeItem(PASSCODE_KEY);
 }
 
+export function getAdminName(): string {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem(NAME_KEY) ?? "";
+}
+
+export function setAdminName(v: string) {
+  if (typeof window === "undefined") return;
+  if (v) window.localStorage.setItem(NAME_KEY, v);
+  else window.localStorage.removeItem(NAME_KEY);
+}
+
 export async function invokeFn<T = unknown>(
   name: string,
   body?: Record<string, unknown>,
 ): Promise<T> {
   const { data, error } = await supabase.functions.invoke<T>(name, {
     body: body ?? {},
-    headers: { "x-admin-passcode": getPasscode() },
+    headers: {
+      "x-admin-passcode": getPasscode(),
+      "x-admin-name": getAdminName(),
+    },
   });
   if (error) {
     const err = error as unknown as { context?: Response };

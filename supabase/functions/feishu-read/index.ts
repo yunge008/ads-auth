@@ -75,7 +75,10 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     await checkAdminPasscode(req, "home");
-    const { staff } = (await req.json()) as { staff: StaffIn[] };
+    const { staff, include_done } = (await req.json()) as {
+      staff: StaffIn[];
+      include_done?: boolean;
+    };
     if (!staff?.length) throw new Error("staff 不能为空");
 
     // Load advertiser→country map + advertiser names from DB
@@ -122,11 +125,11 @@ Deno.serve(async (req) => {
           break;
         }
       }
-      if (firstPRowIdx < 0) continue;
+      if (!include_done && firstPRowIdx < 0) continue;
 
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i] ?? [];
-        if (i <= firstPRowIdx) continue;
+        if (!include_done && i <= firstPRowIdx) continue;
         const dateRaw = cellText(r[1]);
         const dateStr = dateRaw ? parseDate(r[1]) : "";
         if (dateRaw && dateStr === null) continue;
@@ -139,7 +142,7 @@ Deno.serve(async (req) => {
         if (!CODE_RE.test(authCode)) continue;
         const product = cellText(r[8]);
         const pCell = cellText(r[15]);
-        if (pCell) continue;
+        if (!include_done && pCell) continue;
 
         const matched = accByCountry.get(country) ?? [];
         const base = {

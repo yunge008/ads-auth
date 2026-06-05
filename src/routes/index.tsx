@@ -36,6 +36,7 @@ import { useBCAdvertisers, useMaterials, useStaff } from "@/lib/store";
 import {
   type Material,
   type MaterialStatus,
+  ALL_STATUSES,
 } from "@/lib/types";
 import { MultiSelect } from "@/components/MultiSelect";
 import { STATUS_RANK, StatusBadge } from "@/components/StatusBadge";
@@ -142,12 +143,12 @@ function AuthorizePage() {
     return c;
   }, [materials]);
   const statusOptions = React.useMemo(
-    () => Object.keys(statusCounts).sort((a, b) => (STATUS_RANK[a as MaterialStatus] ?? 99) - (STATUS_RANK[b as MaterialStatus] ?? 99)),
-    [statusCounts],
+    () => [...ALL_STATUSES].sort((a, b) => (STATUS_RANK[a] ?? 99) - (STATUS_RANK[b] ?? 99)),
+    [],
   );
 
 
-  const handleFetch = async () => {
+  const handleFetch = async (includeDone = false) => {
     const activeStaff = staff.filter((s) => s.active);
     if (activeStaff.length === 0) {
       toast.error("请先在「设置」中配置启用的人员");
@@ -157,6 +158,7 @@ function AuthorizePage() {
     try {
       const data = await invokeFn<{ materials: Material[]; missing_sheets?: string[] }>("feishu-read", {
         staff: activeStaff.map((s) => ({ name: s.name, sheet_name: s.sheet_name })),
+        include_done: includeDone,
       });
       const list = (data?.materials ?? []).map((m) => ({
         ...m,
@@ -184,7 +186,7 @@ function AuthorizePage() {
   };
 
   const handleAuthorize = async () => {
-    const targets = materials.filter(
+    const targets = visibleMaterials.filter(
       (m) =>
         (m.status === "待授权" || m.status === "API错误") &&
         m.advertiser_id &&
@@ -333,10 +335,16 @@ function AuthorizePage() {
             从飞书拉取未授权素材，匹配广告户后批量授权并回写。
           </p>
         </div>
-        <Button onClick={handleFetch} disabled={loading}>
-          <RefreshCw className={cn("h-4 w-4 mr-1.5", loading && "animate-spin")} />
-          获取未授权素材
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => handleFetch(true)} disabled={loading}>
+            <Download className={cn("h-4 w-4 mr-1.5", loading && "animate-spin")} />
+            获取所有素材
+          </Button>
+          <Button onClick={() => handleFetch(false)} disabled={loading}>
+            <RefreshCw className={cn("h-4 w-4 mr-1.5", loading && "animate-spin")} />
+            获取未授权素材
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
