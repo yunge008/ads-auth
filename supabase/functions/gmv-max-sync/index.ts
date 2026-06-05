@@ -453,19 +453,24 @@ Deno.serve(async (req) => {
                 const vid = String(dims.item_id ?? "");
                 if (!vid) continue;
                 const numOrNull = (k: string) => mets[k] == null ? null : Number(mets[k]);
+                const strOrNull = (k: string) => mets[k] == null ? null : String(mets[k]);
+                const rowCid = String(dims.campaign_id ?? "");
+                const meta = campaignMeta.get(rowCid);
                 upsertRows.push({
                   country: countryByAdv.get(adv) ?? "",
                   advertiser_id: adv,
-                  campaign_id: String(dims.campaign_id ?? ""),
+                  campaign_id: rowCid,
+                  campaign_name: meta?.name ?? null,
+                  campaign_operation_status: meta?.operation_status ?? null,
                   item_group_id: String(dims.item_group_id ?? ""),
                   vid,
                   item_id: vid,
                   stat_date: String(dims.stat_time_day ?? "").slice(0, 10),
-                  creative_delivery_status: mets.creative_delivery_status == null ? null : String(mets.creative_delivery_status),
-                  currency: mets.currency == null ? null : String(mets.currency),
-                  tt_account_name: null,
-                  tt_account_authorization_type: null,
-                  shop_content_type: null,
+                  creative_delivery_status: strOrNull("creative_delivery_status"),
+                  currency: strOrNull("currency"),
+                  tt_account_name: strOrNull("tt_account_name"),
+                  tt_account_authorization_type: strOrNull("tt_account_authorization_type"),
+                  shop_content_type: strOrNull("shop_content_type"),
                   ad_video_view_rate_2s: numOrNull("ad_video_view_rate_2s"),
                   ad_video_view_rate_6s: numOrNull("ad_video_view_rate_6s"),
                   ad_video_view_rate_p25: numOrNull("ad_video_view_rate_p25"),
