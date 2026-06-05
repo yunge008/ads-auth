@@ -145,9 +145,29 @@ function AuthorizePage() {
     for (const m of materials) c[m.status] = (c[m.status] ?? 0) + 1;
     return c;
   }, [materials]);
+  const staffCounts = React.useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const m of materials) c[m.staff_name] = (c[m.staff_name] ?? 0) + 1;
+    return c;
+  }, [materials]);
+  const countryCounts = React.useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const m of materials) c[m.country] = (c[m.country] ?? 0) + 1;
+    return c;
+  }, [materials]);
   const statusOptions = React.useMemo(
     () => [...ALL_STATUSES].sort((a, b) => (STATUS_RANK[a] ?? 99) - (STATUS_RANK[b] ?? 99)),
     [],
+  );
+
+  // Pagination (50 rows / page)
+  const PAGE_SIZE = 50;
+  const [page, setPage] = React.useState(1);
+  const pageCount = Math.max(1, Math.ceil(visibleMaterials.length / PAGE_SIZE));
+  React.useEffect(() => { setPage(1); }, [fStaff, fCountry, fStatus, fVid, fAuth, materials]);
+  const pagedMaterials = React.useMemo(
+    () => visibleMaterials.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [visibleMaterials, page],
   );
 
 
