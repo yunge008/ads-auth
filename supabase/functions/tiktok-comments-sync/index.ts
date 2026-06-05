@@ -21,14 +21,34 @@ type CommentRow = {
   pulled_at: string;
 };
 
-async function fetchPage(token: string, advertiser_id: string, page: number, page_size = 50) {
+function fmtDate(d: Date) {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+async function fetchPage(
+  token: string,
+  advertiser_id: string,
+  page: number,
+  start_time: string,
+  end_time: string,
+  page_size = 50,
+) {
   const url = new URL(`${TT}/comment/list/`);
   url.searchParams.set("advertiser_id", advertiser_id);
   url.searchParams.set("page", String(page));
   url.searchParams.set("page_size", String(page_size));
+  url.searchParams.set("start_time", start_time);
+  url.searchParams.set("end_time", end_time);
   const res = await fetch(url, { headers: { "Access-Token": token } });
   const j = await res.json().catch(() => ({}));
   return j;
+}
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 Deno.serve(async (req) => {
