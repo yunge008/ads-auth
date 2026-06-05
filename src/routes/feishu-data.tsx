@@ -17,13 +17,8 @@ export const Route = createFileRoute("/feishu-data")({
 
 type StaffVidRow = { country: string | null; staff_name: string | null; vid: string; source_type: string; source_sheet: string | null; updated_at: string };
 type SkuRow = { country: string | null; product_id: string; product_name: string | null; sku_id: string | null; merchant_sku: string | null; updated_at: string };
-type GmvRow = {
-  country: string | null; advertiser_id: string; vid: string; stat_date: string;
-  tt_account_name: string | null; tt_account_authorization_type: string | null; shop_content_type: string | null;
-  creative_delivery_status: string | null;
-  cost: number; orders: number; gross_revenue: number;
-  product_impressions: number; product_clicks: number;
-};
+
+
 type AdvertiserRow = { advertiser_id: string; advertiser_name: string | null; country: string | null; shop_id?: string | null };
 type SyncResp = {
   upserted: number;
@@ -45,8 +40,11 @@ type CountryProgressRow = {
   days?: number;
   error?: string;
 };
-const pct = (v: number | null | undefined) => v == null ? "—" : (Number(v) * 100).toFixed(2) + "%";
-const safeDiv = (a: number, b: number) => b > 0 ? a / b : null;
+const DELIVERY_STATUSES = ["IN_QUEUE", "LEARNING", "DELIVERING", "NOT_DELIVERYING", "NOT_ACTIVE", "AUTHORIZATION_NEEDED", "Unavailable", "Excluded", "Rejected"] as const;
+const STATUS_LABELS: Record<string, string> = {
+  IN_QUEUE: "排队中", LEARNING: "学习中", DELIVERING: "投放中", NOT_DELIVERYING: "未投放",
+  NOT_ACTIVE: "不活跃", AUTHORIZATION_NEEDED: "需要授权", Unavailable: "不可用", Excluded: "已排除", Rejected: "已拒绝",
+};
 const daysBetweenInclusive = (a: string, b: string) =>
   Math.round((new Date(b + "T00:00:00Z").getTime() - new Date(a + "T00:00:00Z").getTime()) / 86400000) + 1;
 
@@ -101,7 +99,7 @@ function GmvMaxSection() {
   const [start, setStart] = React.useState(ago30);
   const [end, setEnd] = React.useState(today);
   const [busy, setBusy] = React.useState<string | null>(null);
-  const preview = usePreview<GmvRow>("gmv_max_vid_daily");
+  const reportRef = React.useRef<{ reload: () => void }>({ reload: () => {} });
   const [nameMap, setNameMap] = React.useState<Map<string, string>>(new Map());
   const [advertisers, setAdvertisers] = React.useState<AdvertiserRow[]>([]);
   const [countryRows, setCountryRows] = React.useState<Map<string, CountryProgressRow>>(new Map());
@@ -209,7 +207,7 @@ function GmvMaxSection() {
         setProgress({ label, current: country, done: i + 1, total: targets.length, attempt: 0 });
       }
       toast.success(`${label} 完成：${targets.length} 个国家 / 写入 ${upserted} 行${failed ? ` / ${failed} 个失败` : ""}`);
-      preview.reload();
+      reportRef.current.reload();
     } catch (e) {
       toast.error(`${label} 失败：${(e as Error).message}`);
     } finally {
@@ -300,44 +298,8 @@ function GmvMaxSection() {
           )}
         </CardContent>
       </Card>
-      <PreviewCard title={`GMV Max 日报（${preview.count} 条）`} loading={preview.loading} reload={preview.reload} page={preview.page} count={preview.count} setPage={preview.setPage}>
-        <Table>
-          <TableHeader><TableRow>
-            <TableHead>国家</TableHead><TableHead>广告户</TableHead>
-            <TableHead>VID</TableHead><TableHead>TikTok账号名称</TableHead>
-            <TableHead>授权类型</TableHead><TableHead>内容类型</TableHead>
-            <TableHead>投放状态</TableHead><TableHead>日期</TableHead>
-            <TableHead className="text-right">花费</TableHead><TableHead className="text-right">订单数</TableHead>
-            <TableHead className="text-right">总收入GMV</TableHead>
-            <TableHead className="text-right">PV</TableHead><TableHead className="text-right">Click</TableHead>
-            <TableHead className="text-right">CTR</TableHead><TableHead className="text-right">CVR</TableHead>
-            <TableHead className="text-right">CPM</TableHead><TableHead className="text-right">CPA</TableHead>
-            <TableHead className="text-right">ROI</TableHead>
-          </TableRow></TableHeader>
-          <TableBody>{preview.rows.map((r, i) => (
-            <TableRow key={`${r.advertiser_id}-${r.vid}-${r.stat_date}-${i}`}>
-              <TableCell>{r.country ?? "—"}</TableCell>
-              <TableCell className="text-xs"><div>{nameMap.get(r.advertiser_id) ?? r.advertiser_id}</div><div className="text-[10px] text-muted-foreground font-mono">{r.advertiser_id}</div></TableCell>
-              <TableCell className="font-mono text-xs">{r.vid}</TableCell>
-              <TableCell className="text-xs">{r.tt_account_name ?? "—"}</TableCell>
-              <TableCell className="text-xs">{r.tt_account_authorization_type ?? "—"}</TableCell>
-              <TableCell className="text-xs">{r.shop_content_type ?? "—"}</TableCell>
-              <TableCell className="text-xs">{r.creative_delivery_status ?? "—"}</TableCell>
-              <TableCell className="text-xs">{r.stat_date}</TableCell>
-              <TableCell className="text-right">{Number(r.cost).toFixed(2)}</TableCell>
-              <TableCell className="text-right">{r.orders}</TableCell>
-              <TableCell className="text-right">{Number(r.gross_revenue).toFixed(2)}</TableCell>
-              <TableCell className="text-right">{r.product_impressions}</TableCell>
-              <TableCell className="text-right">{r.product_clicks}</TableCell>
-              <TableCell className="text-right">{pct(safeDiv(r.product_clicks, r.product_impressions))}</TableCell>
-              <TableCell className="text-right">{pct(safeDiv(r.orders, r.product_clicks))}</TableCell>
-              <TableCell className="text-right">{r.product_impressions > 0 ? ((Number(r.cost) / r.product_impressions) * 1000).toFixed(2) : "—"}</TableCell>
-              <TableCell className="text-right">{r.orders > 0 ? (Number(r.cost) / r.orders).toFixed(2) : "—"}</TableCell>
-              <TableCell className="text-right">{Number(r.cost) > 0 ? (Number(r.gross_revenue) / Number(r.cost)).toFixed(2) : "—"}</TableCell>
-            </TableRow>
-          ))}</TableBody>
-        </Table>
-      </PreviewCard>
+      <GmvDailyReport advertisers={advertisers} reportRef={reportRef} />
+
     </>
   );
 }
@@ -364,3 +326,128 @@ function PreviewCard({ title, loading, reload, page, count, setPage, children }:
   const pageCount = Math.max(1, Math.ceil(count / 100));
   return <Card><CardHeader className="flex flex-row items-center justify-between space-y-0"><CardTitle className="text-base">{title}</CardTitle><Button size="sm" variant="outline" onClick={reload} disabled={loading}><RefreshCw className={`h-4 w-4 mr-1 ${loading ? "animate-spin" : ""}`} />刷新</Button></CardHeader><CardContent><div className="border rounded-md overflow-x-auto">{children}</div><div className="mt-3 flex items-center justify-end gap-2 text-xs text-muted-foreground"><Button size="sm" variant="outline" className="h-7" disabled={page <= 1} onClick={() => setPage(page - 1)}><ChevronLeft className="h-3.5 w-3.5" /></Button><span>{page} / {pageCount}</span><Button size="sm" variant="outline" className="h-7" disabled={page >= pageCount} onClick={() => setPage(page + 1)}><ChevronRight className="h-3.5 w-3.5" /></Button></div></CardContent></Card>;
 }
+
+type DailyReportRow = {
+  country: string | null;
+  advertiser_id: string;
+  advertiser_name: string | null;
+  stat_date: string;
+  row_count: number;
+  status_counts: Record<string, number>;
+};
+
+function GmvDailyReport({ advertisers, reportRef }: { advertisers: AdvertiserRow[]; reportRef: React.MutableRefObject<{ reload: () => void }> }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const ago7 = new Date(Date.now() - 7 * 86400 * 1000).toISOString().slice(0, 10);
+  const [start, setStart] = React.useState(ago7);
+  const [end, setEnd] = React.useState(today);
+  const [country, setCountry] = React.useState("");
+  const [vid, setVid] = React.useState("");
+  const [vidInput, setVidInput] = React.useState("");
+  const [page, setPage] = React.useState(1);
+  const [rows, setRows] = React.useState<DailyReportRow[]>([]);
+  const [count, setCount] = React.useState(0);
+  const [loading, setLoading] = React.useState(false);
+
+  const countryOptions = React.useMemo(() => {
+    const set = new Set<string>();
+    for (const a of advertisers) if (a.country) set.add(a.country);
+    return Array.from(set).sort();
+  }, [advertisers]);
+
+  const reload = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await invokeFn<{ rows: DailyReportRow[]; count: number }>("gmv-max-daily-report", {
+        start_date: start, end_date: end, country: country || undefined, vid: vid || undefined, page, page_size: 100,
+      });
+      setRows(r.rows ?? []);
+      setCount(r.count ?? 0);
+    } catch (e) { toast.error(`加载失败：${(e as Error).message}`); }
+    finally { setLoading(false); }
+  }, [start, end, country, vid, page]);
+
+  React.useEffect(() => { reload(); }, [reload]);
+  React.useEffect(() => { reportRef.current.reload = reload; }, [reload, reportRef]);
+
+  const pageCount = Math.max(1, Math.ceil(count / 100));
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0">
+        <CardTitle className="text-base">GMV Max 日报（{count} 条聚合）</CardTitle>
+        <Button size="sm" variant="outline" onClick={reload} disabled={loading}>
+          <RefreshCw className={`h-4 w-4 mr-1 ${loading ? "animate-spin" : ""}`} />刷新
+        </Button>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-wrap items-end gap-2 mb-3">
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-muted-foreground">起始</span>
+            <Input type="date" value={start} onChange={(e) => { setPage(1); setStart(e.target.value); }} className="h-8 w-36" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-muted-foreground">结束</span>
+            <Input type="date" value={end} onChange={(e) => { setPage(1); setEnd(e.target.value); }} className="h-8 w-36" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-muted-foreground">国家</span>
+            <select value={country} onChange={(e) => { setPage(1); setCountry(e.target.value); }} className="h-8 w-32 rounded-md border bg-background px-2 text-sm">
+              <option value="">全部</option>
+              {countryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-muted-foreground">VID查找</span>
+            <div className="flex gap-1">
+              <Input value={vidInput} onChange={(e) => setVidInput(e.target.value)} placeholder="输入VID" className="h-8 w-44 font-mono text-xs" />
+              <Button size="sm" className="h-8" onClick={() => { setPage(1); setVid(vidInput.trim()); }}>查找</Button>
+              {vid && <Button size="sm" variant="outline" className="h-8" onClick={() => { setVidInput(""); setVid(""); setPage(1); }}>清除</Button>}
+            </div>
+          </div>
+        </div>
+        <div className="border rounded-md overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>国家</TableHead>
+                <TableHead>广告户名称</TableHead>
+                <TableHead>日期</TableHead>
+                <TableHead className="text-right">数据行数</TableHead>
+                {DELIVERY_STATUSES.map((s) => (
+                  <TableHead key={s} className="text-right text-xs" title={s}>{STATUS_LABELS[s]}</TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r, i) => (
+                <TableRow key={`${r.advertiser_id}-${r.stat_date}-${i}`}>
+                  <TableCell>{r.country ?? "—"}</TableCell>
+                  <TableCell className="text-xs">
+                    <div>{r.advertiser_name ?? r.advertiser_id}</div>
+                    <div className="text-[10px] text-muted-foreground font-mono">{r.advertiser_id}</div>
+                  </TableCell>
+                  <TableCell className="text-xs">{r.stat_date}</TableCell>
+                  <TableCell className="text-right tabular-nums">{r.row_count}</TableCell>
+                  {DELIVERY_STATUSES.map((s) => {
+                    const v = r.status_counts?.[s] ?? 0;
+                    return <TableCell key={s} className={`text-right tabular-nums ${v ? "" : "text-muted-foreground/40"}`}>{v}</TableCell>;
+                  })}
+                </TableRow>
+              ))}
+              {!rows.length && !loading && (
+                <TableRow><TableCell colSpan={4 + DELIVERY_STATUSES.length} className="text-center text-xs text-muted-foreground py-6">暂无数据</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+        <div className="mt-3 flex items-center justify-end gap-2 text-xs text-muted-foreground">
+          <Button size="sm" variant="outline" className="h-7" disabled={page <= 1} onClick={() => setPage(page - 1)}><ChevronLeft className="h-3.5 w-3.5" /></Button>
+          <span>{page} / {pageCount}</span>
+          <Button size="sm" variant="outline" className="h-7" disabled={page >= pageCount} onClick={() => setPage(page + 1)}><ChevronRight className="h-3.5 w-3.5" /></Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
