@@ -45,7 +45,11 @@ async function ttGet(token: string, path: string, params: Record<string, string>
 
 // Step 1: list all GMV Max campaign IDs for an advertiser (PRODUCT_GMV_MAX).
 // /gmv_max/campaign/get/ requires filtering.gmv_max_promotion_types (enum: PRODUCT_GMV_MAX | LIVE_GMV_MAX).
-async function fetchCampaigns(token: string, advertiser_id: string): Promise<string[]> {
+export async function fetchCampaigns(
+  token: string,
+  advertiser_id: string,
+  _ttGet: typeof ttGet = ttGet,
+): Promise<string[]> {
   const ids: string[] = [];
   let page = 1;
   const page_size = 100;
