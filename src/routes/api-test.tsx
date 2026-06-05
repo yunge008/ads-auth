@@ -12,7 +12,7 @@ export const Route = createFileRoute("/api-test")({
   component: ApiTestPage,
 });
 
-const sample = `tiktok-comments-sync {"advertiser_ids":["7589499008310345744"],"start_date":"2026-06-01","end_date":"2026-06-05","incremental":false,"max_pages":1,"debug":true}`;
+const sample = `gmv-max-sync {"mode":"incremental"}`;
 
 function parseCommand(input: string): { name: string; body: Record<string, unknown> } {
   const raw = input.trim();
