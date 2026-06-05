@@ -47,7 +47,9 @@ export async function verifyPasscode(
   requiredTab?: string,
 ): Promise<AppAccount> {
   const got = (req.headers.get("x-admin-passcode") ?? "").trim();
-  const gotName = (req.headers.get("x-admin-name") ?? "").trim();
+  const rawName = (req.headers.get("x-admin-name") ?? "").trim();
+  let gotName = rawName;
+  try { gotName = decodeURIComponent(rawName); } catch { /* keep raw */ }
   if (!got) throw unauthorized();
 
   // Root env passcode (always admin; bootstraps a DB-managed admin row so
