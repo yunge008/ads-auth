@@ -2,12 +2,19 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { getPasscode, setPasscode, invokeFn } from "@/lib/api";
+import {
+  getPasscode,
+  setPasscode,
+  getAdminName,
+  setAdminName,
+  invokeFn,
+} from "@/lib/api";
 import { accountStore, type CurrentAccount } from "@/lib/account";
 import { toast } from "sonner";
 
 export function PasscodeGate({ children }: { children: ReactNode }) {
   const [unlocked, setUnlocked] = useState(false);
+  const [name, setName] = useState("");
   const [val, setVal] = useState("");
   const [checking, setChecking] = useState(true);
 
@@ -31,6 +38,7 @@ export function PasscodeGate({ children }: { children: ReactNode }) {
       .catch(() => {
         if (!cancelled) {
           setPasscode("");
+          setAdminName("");
           accountStore.set(null);
         }
       })
@@ -42,7 +50,7 @@ export function PasscodeGate({ children }: { children: ReactNode }) {
       setUnlocked(false);
       setVal("");
       accountStore.set(null);
-      toast.error("密码已失效，请重新输入");
+      toast.error("登录已失效，请重新输入");
     };
     window.addEventListener("tt-passcode-invalid", onInvalid);
     return () => {
@@ -53,16 +61,19 @@ export function PasscodeGate({ children }: { children: ReactNode }) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const n = name.trim();
     const v = val.trim();
-    if (!v) return;
+    if (!n || !v) return;
+    setAdminName(n);
     setPasscode(v);
     setChecking(true);
     try {
       await login();
     } catch (err) {
       setPasscode("");
+      setAdminName("");
       accountStore.set(null);
-      toast.error(`密码错误：${(err as Error).message}`);
+      toast.error(`登录失败：${(err as Error).message}`);
     } finally {
       setChecking(false);
     }
@@ -86,19 +97,34 @@ export function PasscodeGate({ children }: { children: ReactNode }) {
       >
         <div className="flex items-center gap-2">
           <Lock className="h-5 w-5 text-primary" />
-          <h1 className="text-base font-semibold">访问密码</h1>
+          <h1 className="text-base font-semibold">登录</h1>
         </div>
         <p className="text-xs text-muted-foreground">
-          本工具仅限内部使用，请输入访问密码后继续。
+          本工具仅限内部使用，请输入用户名与密码后继续。
         </p>
-        <Input
-          type="password"
-          value={val}
-          onChange={(e) => setVal(e.target.value)}
-          placeholder="请输入访问密码"
-          autoFocus
-        />
-        <Button type="submit" className="w-full" disabled={!val.trim()}>
+        <div className="space-y-2">
+          <label className="text-xs text-muted-foreground">用户名</label>
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="请输入用户名"
+            autoFocus
+          />
+        </div>
+        <div className="space-y-2">
+          <label className="text-xs text-muted-foreground">密码</label>
+          <Input
+            type="password"
+            value={val}
+            onChange={(e) => setVal(e.target.value)}
+            placeholder="请输入密码"
+          />
+        </div>
+        <Button
+          type="submit"
+          className="w-full"
+          disabled={!name.trim() || !val.trim()}
+        >
           进入
         </Button>
       </form>
