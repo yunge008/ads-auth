@@ -294,6 +294,7 @@ function MaterialPerformancePage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>国家</TableHead>
+                  <TableHead>广告户</TableHead>
                   <TableHead>同事</TableHead>
                   <TableHead>来源</TableHead>
                   <TableHead>VID</TableHead>
@@ -313,12 +314,13 @@ function MaterialPerformancePage() {
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableRow><TableCell colSpan={15} className="h-20 text-center text-sm text-muted-foreground">加载中…</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={16} className="h-20 text-center text-sm text-muted-foreground">加载中…</TableCell></TableRow>
                 ) : paged.length === 0 ? (
-                  <TableRow><TableCell colSpan={15} className="h-20 text-center text-sm text-muted-foreground">暂无数据</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={16} className="h-20 text-center text-sm text-muted-foreground">暂无数据</TableCell></TableRow>
                 ) : paged.map((r, i) => (
-                  <TableRow key={`${r.country}-${r.staff_name}-${r.source_type}-${r.vid}-${r.item_group_id}-${i}`}>
+                  <TableRow key={`${r.country}-${r.staff_name}-${r.source_type}-${r.vid}-${r.item_group_id}-${r.advertiser_id}-${i}`}>
                     <TableCell>{r.country || "—"}</TableCell>
+                    <TableCell className="text-xs" title={r.advertiser_id}>{r.advertiser_name || r.advertiser_id || "—"}</TableCell>
                     <TableCell>{r.staff_name}</TableCell>
                     <TableCell className="text-xs">{r.source_type}</TableCell>
                     <TableCell className="font-mono text-xs">{r.vid}</TableCell>
@@ -337,6 +339,7 @@ function MaterialPerformancePage() {
                   </TableRow>
                 ))}
               </TableBody>
+
             </Table>
           </div>
           {filteredRows.length > PAGE_SIZE && (
