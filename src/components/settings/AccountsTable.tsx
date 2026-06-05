@@ -179,6 +179,8 @@ export function AccountsTable() {
                   <TableHead>账户名</TableHead>
                   <TableHead className="w-44">账户ID</TableHead>
                   <TableHead className="w-32">国家</TableHead>
+                  <TableHead className="w-48">店铺名</TableHead>
+                  <TableHead className="w-44">店铺ID</TableHead>
                   <TableHead className="w-40">授权时间</TableHead>
                   <TableHead className="w-16 text-right">操作</TableHead>
                 </TableRow>
@@ -186,7 +188,7 @@ export function AccountsTable() {
               <TableBody>
                 {flatRows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="h-16 text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={8} className="h-16 text-center text-sm text-muted-foreground">
                       尚无连接，点「连接 TikTok」开始首次授权
                     </TableCell>
                   </TableRow>
