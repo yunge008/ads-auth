@@ -39,19 +39,28 @@ Deno.serve(async (req) => {
     const pageSize = Math.min(500, Math.max(20, Math.floor(Number(body.page_size ?? 100)) || 100));
 
     const db = admin();
-    let q = db
-      .from("gmv_max_vid_daily")
-      .select("country,advertiser_id,vid,stat_date,creative_delivery_status")
-      .order("stat_date", { ascending: false })
-      .limit(50000);
-    if (body.start_date) q = q.gte("stat_date", body.start_date);
-    if (body.end_date) q = q.lte("stat_date", body.end_date);
-    if (body.country && body.country.trim()) q = q.eq("country", body.country.trim());
-    if (body.vid && body.vid.trim()) q = q.eq("vid", body.vid.trim());
+    const buildQuery = () => {
+      let q = db
+        .from("gmv_max_vid_daily")
+        .select("country,advertiser_id,vid,stat_date,creative_delivery_status")
+        .order("stat_date", { ascending: false });
+      if (body.start_date) q = q.gte("stat_date", body.start_date);
+      if (body.end_date) q = q.lte("stat_date", body.end_date);
+      if (body.country && body.country.trim()) q = q.eq("country", body.country.trim());
+      if (body.vid && body.vid.trim()) q = q.eq("vid", body.vid.trim());
+      return q;
+    };
 
-    const { data, error } = await q;
-    if (error) throw new Error(error.message);
-    const rows = (data ?? []) as RawRow[];
+    // Page through all matching rows (avoid 1000-row default cap and 50k truncation).
+    const PAGE = 1000;
+    const rows: RawRow[] = [];
+    for (let offset = 0; offset < 500000; offset += PAGE) {
+      const { data, error } = await buildQuery().range(offset, offset + PAGE - 1);
+      if (error) throw new Error(error.message);
+      const chunk = (data ?? []) as RawRow[];
+      rows.push(...chunk);
+      if (chunk.length < PAGE) break;
+    }
 
     // Aggregate by country+advertiser+date with DISTINCT VID counts.
     // row_count = distinct VID for that day/advertiser/country
