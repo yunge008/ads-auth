@@ -273,6 +273,7 @@ Deno.serve(async (req) => {
       try {
         campaigns = await fetchCampaigns(tok, adv, ttGet, () => ensureTime(`advertiser ${adv} campaigns`));
       } catch (err) {
+        if (err instanceof TimeBudgetExceeded) throw err;
         errors.push({ advertiser_id: adv, error: `campaign/get: ${(err as Error).message}` });
         return;
       }
@@ -308,6 +309,7 @@ Deno.serve(async (req) => {
             campaignGroups.get(cid)!.add(gid);
           }
         } catch (err) {
+          if (err instanceof TimeBudgetExceeded) throw err;
           errors.push({
             advertiser_id: adv,
             error: `group batch[${batch[0]}...x${batch.length}]: ${(err as Error).message}`,
@@ -366,6 +368,7 @@ Deno.serve(async (req) => {
                 });
               }
             } catch (err) {
+              if (err instanceof TimeBudgetExceeded) throw err;
               errors.push({
                 advertiser_id: adv,
                 window: `${s}~${e}`,
