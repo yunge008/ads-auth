@@ -22,6 +22,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         : [],
     [account],
   );
+  const mainTabs = visibleTabs.filter((t) => t.position !== "bottom");
+  const bottomTabs = visibleTabs.filter((t) => t.position === "bottom");
 
   // Route guard: kick the user to their first allowed tab if they hit a
   // restricted path directly.
@@ -56,7 +58,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <p className="text-xs text-muted-foreground mt-0.5">广告户授权管理</p>
         </div>
         <nav className="flex-1 p-3 space-y-1">
-          {visibleTabs.map((item) => {
+          {mainTabs.map((item) => {
             const active =
               item.to === "/"
                 ? location.pathname === "/"
@@ -79,6 +81,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             );
           })}
         </nav>
+        {bottomTabs.length > 0 && (
+          <nav className="p-3 border-t space-y-1">
+            {bottomTabs.map((item) => {
+              const active = location.pathname.startsWith(item.to);
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  className={cn(
+                    "flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
+                    active
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                  {item.label}
+                </Link>
+              );
+            })}
+          </nav>
+        )}
         {account && (
           <div className="px-3 py-2 border-t flex items-center gap-2 text-xs text-muted-foreground">
             <User className="h-3.5 w-3.5" />
