@@ -7,7 +7,7 @@
 import { corsHeaders } from "../_shared/feishu.ts";
 import { admin, checkAdminPasscode } from "../_shared/auth.ts";
 
-type StaffRow = { country: string; staff_name: string; vid: string; source_type: string };
+type StaffRow = { country: string; staff_name: string; vid: string; source_type: string; registered_sku: string | null };
 type DailyRow = {
   country: string;
   advertiser_id: string;
