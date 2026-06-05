@@ -53,7 +53,7 @@ Deno.serve(async (req) => {
     const db = admin();
 
     // 1) Load staff_vid_map (primary)
-    let mapQ = db.from("staff_vid_map").select("country, staff_name, vid, source_type");
+    let mapQ = db.from("staff_vid_map").select("country, staff_name, vid, source_type, registered_sku");
     if (body.countries?.length) mapQ = mapQ.in("country", body.countries);
     if (body.staff_names?.length) mapQ = mapQ.in("staff_name", body.staff_names);
     if (body.source_types?.length) mapQ = mapQ.in("source_type", body.source_types);
