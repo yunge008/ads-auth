@@ -138,10 +138,12 @@ Deno.serve(async (req) => {
           const pageInfo = j.data?.page_info ?? j.data?.pagination;
           const total = pageInfo?.total_number ?? pageInfo?.total ?? 0;
           if (page * 50 >= Number(total)) break;
+          await sleep(300);
         }
       } catch (e) {
         errors.push({ advertiser_id: advId, error: (e as Error).message });
       }
+      await sleep(500);
     }
 
     let upserted = 0;
