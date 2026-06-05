@@ -187,13 +187,11 @@ function MaterialPerformancePage() {
           <Button size="sm" variant="outline" onClick={exportCsv} disabled={filteredRows.length === 0}>
             <Download className="h-4 w-4 mr-1.5" />导出CSV
           </Button>
-          <Button size="sm" variant="outline" disabled={!!busy} onClick={() => {
-            const end = today;
-            const start = new Date(Date.now() - 3 * 86400 * 1000).toISOString().slice(0, 10);
-            syncLoop("拉取最近3天", start, end);
-          }}>
-            <Database className={`h-4 w-4 mr-1.5 ${busy === "拉取最近3天" ? "animate-spin" : ""}`} />拉取最近3天
-          </Button>
+          <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+            <span>最近刷新</span>
+            <span className="tabular-nums">{lastSyncedAt ? new Date(lastSyncedAt).toLocaleString() : "—"}</span>
+          </div>
+
         </div>
       </div>
 
