@@ -40,6 +40,8 @@ type Row = {
   roi: number | null;
   ctr: number | null;
   cvr: number | null;
+  cpm: number | null;
+  cpa: number | null;
 };
 type SeriesPoint = {
   stat_date: string;
@@ -51,6 +53,8 @@ type SeriesPoint = {
   roi: number | null;
   ctr: number | null;
   cvr: number | null;
+  cpm: number | null;
+  cpa: number | null;
 };
 
 const METRICS = [
@@ -60,6 +64,8 @@ const METRICS = [
   { key: "roi", label: "ROI", color: "#f59e0b", axis: "right" as const, defaultOn: true },
   { key: "ctr", label: "CTR", color: "#a855f7", axis: "right" as const, defaultOn: false },
   { key: "cvr", label: "CVR", color: "#ec4899", axis: "right" as const, defaultOn: false },
+  { key: "cpm", label: "CPM", color: "#14b8a6", axis: "left" as const, defaultOn: false },
+  { key: "cpa", label: "CPA", color: "#f97316", axis: "left" as const, defaultOn: false },
   { key: "product_impressions", label: "PV", color: "#6366f1", axis: "left" as const, defaultOn: false },
   { key: "product_clicks", label: "Click", color: "#06b6d4", axis: "right" as const, defaultOn: false },
 ];
@@ -180,13 +186,13 @@ function MaterialPerformancePage() {
   const exportCsv = () => {
     const headers = [
       "国家", "广告户", "同事", "来源", "VID", "商品ID", "登记SKU", "商家SKU",
-      "消耗", "收入", "订单", "展现", "点击", "ROI", "CTR", "CVR",
+      "消耗", "收入", "订单", "展现", "点击", "ROI", "CTR", "CVR", "CPM", "CPA",
     ];
     const csv = [headers.join(",")]
       .concat(filteredRows.map((r) => [
         r.country, r.advertiser_name || r.advertiser_id, r.staff_name, r.source_type, r.vid, r.item_group_id, r.registered_sku, r.merchant_sku,
         r.cost, r.gross_revenue, r.orders, r.product_impressions, r.product_clicks,
-        r.roi ?? "", r.ctr ?? "", r.cvr ?? "",
+        r.roi ?? "", r.ctr ?? "", r.cvr ?? "", r.cpm ?? "", r.cpa ?? "",
       ].map((x) => `"${String(x ?? "").replace(/"/g, '""')}"`).join(",")))
       .join("\n");
 
@@ -342,15 +348,17 @@ function MaterialPerformancePage() {
                   <TableHead className="text-right">收入</TableHead>
                   <TableHead className="text-right">CTR</TableHead>
                   <TableHead className="text-right">CVR</TableHead>
+                  <TableHead className="text-right">CPM</TableHead>
+                  <TableHead className="text-right">CPA</TableHead>
                   <TableHead className="text-right">展现</TableHead>
                   <TableHead className="text-right">点击</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableRow><TableCell colSpan={16} className="h-20 text-center text-sm text-muted-foreground">加载中…</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={18} className="h-20 text-center text-sm text-muted-foreground">加载中…</TableCell></TableRow>
                 ) : paged.length === 0 ? (
-                  <TableRow><TableCell colSpan={16} className="h-20 text-center text-sm text-muted-foreground">暂无数据</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={18} className="h-20 text-center text-sm text-muted-foreground">暂无数据</TableCell></TableRow>
                 ) : paged.map((r, i) => (
                   <TableRow key={`${r.country}-${r.staff_name}-${r.source_type}-${r.vid}-${r.item_group_id}-${r.advertiser_id}-${i}`}>
                     <TableCell>{r.country || "—"}</TableCell>
@@ -368,6 +376,8 @@ function MaterialPerformancePage() {
                     <TableCell className="text-right tabular-nums">{fmtNum(r.gross_revenue)}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmtPct(r.ctr)}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmtPct(r.cvr)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{fmtRoi(r.cpm)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{fmtRoi(r.cpa)}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmtNum(r.product_impressions)}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmtNum(r.product_clicks)}</TableCell>
                   </TableRow>

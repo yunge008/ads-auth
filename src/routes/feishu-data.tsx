@@ -23,11 +23,9 @@ type GmvRow = {
   creative_delivery_status: string | null;
   cost: number; orders: number; gross_revenue: number;
   product_impressions: number; product_clicks: number;
-  ad_video_view_rate_2s: number | null; ad_video_view_rate_6s: number | null;
-  ad_video_view_rate_p25: number | null; ad_video_view_rate_p50: number | null;
-  ad_video_view_rate_p75: number | null; ad_video_view_rate_p100: number | null;
 };
 const pct = (v: number | null | undefined) => v == null ? "—" : (Number(v) * 100).toFixed(2) + "%";
+const safeDiv = (a: number, b: number) => b > 0 ? a / b : null;
 
 function FeishuDataPage() {
   return (
@@ -151,10 +149,9 @@ function GmvMaxSection() {
             <TableHead className="text-right">花费</TableHead><TableHead className="text-right">订单数</TableHead>
             <TableHead className="text-right">总收入GMV</TableHead>
             <TableHead className="text-right">PV</TableHead><TableHead className="text-right">Click</TableHead>
-            
-            <TableHead className="text-right">2秒播放率</TableHead><TableHead className="text-right">6秒播放率</TableHead>
-            <TableHead className="text-right">25%播放率</TableHead><TableHead className="text-right">50%播放率</TableHead>
-            <TableHead className="text-right">75%播放率</TableHead><TableHead className="text-right">完播率</TableHead>
+            <TableHead className="text-right">CTR</TableHead><TableHead className="text-right">CVR</TableHead>
+            <TableHead className="text-right">CPM</TableHead><TableHead className="text-right">CPA</TableHead>
+            <TableHead className="text-right">ROI</TableHead>
           </TableRow></TableHeader>
           <TableBody>{preview.rows.map((r, i) => (
             <TableRow key={`${r.advertiser_id}-${r.vid}-${r.stat_date}-${i}`}>
@@ -171,13 +168,11 @@ function GmvMaxSection() {
               <TableCell className="text-right">{Number(r.gross_revenue).toFixed(2)}</TableCell>
               <TableCell className="text-right">{r.product_impressions}</TableCell>
               <TableCell className="text-right">{r.product_clicks}</TableCell>
-              
-              <TableCell className="text-right">{pct(r.ad_video_view_rate_2s)}</TableCell>
-              <TableCell className="text-right">{pct(r.ad_video_view_rate_6s)}</TableCell>
-              <TableCell className="text-right">{pct(r.ad_video_view_rate_p25)}</TableCell>
-              <TableCell className="text-right">{pct(r.ad_video_view_rate_p50)}</TableCell>
-              <TableCell className="text-right">{pct(r.ad_video_view_rate_p75)}</TableCell>
-              <TableCell className="text-right">{pct(r.ad_video_view_rate_p100)}</TableCell>
+              <TableCell className="text-right">{pct(safeDiv(r.product_clicks, r.product_impressions))}</TableCell>
+              <TableCell className="text-right">{pct(safeDiv(r.orders, r.product_clicks))}</TableCell>
+              <TableCell className="text-right">{r.product_impressions > 0 ? ((Number(r.cost) / r.product_impressions) * 1000).toFixed(2) : "—"}</TableCell>
+              <TableCell className="text-right">{r.orders > 0 ? (Number(r.cost) / r.orders).toFixed(2) : "—"}</TableCell>
+              <TableCell className="text-right">{Number(r.cost) > 0 ? (Number(r.gross_revenue) / Number(r.cost)).toFixed(2) : "—"}</TableCell>
             </TableRow>
           ))}</TableBody>
         </Table>
