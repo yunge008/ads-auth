@@ -97,6 +97,12 @@ function MaterialPerformancePage() {
     METRICS.filter((m) => m.defaultOn).map((m) => m.key),
   );
   const [page, setPage] = React.useState(1);
+  const [sortKey, setSortKey] = React.useState<keyof Row | null>(null);
+  const [sortDir, setSortDir] = React.useState<"asc" | "desc">("desc");
+  const toggleSort = (k: keyof Row) => {
+    if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(k); setSortDir("desc"); }
+  };
 
   const runQuery = React.useCallback(async () => {
     setLoading(true);
