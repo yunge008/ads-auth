@@ -21,23 +21,53 @@ type CommentRow = {
   pulled_at: string;
 };
 
-async function fetchPage(token: string, advertiser_id: string, page: number, page_size = 50) {
+function fmtDate(d: Date) {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+async function fetchPage(
+  token: string,
+  advertiser_id: string,
+  page: number,
+  start_time: string,
+  end_time: string,
+  page_size = 50,
+) {
   const url = new URL(`${TT}/comment/list/`);
   url.searchParams.set("advertiser_id", advertiser_id);
   url.searchParams.set("page", String(page));
   url.searchParams.set("page_size", String(page_size));
+  url.searchParams.set("start_time", start_time);
+  url.searchParams.set("end_time", end_time);
   const res = await fetch(url, { headers: { "Access-Token": token } });
   const j = await res.json().catch(() => ({}));
   return j;
+}
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     await checkAdminPasscode(req, "comments");
-    const { advertiser_ids: filterIds, max_pages = 5 } = (await req
+    const { advertiser_ids: filterIds, max_pages = 5, days = 30, start_date, end_date } = (await req
       .json()
-      .catch(() => ({}))) as { advertiser_ids?: string[]; max_pages?: number };
+      .catch(() => ({}))) as {
+      advertiser_ids?: string[];
+      max_pages?: number;
+      days?: number;
+      start_date?: string;
+      end_date?: string;
+    };
+
+    const endDate = end_date ?? fmtDate(new Date());
+    const startDate =
+      start_date ?? fmtDate(new Date(Date.now() - Math.max(1, days) * 86400 * 1000));
 
     const db = admin();
     const [{ data: conns, error: cErr }, { data: acRows, error: aErr }] = await Promise.all([
@@ -74,7 +104,7 @@ Deno.serve(async (req) => {
       const token = tokenByAdv.get(advId)!;
       try {
         for (let page = 1; page <= max_pages; page++) {
-          const j = await fetchPage(token, advId, page);
+          const j = await fetchPage(token, advId, page, startDate, endDate);
           if (j.code !== 0) {
             errors.push({ advertiser_id: advId, error: String(j.message ?? `code=${j.code}`) });
             break;
@@ -108,10 +138,12 @@ Deno.serve(async (req) => {
           const pageInfo = j.data?.page_info ?? j.data?.pagination;
           const total = pageInfo?.total_number ?? pageInfo?.total ?? 0;
           if (page * 50 >= Number(total)) break;
+          await sleep(300);
         }
       } catch (e) {
         errors.push({ advertiser_id: advId, error: (e as Error).message });
       }
+      await sleep(500);
     }
 
     let upserted = 0;

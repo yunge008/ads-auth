@@ -41,6 +41,10 @@ function CommentsPage() {
   const [fCountry, setFCountry] = React.useState<string[]>([]);
   const [fAdv, setFAdv] = React.useState<string[]>([]);
   const [page, setPage] = React.useState(1);
+  const today = new Date().toISOString().slice(0, 10);
+  const ago30 = new Date(Date.now() - 30 * 86400 * 1000).toISOString().slice(0, 10);
+  const [startDate, setStartDate] = React.useState(ago30);
+  const [endDate, setEndDate] = React.useState(today);
   const PAGE_SIZE = 50;
 
   const load = async () => {
@@ -75,8 +79,9 @@ function CommentsPage() {
   const handleSync = async () => {
     setBusy("sync");
     try {
-      const r = await invokeFn<{ upserted: number; errors: unknown[] }>("tiktok-comments-sync", {});
+      const r = await invokeFn<{ upserted: number; errors: { advertiser_id: string; error: string }[] }>("tiktok-comments-sync", { start_date: startDate, end_date: endDate });
       toast.success(`已同步 ${r.upserted} 条评论`);
+      if (r.errors?.length) toast.warning(`${r.errors.length} 个广告户出错：${r.errors[0].error}`);
       await load();
     } catch (e) { toast.error(`同步失败：${(e as Error).message}`); }
     finally { setBusy(null); }
@@ -98,7 +103,15 @@ function CommentsPage() {
           <h2 className="text-xl font-semibold tracking-tight">评论内容</h2>
           <p className="text-sm text-muted-foreground mt-1">同步广告户评论并翻译成中文</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-end gap-2">
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-muted-foreground">起始</span>
+            <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-8 w-36" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-muted-foreground">结束</span>
+            <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-8 w-36" />
+          </div>
           <Button onClick={handleSync} disabled={!!busy}>
             <RefreshCw className={`h-4 w-4 mr-1.5 ${busy === "sync" ? "animate-spin" : ""}`} />
             同步评论
