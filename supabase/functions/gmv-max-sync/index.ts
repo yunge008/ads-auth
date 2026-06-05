@@ -345,7 +345,7 @@ Deno.serve(async (req) => {
 
     // Phase 1: fetch campaigns for all advertisers first, then sort small → large
     // so big accounts go last and don't starve smaller ones on timeout.
-    const campaignsByAdv = new Map<string, string[]>();
+    const campaignsByAdv = new Map<string, CampaignInfo[]>();
     const phase1Failed = new Set<string>();
     let phase1Stopped = false;
     for (const adv of targets) {
