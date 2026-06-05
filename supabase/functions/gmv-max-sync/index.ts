@@ -343,38 +343,49 @@ Deno.serve(async (req) => {
     }[] = [];
 
     const processedAdvertisers: string[] = [];
-    let stoppedBeforeTimeout: { reason: string; remaining_advertiser_ids: string[] } | null = null;
+    let stoppedBeforeTimeout:
+      | { advertiser_id: string; remaining_campaign_ids: string[]; remaining_advertiser_ids: string[] }
+      | null = null;
 
     // Phase 1: fetch campaigns for all advertisers first, then sort small → large
     // so big accounts go last and don't starve smaller ones on timeout.
+    // If body.campaign_ids was passed (resume mode), skip fetch & sort — use as-is.
     const campaignsByAdv = new Map<string, CampaignInfo[]>();
     const phase1Failed = new Set<string>();
     let phase1Stopped = false;
-    for (const adv of targets) {
-      try {
-        ensureTime(`phase1 ${adv}`);
-        const tok = tokenByAdv.get(adv)!;
-        const cs = await fetchCampaigns(tok, adv, ttGet, () => ensureTime(`phase1 ${adv} campaigns`));
-        campaignsByAdv.set(adv, cs);
-      } catch (err) {
-        if (err instanceof TimeBudgetExceeded) {
-          stoppedBeforeTimeout = {
-            reason: err.message,
-            remaining_advertiser_ids: targets.filter(
-              (id) => !campaignsByAdv.has(id) && !phase1Failed.has(id),
-            ),
-          };
-          phase1Stopped = true;
-          break;
+    if (hasPresetCampaigns) {
+      const preset: CampaignInfo[] = presetCampaignIds.map((id) => ({ id, name: "", operation_status: "" }));
+      for (const adv of targets) campaignsByAdv.set(adv, preset);
+    } else {
+      for (const adv of targets) {
+        try {
+          ensureTime(`phase1 ${adv}`);
+          const tok = tokenByAdv.get(adv)!;
+          const cs = await fetchCampaigns(tok, adv, ttGet, () => ensureTime(`phase1 ${adv} campaigns`));
+          campaignsByAdv.set(adv, cs);
+        } catch (err) {
+          if (err instanceof TimeBudgetExceeded) {
+            stoppedBeforeTimeout = {
+              advertiser_id: "",
+              remaining_campaign_ids: [],
+              remaining_advertiser_ids: targets.filter(
+                (id) => !campaignsByAdv.has(id) && !phase1Failed.has(id),
+              ),
+            };
+            phase1Stopped = true;
+            break;
+          }
+          phase1Failed.add(adv);
+          errors.push({ advertiser_id: adv, error: `campaign/get: ${(err as Error).message}` });
         }
-        phase1Failed.add(adv);
-        errors.push({ advertiser_id: adv, error: `campaign/get: ${(err as Error).message}` });
       }
     }
 
-    const sortedTargets = [...campaignsByAdv.keys()].sort(
-      (a, b) => campaignsByAdv.get(a)!.length - campaignsByAdv.get(b)!.length,
-    );
+    const sortedTargets = hasPresetCampaigns
+      ? [...campaignsByAdv.keys()]
+      : [...campaignsByAdv.keys()].sort(
+          (a, b) => campaignsByAdv.get(a)!.length - campaignsByAdv.get(b)!.length,
+        );
     const rankByAdv = new Map<string, number>();
     sortedTargets.forEach((id, i) => rankByAdv.set(id, i + 1));
 
