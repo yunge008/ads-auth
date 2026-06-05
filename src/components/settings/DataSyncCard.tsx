@@ -130,11 +130,19 @@ export function DataSyncCard() {
         const processedThisRound = new Set<string>();
         for (const st of resp.batch_stats ?? []) {
           processedThisRound.add(st.advertiser_id);
-          updateRow(st.advertiser_id, {
-            status: "success",
-            rows: st.rows,
-            campaigns: st.campaigns,
-            days,
+          setResults((prev) => {
+            const next = new Map(prev);
+            const cur = next.get(st.advertiser_id) ?? { advertiser_id: st.advertiser_id, status: "pending" as AdvStatus };
+            next.set(st.advertiser_id, {
+              ...cur,
+              advertiser_name: nameOf(st.advertiser_id),
+              status: "success",
+              // Accumulate across resume rounds so big accounts show full totals.
+              rows: (cur.rows ?? 0) + (st.rows ?? 0),
+              campaigns: Math.max(cur.campaigns ?? 0, st.campaigns ?? 0),
+              days,
+            });
+            return next;
           });
         }
         for (const err of resp.errors ?? []) {
@@ -240,11 +248,11 @@ export function DataSyncCard() {
             </Button>
             <Button size="sm" variant="outline" disabled={!!busy} onClick={() => {
               const e2 = today;
-              const s2 = new Date(Date.now() - 3 * 86400 * 1000).toISOString().slice(0, 10);
-              runLoop("最近3天", s2, e2);
+              const s2 = new Date(Date.now() - 1 * 86400 * 1000).toISOString().slice(0, 10);
+              runLoop("今天+昨天", s2, e2);
             }}>
-              <RotateCw className={`h-4 w-4 mr-1.5 ${busy === "最近3天" ? "animate-spin" : ""}`} />
-              最近3天
+              <RotateCw className={`h-4 w-4 mr-1.5 ${busy === "今天+昨天" ? "animate-spin" : ""}`} />
+              今天+昨天
             </Button>
           </div>
 
