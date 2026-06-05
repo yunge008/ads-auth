@@ -31,7 +31,10 @@ export async function invokeFn<T = unknown>(
 ): Promise<T> {
   const { data, error } = await supabase.functions.invoke<T>(name, {
     body: body ?? {},
-    headers: { "x-admin-passcode": getPasscode() },
+    headers: {
+      "x-admin-passcode": getPasscode(),
+      "x-admin-name": getAdminName(),
+    },
   });
   if (error) {
     const err = error as unknown as { context?: Response };
