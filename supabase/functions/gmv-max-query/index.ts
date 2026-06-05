@@ -52,15 +52,25 @@ Deno.serve(async (req) => {
 
     const db = admin();
 
-    // 1) Load staff_vid_map (primary)
-    let mapQ = db.from("staff_vid_map").select("country, staff_name, vid, source_type, registered_sku");
-    if (body.countries?.length) mapQ = mapQ.in("country", body.countries);
-    if (body.staff_names?.length) mapQ = mapQ.in("staff_name", body.staff_names);
-    if (body.source_types?.length) mapQ = mapQ.in("source_type", body.source_types);
-    if (body.vids?.length) mapQ = mapQ.in("vid", body.vids);
-    const { data: mapRows, error: mapErr } = await mapQ;
-    if (mapErr) throw new Error(mapErr.message);
-    const staff = (mapRows ?? []) as StaffRow[];
+    // 1) Load staff_vid_map (primary) — paginate to bypass 1000-row default.
+    const staff: StaffRow[] = [];
+    {
+      const PAGE = 1000;
+      let from = 0;
+      for (;;) {
+        let mapQ = db.from("staff_vid_map").select("country, staff_name, vid, source_type, registered_sku");
+        if (body.countries?.length) mapQ = mapQ.in("country", body.countries);
+        if (body.staff_names?.length) mapQ = mapQ.in("staff_name", body.staff_names);
+        if (body.source_types?.length) mapQ = mapQ.in("source_type", body.source_types);
+        if (body.vids?.length) mapQ = mapQ.in("vid", body.vids);
+        const { data: mapRows, error: mapErr } = await mapQ.range(from, from + PAGE - 1);
+        if (mapErr) throw new Error(mapErr.message);
+        const rows = (mapRows ?? []) as StaffRow[];
+        staff.push(...rows);
+        if (rows.length < PAGE) break;
+        from += PAGE;
+      }
+    }
     const vidsInScope = Array.from(new Set(staff.map((s) => s.vid)));
 
     // 2) Load daily data for those vids in date range
