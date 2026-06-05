@@ -494,6 +494,12 @@ Deno.serve(async (req) => {
       }
     }
 
+    const advertiser_names: Record<string, string> = {};
+    for (const adv of targets) {
+      const nm = nameByAdv.get(adv);
+      if (nm) advertiser_names[adv] = nm;
+    }
+
     return new Response(
       JSON.stringify({
         mode,
@@ -508,6 +514,7 @@ Deno.serve(async (req) => {
         stopped_before_timeout: stoppedBeforeTimeout,
         upserted,
         batch_stats: batchStats,
+        advertiser_names,
         errors,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
