@@ -32,7 +32,7 @@ function splitWindows(start: string, end: string, max = 30): Array<[string, stri
   let cur = start;
   while (daysBetween(cur, end) >= 0) {
     const next = addDays(cur, max - 1);
-    const stop = daysBetween(next, end) > 0 ? end : next;
+    const stop = daysBetween(next, end) > 0 ? next : end;
     out.push([cur, stop]);
     cur = addDays(stop, 1);
   }
