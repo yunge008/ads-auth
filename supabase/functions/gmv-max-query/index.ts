@@ -7,7 +7,7 @@
 import { corsHeaders } from "../_shared/feishu.ts";
 import { admin, checkAdminPasscode } from "../_shared/auth.ts";
 
-type StaffRow = { country: string; staff_name: string; vid: string; source_type: string };
+type StaffRow = { country: string; staff_name: string; vid: string; source_type: string; registered_sku: string | null };
 type DailyRow = {
   country: string;
   advertiser_id: string;
@@ -53,7 +53,7 @@ Deno.serve(async (req) => {
     const db = admin();
 
     // 1) Load staff_vid_map (primary)
-    let mapQ = db.from("staff_vid_map").select("country, staff_name, vid, source_type");
+    let mapQ = db.from("staff_vid_map").select("country, staff_name, vid, source_type, registered_sku");
     if (body.countries?.length) mapQ = mapQ.in("country", body.countries);
     if (body.staff_names?.length) mapQ = mapQ.in("staff_name", body.staff_names);
     if (body.source_types?.length) mapQ = mapQ.in("source_type", body.source_types);
@@ -110,6 +110,7 @@ Deno.serve(async (req) => {
       source_type: string;
       vid: string;
       item_group_id: string;
+      registered_sku: string;
       merchant_sku: string;
       product_id: string;
       cost: number;
@@ -140,6 +141,7 @@ Deno.serve(async (req) => {
             source_type: s.source_type,
             vid: s.vid,
             item_group_id: "",
+            registered_sku: s.registered_sku ?? "",
             merchant_sku: "",
             product_id: "",
             cost: 0,
@@ -163,6 +165,7 @@ Deno.serve(async (req) => {
               source_type: s.source_type,
               vid: s.vid,
               item_group_id: d.item_group_id,
+              registered_sku: s.registered_sku ?? "",
               merchant_sku,
               product_id: d.item_group_id,
               cost: 0,
@@ -181,6 +184,7 @@ Deno.serve(async (req) => {
         }
       }
     }
+
     const rows = Array.from(aggMap.values()).map((a) => ({
       ...a,
       roi: safeDiv(a.gross_revenue, a.cost),

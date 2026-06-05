@@ -61,11 +61,16 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Dedupe by unique key (country, product_id, merchant_sku) — last wins
+    const dedup = new Map<string, (typeof rows)[number]>();
+    for (const r of rows) dedup.set(`${r.country}|${r.product_id}|${r.merchant_sku}`, r);
+    const finalRows = Array.from(dedup.values());
+
     let upserted = 0;
-    if (rows.length) {
+    if (finalRows.length) {
       const CHUNK = 500;
-      for (let i = 0; i < rows.length; i += CHUNK) {
-        const batch = rows.slice(i, i + CHUNK);
+      for (let i = 0; i < finalRows.length; i += CHUNK) {
+        const batch = finalRows.slice(i, i + CHUNK);
         const { error } = await db
           .from("sku_product_map")
           .upsert(batch, { onConflict: "country,product_id,merchant_sku" });
@@ -73,6 +78,7 @@ Deno.serve(async (req) => {
         upserted += batch.length;
       }
     }
+
 
     return new Response(JSON.stringify({ upserted }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

@@ -1,0 +1,1 @@
+ALTER TABLE public.staff_vid_map ADD COLUMN IF NOT EXISTS registered_sku text;

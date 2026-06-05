@@ -27,6 +27,7 @@ type Row = {
   source_type: string;
   vid: string;
   item_group_id: string;
+  registered_sku: string;
   merchant_sku: string;
   product_id: string;
   cost: number;
@@ -137,16 +138,17 @@ function MaterialPerformancePage() {
 
   const exportCsv = () => {
     const headers = [
-      "国家", "同事", "来源", "VID", "商品ID", "商家SKU",
+      "国家", "同事", "来源", "VID", "商品ID", "登记SKU", "商家SKU",
       "消耗", "收入", "订单", "展现", "点击", "ROI", "CTR", "CVR",
     ];
     const csv = [headers.join(",")]
       .concat(rows.map((r) => [
-        r.country, r.staff_name, r.source_type, r.vid, r.item_group_id, r.merchant_sku,
+        r.country, r.staff_name, r.source_type, r.vid, r.item_group_id, r.registered_sku, r.merchant_sku,
         r.cost, r.gross_revenue, r.orders, r.product_impressions, r.product_clicks,
         r.roi ?? "", r.ctr ?? "", r.cvr ?? "",
       ].map((x) => `"${String(x ?? "").replace(/"/g, '""')}"`).join(",")))
       .join("\n");
+
     const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -277,8 +279,10 @@ function MaterialPerformancePage() {
                   <TableHead>同事</TableHead>
                   <TableHead>来源</TableHead>
                   <TableHead>VID</TableHead>
+                  <TableHead>登记SKU</TableHead>
                   <TableHead>商家SKU</TableHead>
                   <TableHead>商品ID</TableHead>
+
                   <TableHead className="text-right">订单</TableHead>
                   <TableHead className="text-right">ROI</TableHead>
                   <TableHead className="text-right">消耗</TableHead>
@@ -291,17 +295,19 @@ function MaterialPerformancePage() {
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableRow><TableCell colSpan={14} className="h-20 text-center text-sm text-muted-foreground">加载中…</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={15} className="h-20 text-center text-sm text-muted-foreground">加载中…</TableCell></TableRow>
                 ) : paged.length === 0 ? (
-                  <TableRow><TableCell colSpan={14} className="h-20 text-center text-sm text-muted-foreground">暂无数据</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={15} className="h-20 text-center text-sm text-muted-foreground">暂无数据</TableCell></TableRow>
                 ) : paged.map((r, i) => (
                   <TableRow key={`${r.country}-${r.staff_name}-${r.source_type}-${r.vid}-${r.item_group_id}-${i}`}>
                     <TableCell>{r.country || "—"}</TableCell>
                     <TableCell>{r.staff_name}</TableCell>
                     <TableCell className="text-xs">{r.source_type}</TableCell>
                     <TableCell className="font-mono text-xs">{r.vid}</TableCell>
+                    <TableCell>{r.registered_sku || "—"}</TableCell>
                     <TableCell>{r.merchant_sku || "未匹配"}</TableCell>
                     <TableCell className="font-mono text-xs">{r.item_group_id || "—"}</TableCell>
+
                     <TableCell className="text-right tabular-nums">{fmtNum(r.orders)}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmtRoi(r.roi)}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmtNum(r.cost)}</TableCell>
