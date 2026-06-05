@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 
 export const PASSCODE_KEY = "tt_admin_passcode";
+export const NAME_KEY = "tt_admin_name";
 
 export function getPasscode(): string {
   if (typeof window === "undefined") return "";
@@ -11,6 +12,17 @@ export function setPasscode(v: string) {
   if (typeof window === "undefined") return;
   if (v) window.localStorage.setItem(PASSCODE_KEY, v);
   else window.localStorage.removeItem(PASSCODE_KEY);
+}
+
+export function getAdminName(): string {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem(NAME_KEY) ?? "";
+}
+
+export function setAdminName(v: string) {
+  if (typeof window === "undefined") return;
+  if (v) window.localStorage.setItem(NAME_KEY, v);
+  else window.localStorage.removeItem(NAME_KEY);
 }
 
 export async function invokeFn<T = unknown>(
