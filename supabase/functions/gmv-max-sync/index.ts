@@ -34,27 +34,58 @@ function safeDiv(num: number, den: number): number | null {
 
 type RawRow = Record<string, unknown>;
 
+async function ttGet(token: string, path: string, params: Record<string, string>): Promise<Record<string, unknown>> {
+  const url = new URL(`${TT}${path}`);
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+  const res = await fetch(url, { headers: { "Access-Token": token } });
+  const j = await res.json().catch(() => ({}));
+  if (j.code !== 0) throw new Error(`${path}: ${j.message ?? "unknown"}`);
+  return (j.data ?? {}) as Record<string, unknown>;
+}
+
+// Step 1: list all GMV Max campaign IDs for an advertiser.
+async function fetchCampaigns(token: string, advertiser_id: string): Promise<string[]> {
+  const ids: string[] = [];
+  let page = 1;
+  const page_size = 100;
+  for (let i = 0; i < 50; i++) {
+    const data = await ttGet(token, "/gmv_max/campaign/get/", {
+      advertiser_id,
+      page: String(page),
+      page_size: String(page_size),
+    });
+    const list = (data.list ?? []) as Array<Record<string, unknown>>;
+    for (const c of list) {
+      const cid = c.campaign_id ?? c.id;
+      if (cid != null) ids.push(String(cid));
+    }
+    const pi = (data.page_info ?? {}) as Record<string, unknown>;
+    const total = Number(pi.total_number ?? 0);
+    if (page * page_size >= total || list.length === 0) break;
+    page++;
+  }
+  return Array.from(new Set(ids));
+}
+
+// Generic paged report fetch with arbitrary dimensions + filters.
 async function fetchReport(
   token: string,
   advertiser_id: string,
   store_id: string,
   start: string,
   end: string,
+  dimensions: string[],
+  filtering?: Array<Record<string, unknown>>,
 ): Promise<RawRow[]> {
   const out: RawRow[] = [];
   let page = 1;
   const page_size = 200;
   for (let i = 0; i < 50; i++) {
-    const url = new URL(`${TT}/gmv_max/report/get/`);
-    url.searchParams.set("advertiser_id", advertiser_id);
-    url.searchParams.set("store_ids", JSON.stringify([store_id]));
-    url.searchParams.set(
-      "dimensions",
-      JSON.stringify(["campaign_id", "item_group_id", "item_id", "stat_time_day"]),
-    );
-    url.searchParams.set(
-      "metrics",
-      JSON.stringify([
+    const params: Record<string, string> = {
+      advertiser_id,
+      store_ids: JSON.stringify([store_id]),
+      dimensions: JSON.stringify(dimensions),
+      metrics: JSON.stringify([
         "creative_delivery_status",
         "cost",
         "orders",
@@ -62,18 +93,18 @@ async function fetchReport(
         "product_impressions",
         "product_clicks",
       ]),
-    );
-    url.searchParams.set("start_date", start);
-    url.searchParams.set("end_date", end);
-    url.searchParams.set("page", String(page));
-    url.searchParams.set("page_size", String(page_size));
-    const res = await fetch(url, { headers: { "Access-Token": token } });
-    const j = await res.json().catch(() => ({}));
-    if (j.code !== 0) throw new Error(`gmv_max/report/get: ${j.message ?? "unknown"}`);
-    const list = (j.data?.list ?? []) as RawRow[];
+      start_date: start,
+      end_date: end,
+      page: String(page),
+      page_size: String(page_size),
+    };
+    if (filtering && filtering.length) params.filtering = JSON.stringify(filtering);
+    const data = await ttGet(token, "/gmv_max/report/get/", params);
+    const list = (data.list ?? []) as RawRow[];
     out.push(...list);
-    const total = j.data?.page_info?.total_number ?? 0;
-    if (page * page_size >= Number(total) || list.length === 0) break;
+    const pi = (data.page_info ?? {}) as Record<string, unknown>;
+    const total = Number(pi.total_number ?? 0);
+    if (page * page_size >= total || list.length === 0) break;
     page++;
   }
   return out;
@@ -122,40 +153,82 @@ Deno.serve(async (req) => {
     for (const adv of targets) {
       const tok = tokenByAdv.get(adv)!;
       const shopId = shopByAdv.get(adv)!;
+
+      // Step 1: pull all campaign IDs for this advertiser
+      let campaigns: string[] = [];
+      try {
+        campaigns = await fetchCampaigns(tok, adv);
+      } catch (err) {
+        errors.push({ advertiser_id: adv, error: `campaign/get: ${(err as Error).message}` });
+        continue;
+      }
+      if (campaigns.length === 0) continue;
+
       for (const [s, e] of windows) {
-        try {
-          const list = await fetchReport(tok, adv, shopId, s, e);
-          for (const r of list) {
-            const dims = (r.dimensions ?? {}) as Record<string, unknown>;
-            const mets = (r.metrics ?? {}) as Record<string, unknown>;
-            const cost = Number(mets.cost ?? 0) || 0;
-            const rev = Number(mets.gross_revenue ?? 0) || 0;
-            const orders = Number(mets.orders ?? 0) || 0;
-            const imps = Number(mets.product_impressions ?? 0) || 0;
-            const clks = Number(mets.product_clicks ?? 0) || 0;
-            upsertRows.push({
-              country: countryByAdv.get(adv) ?? "",
-              advertiser_id: adv,
-              campaign_id: String(dims.campaign_id ?? ""),
-              item_group_id: String(dims.item_group_id ?? ""),
-              vid: String(dims.item_id ?? ""),
-              stat_date: String(dims.stat_time_day ?? "").slice(0, 10),
-              creative_delivery_status: (mets.creative_delivery_status as string) ?? null,
-              cost,
-              gross_revenue: rev,
-              orders,
-              product_impressions: imps,
-              product_clicks: clks,
-              roi: safeDiv(rev, cost),
-              ctr: safeDiv(clks, imps),
-              cvr: safeDiv(orders, clks),
-              cpm: safeDiv(cost, imps) === null ? null : (cost / imps) * 1000,
-              raw_payload: r,
-              pulled_at: nowIso,
-            });
+        // Step 2: per campaign, pull item_group_ids via report (item group level)
+        const groupsByCampaign = new Map<string, Set<string>>();
+        for (const cid of campaigns) {
+          try {
+            const list = await fetchReport(tok, adv, shopId, s, e,
+              ["campaign_id", "item_group_id", "stat_time_day"],
+              [{ field_name: "campaign_ids", filter_type: "IN", filter_value: JSON.stringify([cid]) }],
+            );
+            const set = groupsByCampaign.get(cid) ?? new Set<string>();
+            for (const r of list) {
+              const dims = (r.dimensions ?? {}) as Record<string, unknown>;
+              const igid = String(dims.item_group_id ?? "");
+              if (igid) set.add(igid);
+            }
+            groupsByCampaign.set(cid, set);
+          } catch (err) {
+            errors.push({ advertiser_id: adv, window: `${s}~${e}`, error: `group ${cid}: ${(err as Error).message}` });
           }
-        } catch (err) {
-          errors.push({ advertiser_id: adv, window: `${s}~${e}`, error: (err as Error).message });
+        }
+
+        // Step 3: per (campaign, item_group) pull creative-level VIDs
+        for (const [cid, gset] of groupsByCampaign) {
+          for (const igid of gset) {
+            try {
+              const list = await fetchReport(tok, adv, shopId, s, e,
+                ["campaign_id", "item_group_id", "item_id", "stat_time_day"],
+                [
+                  { field_name: "campaign_ids", filter_type: "IN", filter_value: JSON.stringify([cid]) },
+                  { field_name: "item_group_ids", filter_type: "IN", filter_value: JSON.stringify([igid]) },
+                ],
+              );
+              for (const r of list) {
+                const dims = (r.dimensions ?? {}) as Record<string, unknown>;
+                const mets = (r.metrics ?? {}) as Record<string, unknown>;
+                const cost = Number(mets.cost ?? 0) || 0;
+                const rev = Number(mets.gross_revenue ?? 0) || 0;
+                const orders = Number(mets.orders ?? 0) || 0;
+                const imps = Number(mets.product_impressions ?? 0) || 0;
+                const clks = Number(mets.product_clicks ?? 0) || 0;
+                upsertRows.push({
+                  country: countryByAdv.get(adv) ?? "",
+                  advertiser_id: adv,
+                  campaign_id: String(dims.campaign_id ?? cid),
+                  item_group_id: String(dims.item_group_id ?? igid),
+                  vid: String(dims.item_id ?? ""),
+                  stat_date: String(dims.stat_time_day ?? "").slice(0, 10),
+                  creative_delivery_status: (mets.creative_delivery_status as string) ?? null,
+                  cost,
+                  gross_revenue: rev,
+                  orders,
+                  product_impressions: imps,
+                  product_clicks: clks,
+                  roi: safeDiv(rev, cost),
+                  ctr: safeDiv(clks, imps),
+                  cvr: safeDiv(orders, clks),
+                  cpm: safeDiv(cost, imps) === null ? null : (cost / imps) * 1000,
+                  raw_payload: r,
+                  pulled_at: nowIso,
+                });
+              }
+            } catch (err) {
+              errors.push({ advertiser_id: adv, window: `${s}~${e}`, error: `creative ${cid}/${igid}: ${(err as Error).message}` });
+            }
+          }
         }
       }
     }
