@@ -133,23 +133,6 @@ function MaterialPerformancePage() {
   const paged = filteredRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
 
-  const doSync = async (fn: string, body: Record<string, unknown> = {}, label: string) => {
-    setBusy(label);
-    try {
-      const r = await invokeFn<Record<string, unknown>>(fn, body);
-      const summary = Object.entries(r)
-        .filter(([k]) => k !== "errors")
-        .map(([k, v]) => `${k}=${typeof v === "number" ? v : JSON.stringify(v)}`)
-        .join(" / ");
-      toast.success(`${label} 完成：${summary}`);
-      const errs = (r as { errors?: { error: string }[] }).errors;
-      if (errs?.length) toast.warning(`${errs.length} 条错误：${errs[0].error}`);
-      await runQuery();
-    } catch (e) {
-      toast.error(`${label} 失败：${(e as Error).message}`);
-    } finally { setBusy(null); }
-  };
-
   // Iterative sync that auto-continues remaining_advertiser_ids and surfaces
   // per-round progress as toasts, so the user can see which accounts finished.
   const syncLoop = async (label: string, s: string, e: string) => {
