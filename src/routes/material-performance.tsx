@@ -75,6 +75,32 @@ const fmtNum = (n: number) => (n ?? 0).toLocaleString(undefined, { maximumFracti
 const fmtPct = (n: number | null) => (n == null ? "—" : (n * 100).toFixed(2) + "%");
 const fmtRoi = (n: number | null) => (n == null ? "—" : n.toFixed(2));
 
+function SortTH({
+  k, label, align = "left", sortKey, sortDir, onSort,
+}: {
+  k: keyof Row;
+  label: string;
+  align?: "left" | "right";
+  sortKey: keyof Row | null;
+  sortDir: "asc" | "desc";
+  onSort: (k: keyof Row) => void;
+}) {
+  const active = sortKey === k;
+  const Icon = !active ? ArrowUpDown : sortDir === "asc" ? ArrowUp : ArrowDown;
+  return (
+    <TableHead className={align === "right" ? "text-right" : ""}>
+      <button
+        type="button"
+        onClick={() => onSort(k)}
+        className={`inline-flex items-center gap-1 hover:text-foreground ${active ? "text-foreground" : ""} ${align === "right" ? "flex-row-reverse" : ""}`}
+      >
+        <span>{label}</span>
+        <Icon className={`h-3 w-3 ${active ? "opacity-100" : "opacity-40"}`} />
+      </button>
+    </TableHead>
+  );
+}
+
 function MaterialPerformancePage() {
   const today = new Date().toISOString().slice(0, 10);
   const ago30 = new Date(Date.now() - 30 * 86400 * 1000).toISOString().slice(0, 10);
