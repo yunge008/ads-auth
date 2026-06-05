@@ -79,6 +79,12 @@ export type Database = {
       }
       gmv_max_vid_daily: {
         Row: {
+          ad_video_view_rate_2s: number | null
+          ad_video_view_rate_6s: number | null
+          ad_video_view_rate_p100: number | null
+          ad_video_view_rate_p25: number | null
+          ad_video_view_rate_p50: number | null
+          ad_video_view_rate_p75: number | null
           advertiser_id: string
           campaign_id: string
           cost: number
@@ -92,16 +98,26 @@ export type Database = {
           gross_revenue: number
           id: string
           item_group_id: string
+          item_id: string | null
           orders: number
           product_clicks: number
           product_impressions: number
           pulled_at: string
           roi: number | null
+          shop_content_type: string | null
           stat_date: string
+          tt_account_authorization_type: string | null
+          tt_account_name: string | null
           updated_at: string
           vid: string
         }
         Insert: {
+          ad_video_view_rate_2s?: number | null
+          ad_video_view_rate_6s?: number | null
+          ad_video_view_rate_p100?: number | null
+          ad_video_view_rate_p25?: number | null
+          ad_video_view_rate_p50?: number | null
+          ad_video_view_rate_p75?: number | null
           advertiser_id: string
           campaign_id?: string
           cost?: number
@@ -115,16 +131,26 @@ export type Database = {
           gross_revenue?: number
           id?: string
           item_group_id?: string
+          item_id?: string | null
           orders?: number
           product_clicks?: number
           product_impressions?: number
           pulled_at?: string
           roi?: number | null
+          shop_content_type?: string | null
           stat_date: string
+          tt_account_authorization_type?: string | null
+          tt_account_name?: string | null
           updated_at?: string
           vid?: string
         }
         Update: {
+          ad_video_view_rate_2s?: number | null
+          ad_video_view_rate_6s?: number | null
+          ad_video_view_rate_p100?: number | null
+          ad_video_view_rate_p25?: number | null
+          ad_video_view_rate_p50?: number | null
+          ad_video_view_rate_p75?: number | null
           advertiser_id?: string
           campaign_id?: string
           cost?: number
@@ -138,12 +164,16 @@ export type Database = {
           gross_revenue?: number
           id?: string
           item_group_id?: string
+          item_id?: string | null
           orders?: number
           product_clicks?: number
           product_impressions?: number
           pulled_at?: string
           roi?: number | null
+          shop_content_type?: string | null
           stat_date?: string
+          tt_account_authorization_type?: string | null
+          tt_account_name?: string | null
           updated_at?: string
           vid?: string
         }
