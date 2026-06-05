@@ -17,6 +17,8 @@ Deno.serve(async (req) => {
       label?: string;
       advertiser_id?: string;
       country?: string;
+      shop_id?: string;
+      shop_name?: string;
     };
 
     if (body.op === "delete") {
