@@ -48,8 +48,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="flex min-h-screen bg-muted/30">
-      <aside className="w-56 shrink-0 border-r bg-card flex flex-col">
+    <div className="flex h-screen bg-muted/30">
+      <aside className="w-56 shrink-0 border-r bg-card flex flex-col h-screen sticky top-0">
+
         <div className="px-5 py-5 border-b">
           <h1 className="text-base font-semibold text-foreground">AR广告工具</h1>
           <p className="text-xs text-muted-foreground mt-0.5">广告户授权管理</p>

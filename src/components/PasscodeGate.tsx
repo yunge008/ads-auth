@@ -16,7 +16,12 @@ export function PasscodeGate({ children }: { children: ReactNode }) {
   const [unlocked, setUnlocked] = useState(false);
   const [name, setName] = useState("");
   const [val, setVal] = useState("");
-  const [checking, setChecking] = useState(true);
+  // Only show the "checking" screen when we actually have a stored passcode
+  // to validate. Without it (e.g. after logout), go straight to login.
+  const [checking, setChecking] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return !!window.localStorage.getItem("tt_admin_passcode");
+  });
 
   const login = async () => {
     const { account } = await invokeFn<{ account: CurrentAccount }>(
