@@ -303,7 +303,7 @@ function GmvMaxSection() {
           )}
         </CardContent>
       </Card>
-      <GmvDailyReport advertisers={advertisers} />
+      <GmvDailyReport advertisers={advertisers} reportRef={reportRef} />
 
     </>
   );
