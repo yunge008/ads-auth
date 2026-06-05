@@ -71,7 +71,20 @@ function ApiTestPage() {
         </CardContent>
       </Card>
       <Card>
-        <CardHeader><CardTitle className="text-base">回传内容</CardTitle></CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <CardTitle className="text-base">回传内容</CardTitle>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!output}
+            onClick={() => {
+              navigator.clipboard.writeText(output);
+              toast.success("已复制回传内容");
+            }}
+          >
+            <Copy className="h-4 w-4 mr-1" />复制回传
+          </Button>
+        </CardHeader>
         <CardContent>
           <pre className="max-h-[520px] overflow-auto rounded-md border bg-muted/40 p-3 text-xs whitespace-pre-wrap">{output || "等待执行…"}</pre>
         </CardContent>

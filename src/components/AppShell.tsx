@@ -105,17 +105,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </nav>
         )}
         {account && (
-          <div className="px-3 py-2 border-t flex items-center gap-2 text-xs text-muted-foreground">
-            <User className="h-3.5 w-3.5" />
-            <span className="truncate">
-              {account.name}
-              {account.isAdmin && (
-                <span className="ml-1 text-primary">(管理员)</span>
-              )}
-            </span>
+          <div className="p-3 border-t space-y-1">
+            <div className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground">
+              <User className="h-4 w-4" />
+              <span className="truncate">
+                {account.name}
+                {account.isAdmin && (
+                  <span className="ml-1 text-primary">(管理员)</span>
+                )}
+              </span>
+            </div>
           </div>
         )}
-        <div className="p-3 border-t">
+        <div className="p-3 border-t space-y-1">
           <button
             onClick={() => {
               setPasscode("");

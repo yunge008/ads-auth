@@ -41,16 +41,16 @@ for (const adv of ADVERTISERS) {
   });
 }
 
-// ---------- fetchReport: group-level keeps PRODUCT filter; creative-level drops it ----------
+// ---------- fetchReport: scoped queries drop gmv_max_promotion_types ----------
 for (const adv of ADVERTISERS) {
-  Deno.test(`fetchReport[${adv}] group-level: filtering object has PRODUCT + extras, paginates by total_page`, async () => {
+  Deno.test(`fetchReport[${adv}] group-level with campaign_ids: omits gmv_max_promotion_types, paginates by total_page`, async () => {
     const TOTAL_PAGE = 2;
     const { fn, calls } = makeTtGet((path, params) => {
       assertEquals(path, "/gmv_max/report/get/");
       assertEquals(params.advertiser_id, adv);
       const filt = JSON.parse(params.filtering);
       assert(!Array.isArray(filt), "filtering must be object");
-      assertEquals(filt.gmv_max_promotion_types, ["PRODUCT"]);
+      assert(!("gmv_max_promotion_types" in filt), "scoped query must omit promotion type");
       assertEquals(filt.campaign_ids, [`${adv}_cid`]);
       const page = Number(params.page);
       return {
