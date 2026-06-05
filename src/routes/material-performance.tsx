@@ -7,7 +7,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
-import { RotateCw, ChevronLeft, ChevronRight, Download, Database } from "lucide-react";
+import { RotateCw, ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { toast } from "sonner";
 import { invokeFn } from "@/lib/api";
 import { MultiSelect } from "@/components/MultiSelect";
