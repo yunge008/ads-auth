@@ -295,17 +295,19 @@ function MaterialPerformancePage() {
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableRow><TableCell colSpan={14} className="h-20 text-center text-sm text-muted-foreground">加载中…</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={15} className="h-20 text-center text-sm text-muted-foreground">加载中…</TableCell></TableRow>
                 ) : paged.length === 0 ? (
-                  <TableRow><TableCell colSpan={14} className="h-20 text-center text-sm text-muted-foreground">暂无数据</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={15} className="h-20 text-center text-sm text-muted-foreground">暂无数据</TableCell></TableRow>
                 ) : paged.map((r, i) => (
                   <TableRow key={`${r.country}-${r.staff_name}-${r.source_type}-${r.vid}-${r.item_group_id}-${i}`}>
                     <TableCell>{r.country || "—"}</TableCell>
                     <TableCell>{r.staff_name}</TableCell>
                     <TableCell className="text-xs">{r.source_type}</TableCell>
                     <TableCell className="font-mono text-xs">{r.vid}</TableCell>
+                    <TableCell>{r.registered_sku || "—"}</TableCell>
                     <TableCell>{r.merchant_sku || "未匹配"}</TableCell>
                     <TableCell className="font-mono text-xs">{r.item_group_id || "—"}</TableCell>
+
                     <TableCell className="text-right tabular-nums">{fmtNum(r.orders)}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmtRoi(r.roi)}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmtNum(r.cost)}</TableCell>
