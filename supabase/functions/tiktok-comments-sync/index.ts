@@ -28,30 +28,56 @@ function fmtDate(d: Date) {
   return `${y}-${m}-${day}`;
 }
 
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function fetchAdgroups(token: string, advertiser_id: string): Promise<string[]> {
+  const ids: string[] = [];
+  let page = 1;
+  while (true) {
+    const url = new URL(`${TT}/adgroup/get/`);
+    url.searchParams.set("advertiser_id", advertiser_id);
+    url.searchParams.set("fields", JSON.stringify(["adgroup_id"]));
+    url.searchParams.set("page_size", "1000");
+    url.searchParams.set("page", String(page));
+    const res = await fetch(url, { headers: { "Access-Token": token } });
+    const j = await res.json().catch(() => ({}));
+    if (j.code !== 0) throw new Error(`adgroup/get: ${j.message ?? j.code}`);
+    const list = (j.data?.list ?? []) as { adgroup_id: string }[];
+    for (const x of list) if (x.adgroup_id) ids.push(String(x.adgroup_id));
+    const pi = j.data?.page_info;
+    const totalPage = Number(pi?.total_page ?? 1);
+    if (page >= totalPage || list.length === 0) break;
+    page += 1;
+    await sleep(150);
+  }
+  return ids;
+}
+
 async function fetchPage(
   token: string,
   advertiser_id: string,
+  adgroup_id: string,
   page: number,
   start_time: string,
   end_time: string,
-  page_size = 50,
+  page_size = 100,
 ) {
   const url = new URL(`${TT}/comment/list/`);
   url.searchParams.set("advertiser_id", advertiser_id);
-  url.searchParams.set("page", String(page));
-  url.searchParams.set("page_size", String(page_size));
+  url.searchParams.set("search_field", "ADGROUP_ID");
+  url.searchParams.set("search_value", adgroup_id);
   url.searchParams.set("start_time", start_time);
   url.searchParams.set("end_time", end_time);
-  url.searchParams.set("search_field", "COMMENT_TIME");
-  url.searchParams.set("sort_field", "COMMENT_TIME");
+  url.searchParams.set("comment_type", JSON.stringify(["ALL"]));
+  url.searchParams.set("sort_field", "CREATE_TIME");
   url.searchParams.set("sort_type", "DESC");
+  url.searchParams.set("page", String(page));
+  url.searchParams.set("page_size", String(page_size));
   const res = await fetch(url, { headers: { "Access-Token": token } });
   const j = await res.json().catch(() => ({}));
   return j;
-}
-
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
 }
 
 Deno.serve(async (req) => {
