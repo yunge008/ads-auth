@@ -100,12 +100,10 @@ export type Database = {
           orders: number
           product_clicks: number
           product_impressions: number
-          pulled_at: string
           shop_content_type: string | null
           stat_date: string
           tt_account_authorization_type: string | null
           tt_account_name: string | null
-          updated_at: string
           vid: string
         }
         Insert: {
@@ -130,12 +128,10 @@ export type Database = {
           orders?: number
           product_clicks?: number
           product_impressions?: number
-          pulled_at?: string
           shop_content_type?: string | null
           stat_date: string
           tt_account_authorization_type?: string | null
           tt_account_name?: string | null
-          updated_at?: string
           vid?: string
         }
         Update: {
@@ -160,12 +156,10 @@ export type Database = {
           orders?: number
           product_clicks?: number
           product_impressions?: number
-          pulled_at?: string
           shop_content_type?: string | null
           stat_date?: string
           tt_account_authorization_type?: string | null
           tt_account_name?: string | null
-          updated_at?: string
           vid?: string
         }
         Relationships: []
@@ -176,12 +170,10 @@ export type Database = {
           campaign_id: string | null
           created_at: string
           item_group_id: string | null
-          pulled_at: string
           shop_content_type: string | null
           title: string | null
           tt_account_authorization_type: string | null
           tt_account_name: string | null
-          updated_at: string
           vid: string
         }
         Insert: {
@@ -189,12 +181,10 @@ export type Database = {
           campaign_id?: string | null
           created_at?: string
           item_group_id?: string | null
-          pulled_at?: string
           shop_content_type?: string | null
           title?: string | null
           tt_account_authorization_type?: string | null
           tt_account_name?: string | null
-          updated_at?: string
           vid: string
         }
         Update: {
@@ -202,12 +192,10 @@ export type Database = {
           campaign_id?: string | null
           created_at?: string
           item_group_id?: string | null
-          pulled_at?: string
           shop_content_type?: string | null
           title?: string | null
           tt_account_authorization_type?: string | null
           tt_account_name?: string | null
-          updated_at?: string
           vid?: string
         }
         Relationships: []
