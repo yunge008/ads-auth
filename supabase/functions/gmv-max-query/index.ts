@@ -110,6 +110,7 @@ Deno.serve(async (req) => {
       source_type: string;
       vid: string;
       item_group_id: string;
+      registered_sku: string;
       merchant_sku: string;
       product_id: string;
       cost: number;
@@ -140,6 +141,7 @@ Deno.serve(async (req) => {
             source_type: s.source_type,
             vid: s.vid,
             item_group_id: "",
+            registered_sku: s.registered_sku ?? "",
             merchant_sku: "",
             product_id: "",
             cost: 0,
@@ -163,6 +165,7 @@ Deno.serve(async (req) => {
               source_type: s.source_type,
               vid: s.vid,
               item_group_id: d.item_group_id,
+              registered_sku: s.registered_sku ?? "",
               merchant_sku,
               product_id: d.item_group_id,
               cost: 0,
@@ -181,6 +184,7 @@ Deno.serve(async (req) => {
         }
       }
     }
+
     const rows = Array.from(aggMap.values()).map((a) => ({
       ...a,
       roi: safeDiv(a.gross_revenue, a.cost),
