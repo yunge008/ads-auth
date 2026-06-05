@@ -38,6 +38,37 @@ export async function readRange(
   spreadsheetToken: string,
   range: string, // e.g. "<sheet_id>!A2:G"
 ) {
+  // Feishu values v2 caps a single response at ~5000 cells.
+  // For open-ended ranges (e.g. "A2:G") we paginate by row chunks until empty.
+  const m = range.match(/^(.+)!([A-Z]+)(\d+):([A-Z]+)(\d*)$/);
+  if (!m) return await readRangeOnce(token, spreadsheetToken, range);
+  const [, sid, colStart, rowStartStr, colEnd, rowEndStr] = m;
+  const startRow = parseInt(rowStartStr, 10);
+  const endRow = rowEndStr ? parseInt(rowEndStr, 10) : 0; // 0 = open-ended
+  const CHUNK = 500; // 500 rows * ~8 cols = 4000 cells, under 5000 cap
+  const out: unknown[][] = [];
+  let cur = startRow;
+  while (true) {
+    const stop = endRow ? Math.min(cur + CHUNK - 1, endRow) : cur + CHUNK - 1;
+    const r = `${sid}!${colStart}${cur}:${colEnd}${stop}`;
+    const chunk = await readRangeOnce(token, spreadsheetToken, r);
+    // strip fully-empty trailing rows in chunk
+    let lastNonEmpty = -1;
+    for (let i = 0; i < chunk.length; i++) {
+      const row = chunk[i] ?? [];
+      if (row.some((c) => c != null && String(c).trim() !== "")) lastNonEmpty = i;
+    }
+    const trimmed = chunk.slice(0, lastNonEmpty + 1);
+    out.push(...trimmed);
+    // Stop if response was short (less than CHUNK rows of actual content) or we hit endRow
+    if (trimmed.length < CHUNK) break;
+    if (endRow && stop >= endRow) break;
+    cur = stop + 1;
+  }
+  return out;
+}
+
+async function readRangeOnce(token: string, spreadsheetToken: string, range: string) {
   const res = await fetch(
     `${FEISHU_BASE}/sheets/v2/spreadsheets/${spreadsheetToken}/values/${encodeURIComponent(range)}`,
     { headers: { Authorization: `Bearer ${token}` } },
@@ -46,6 +77,7 @@ export async function readRange(
   if (json.code !== 0) throw new Error(`读取 ${range} 失败: ${json.msg}`);
   return (json.data?.valueRange?.values as unknown[][]) ?? [];
 }
+
 
 export async function writeValues(
   token: string,

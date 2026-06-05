@@ -52,17 +52,21 @@ function splitWindows(start: string, end: string, max = 30): Array<[string, stri
 }
 function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
 
+async function fetchAdgroupsRaw(token: string, advertiser_id: string, page = 1) {
+  const url = new URL(`${TT}/adgroup/get/`);
+  url.searchParams.set("advertiser_id", advertiser_id);
+  url.searchParams.set("fields", JSON.stringify(["adgroup_id", "adgroup_name"]));
+  url.searchParams.set("page_size", "1000");
+  url.searchParams.set("page", String(page));
+  const res = await fetch(url, { headers: { "Access-Token": token } });
+  return await res.json().catch(() => ({}));
+}
+
 async function fetchAdgroups(token: string, advertiser_id: string): Promise<string[]> {
   const ids: string[] = [];
   let page = 1;
   while (true) {
-    const url = new URL(`${TT}/adgroup/get/`);
-    url.searchParams.set("advertiser_id", advertiser_id);
-    url.searchParams.set("fields", JSON.stringify(["adgroup_id"]));
-    url.searchParams.set("page_size", "1000");
-    url.searchParams.set("page", String(page));
-    const res = await fetch(url, { headers: { "Access-Token": token } });
-    const j = await res.json().catch(() => ({}));
+    const j = await fetchAdgroupsRaw(token, advertiser_id, page);
     if (j.code !== 0) throw new Error(`adgroup/get: ${j.message ?? j.code}`);
     const list = (j.data?.list ?? []) as { adgroup_id: string }[];
     for (const x of list) if (x.adgroup_id) ids.push(String(x.adgroup_id));
@@ -74,6 +78,7 @@ async function fetchAdgroups(token: string, advertiser_id: string): Promise<stri
   }
   return ids;
 }
+
 
 function toStartTs(d: string) {
   // TikTok comment/list/ requires "YYYY-MM-DD HH:MM:SS"
@@ -189,6 +194,7 @@ Deno.serve(async (req) => {
       const advRows: CommentRow[] = [];
       let advHadError = false;
       try {
+        const adgroupRaw = debug ? await fetchAdgroupsRaw(token, advId, 1) : null;
         const adgroups = await fetchAdgroups(token, advId);
         if (debug) {
           const firstAdgroup = adgroups[0] ?? null;
@@ -196,7 +202,6 @@ Deno.serve(async (req) => {
           const sample = firstAdgroup
             ? await fetchPage(token, advId, firstAdgroup, 1, ws, we, 100, "ADGROUP_ID")
             : null;
-          const advSample = await fetchPage(token, advId, advId, 1, ws, we, 100, "ADVERTISER_ID");
           return new Response(
             JSON.stringify({
               debug: true,
@@ -211,12 +216,14 @@ Deno.serve(async (req) => {
               windows,
               adgroup_count: adgroups.length,
               sample_adgroup_id: firstAdgroup,
+              adgroup_raw_response: adgroupRaw,
               sample_response_by_adgroup: sample,
-              sample_response_by_advertiser: advSample,
             }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" } },
           );
         }
+
+
 
         for (const agId of adgroups) {
           for (const [ws, we] of windows) {
