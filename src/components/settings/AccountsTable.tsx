@@ -122,6 +122,19 @@ export function AccountsTable() {
     }
   };
 
+  const handleSaveShop = async (advertiser_id: string) => {
+    const shop_id = editingShopId.trim();
+    const shop_name = editingShopName.trim();
+    try {
+      await invokeFn("tiktok-connections", { op: "set_shop", advertiser_id, shop_id, shop_name });
+      toast.success("已保存店铺信息");
+      setEditingShopAdv(null);
+      setShops((prev) => ({ ...prev, [advertiser_id]: { shop_id: shop_id || null, shop_name: shop_name || null } }));
+    } catch (e) {
+      toast.error(`保存失败：${(e as Error).message}`);
+    }
+  };
+
   const advNameById = new Map(advertisers.map((a) => [a.advertiser_id, a.advertiser_name]));
   const flatRows = conns.flatMap((c) =>
     (c.advertiser_ids.length ? c.advertiser_ids : [""]).map((aid, idx) => ({
@@ -130,6 +143,8 @@ export function AccountsTable() {
       advertiser_id: aid,
       advertiser_name: aid ? (advNameById.get(aid) ?? aid) : "—",
       country: aid ? (countries[aid] ?? "") : "",
+      shop_id: aid ? (shops[aid]?.shop_id ?? "") : "",
+      shop_name: aid ? (shops[aid]?.shop_name ?? "") : "",
       created_at: c.created_at,
       is_first: idx === 0,
     })),
