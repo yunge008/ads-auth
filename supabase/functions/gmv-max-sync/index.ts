@@ -73,19 +73,25 @@ async function fetchCampaigns(token: string, advertiser_id: string): Promise<str
   return Array.from(new Set(ids));
 }
 
-// Generic paged report fetch with arbitrary dimensions + filters.
-async function fetchReport(
+// Generic paged report fetch. filtering MUST be an object (not array),
+// always merged with gmv_max_promotion_types: ["PRODUCT"].
+export async function fetchReport(
   token: string,
   advertiser_id: string,
   store_id: string,
   start: string,
   end: string,
   dimensions: string[],
-  filtering?: Array<Record<string, unknown>>,
+  extraFilter: Record<string, unknown> = {},
+  _ttGet: typeof ttGet = ttGet,
 ): Promise<RawRow[]> {
   const out: RawRow[] = [];
   let page = 1;
   const page_size = 200;
+  const filtering = JSON.stringify({
+    gmv_max_promotion_types: ["PRODUCT"],
+    ...extraFilter,
+  });
   for (let i = 0; i < 50; i++) {
     const params: Record<string, string> = {
       advertiser_id,
@@ -103,18 +109,17 @@ async function fetchReport(
       end_date: end,
       page: String(page),
       page_size: String(page_size),
+      filtering,
     };
-    const mergedFiltering = [
-      { field_name: "gmv_max_promotion_types", filter_type: "IN", filter_value: JSON.stringify(["PRODUCT"]) },
-      ...(filtering ?? []),
-    ];
-    params.filtering = JSON.stringify(mergedFiltering);
-    const data = await ttGet(token, "/gmv_max/report/get/", params);
+    const data = await _ttGet(token, "/gmv_max/report/get/", params);
     const list = (data.list ?? []) as RawRow[];
     out.push(...list);
     const pi = (data.page_info ?? {}) as Record<string, unknown>;
+    const totalPage = Number(pi.total_page ?? 0);
     const total = Number(pi.total_number ?? 0);
-    if (page * page_size >= total || list.length === 0) break;
+    if (list.length === 0) break;
+    if (totalPage > 0 && page >= totalPage) break;
+    if (!totalPage && total > 0 && page * page_size >= total) break;
     page++;
   }
   return out;
