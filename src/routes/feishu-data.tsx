@@ -104,7 +104,7 @@ function GmvMaxSection() {
   const [start, setStart] = React.useState(ago30);
   const [end, setEnd] = React.useState(today);
   const [busy, setBusy] = React.useState<string | null>(null);
-  const preview = usePreview<GmvRow>("gmv_max_vid_daily");
+  const reportRef = React.useRef<{ reload: () => void }>({ reload: () => {} });
   const [nameMap, setNameMap] = React.useState<Map<string, string>>(new Map());
   const [advertisers, setAdvertisers] = React.useState<AdvertiserRow[]>([]);
   const [countryRows, setCountryRows] = React.useState<Map<string, CountryProgressRow>>(new Map());
