@@ -37,6 +37,7 @@ type RawRow = Record<string, unknown>;
 async function fetchReport(
   token: string,
   advertiser_id: string,
+  store_id: string,
   start: string,
   end: string,
 ): Promise<RawRow[]> {
@@ -46,6 +47,7 @@ async function fetchReport(
   for (let i = 0; i < 50; i++) {
     const url = new URL(`${TT}/gmv_max/report/get/`);
     url.searchParams.set("advertiser_id", advertiser_id);
+    url.searchParams.set("store_ids", JSON.stringify([store_id]));
     url.searchParams.set(
       "dimensions",
       JSON.stringify(["campaign_id", "item_group_id", "item_id", "stat_time_day"]),
