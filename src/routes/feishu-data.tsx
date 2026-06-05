@@ -71,6 +71,16 @@ function GmvMaxSection() {
   const [end, setEnd] = React.useState(today);
   const [busy, setBusy] = React.useState<string | null>(null);
   const preview = usePreview<GmvRow>("gmv_max_vid_daily");
+  const [nameMap, setNameMap] = React.useState<Map<string, string>>(new Map());
+  React.useEffect(() => {
+    invokeFn<{ rows: { advertiser_id: string; advertiser_name: string | null }[] }>(
+      "data-preview", { table: "advertiser_countries", page: 1, page_size: 500 },
+    ).then((r) => {
+      const m = new Map<string, string>();
+      for (const a of r.rows ?? []) if (a.advertiser_name) m.set(a.advertiser_id, a.advertiser_name);
+      setNameMap(m);
+    }).catch(() => {});
+  }, []);
 
   const run = async (label: string, work: () => Promise<unknown>) => {
     setBusy(label);
