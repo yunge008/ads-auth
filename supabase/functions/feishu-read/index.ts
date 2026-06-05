@@ -125,11 +125,11 @@ Deno.serve(async (req) => {
           break;
         }
       }
-      if (firstPRowIdx < 0) continue;
+      if (!include_done && firstPRowIdx < 0) continue;
 
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i] ?? [];
-        if (i <= firstPRowIdx) continue;
+        if (!include_done && i <= firstPRowIdx) continue;
         const dateRaw = cellText(r[1]);
         const dateStr = dateRaw ? parseDate(r[1]) : "";
         if (dateRaw && dateStr === null) continue;
@@ -142,7 +142,7 @@ Deno.serve(async (req) => {
         if (!CODE_RE.test(authCode)) continue;
         const product = cellText(r[8]);
         const pCell = cellText(r[15]);
-        if (pCell) continue;
+        if (!include_done && pCell) continue;
 
         const matched = accByCountry.get(country) ?? [];
         const base = {
