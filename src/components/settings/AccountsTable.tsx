@@ -270,6 +270,71 @@ export function AccountsTable() {
                           </button>
                         )}
                       </TableCell>
+                      <TableCell>
+                        {!r.advertiser_id ? (
+                          <span className="text-muted-foreground">—</span>
+                        ) : editingShopAdv === r.advertiser_id ? (
+                          <div className="flex items-center gap-1">
+                            <Input
+                              value={editingShopName}
+                              onChange={(e) => setEditingShopName(e.target.value)}
+                              placeholder="店铺名"
+                              className="h-7 w-32"
+                              autoFocus
+                            />
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 hover:underline"
+                            onClick={() => {
+                              setEditingShopAdv(r.advertiser_id);
+                              setEditingShopName(r.shop_name);
+                              setEditingShopId(r.shop_id);
+                            }}
+                          >
+                            {r.shop_name || <span className="text-muted-foreground">点击设置</span>}
+                            <Pencil className="h-3 w-3 text-muted-foreground" />
+                          </button>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {!r.advertiser_id ? (
+                          <span className="text-muted-foreground">—</span>
+                        ) : editingShopAdv === r.advertiser_id ? (
+                          <div className="flex items-center gap-1">
+                            <Input
+                              value={editingShopId}
+                              onChange={(e) => setEditingShopId(e.target.value)}
+                              placeholder="店铺ID"
+                              className="h-7 w-32 font-mono text-xs"
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") handleSaveShop(r.advertiser_id);
+                                if (e.key === "Escape") setEditingShopAdv(null);
+                              }}
+                            />
+                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => handleSaveShop(r.advertiser_id)}>
+                              <Check className="h-4 w-4" />
+                            </Button>
+                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setEditingShopAdv(null)}>
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 hover:underline font-mono text-xs"
+                            onClick={() => {
+                              setEditingShopAdv(r.advertiser_id);
+                              setEditingShopName(r.shop_name);
+                              setEditingShopId(r.shop_id);
+                            }}
+                          >
+                            {r.shop_id || <span className="text-muted-foreground font-sans">点击设置</span>}
+                            <Pencil className="h-3 w-3 text-muted-foreground" />
+                          </button>
+                        )}
+                      </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {r.is_first ? new Date(r.created_at).toLocaleString() : null}
                       </TableCell>
