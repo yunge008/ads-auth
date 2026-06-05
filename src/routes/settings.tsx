@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { AccountsTable } from "@/components/settings/AccountsTable";
 import { StaffTable } from "@/components/settings/StaffTable";
 import { AccountsManager } from "@/components/settings/AccountsManager";
+import { DataSyncCard } from "@/components/settings/DataSyncCard";
 import { useCurrentAccount } from "@/lib/account";
 
 export const Route = createFileRoute("/settings")({
@@ -34,7 +35,10 @@ function SettingsPage() {
         </div>
       </div>
 
+      <DataSyncCard />
+
       {account?.isAdmin && <AccountsManager />}
     </div>
   );
 }
+
