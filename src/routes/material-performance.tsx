@@ -348,6 +348,8 @@ function MaterialPerformancePage() {
                   <TableHead className="text-right">收入</TableHead>
                   <TableHead className="text-right">CTR</TableHead>
                   <TableHead className="text-right">CVR</TableHead>
+                  <TableHead className="text-right">CPM</TableHead>
+                  <TableHead className="text-right">CPA</TableHead>
                   <TableHead className="text-right">展现</TableHead>
                   <TableHead className="text-right">点击</TableHead>
                 </TableRow>
