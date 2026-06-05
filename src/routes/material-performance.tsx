@@ -96,12 +96,6 @@ function MaterialPerformancePage() {
       const r = await invokeFn<{ rows: Row[]; series: SeriesPoint[] }>("gmv-max-query", {
         start_date: startDate,
         end_date: endDate,
-        countries: fCountry.length ? fCountry : undefined,
-        staff_names: fStaff.length ? fStaff : undefined,
-        source_types: fSource.length ? fSource : undefined,
-        vids: fVid.trim() ? fVid.split(/[\s,，]+/).filter(Boolean) : undefined,
-        merchant_skus: fSku.trim() ? fSku.split(/[\s,，]+/).filter(Boolean) : undefined,
-        product_ids: fPid.trim() ? fPid.split(/[\s,，]+/).filter(Boolean) : undefined,
       });
       setRows(r.rows ?? []);
       setSeries(r.series ?? []);
@@ -109,16 +103,33 @@ function MaterialPerformancePage() {
     } catch (e) {
       toast.error(`查询失败：${(e as Error).message}`);
     } finally { setLoading(false); }
-  }, [startDate, endDate, fCountry, fStaff, fSource, fVid, fSku, fPid]);
+  }, [startDate, endDate]);
 
-  React.useEffect(() => { runQuery(); }, []); // initial load
+  React.useEffect(() => { runQuery(); }, []); // auto on mount
 
   const countries = React.useMemo(() => Array.from(new Set(rows.map((r) => r.country).filter(Boolean))), [rows]);
   const staffs = React.useMemo(() => Array.from(new Set(rows.map((r) => r.staff_name).filter(Boolean))), [rows]);
   const sources = React.useMemo(() => Array.from(new Set(rows.map((r) => r.source_type).filter(Boolean))), [rows]);
 
-  const paged = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const filteredRows = React.useMemo(() => {
+    const vids = fVid.trim() ? fVid.split(/[\s,，]+/).filter(Boolean) : null;
+    const skus = fSku.trim() ? fSku.split(/[\s,，]+/).filter(Boolean) : null;
+    const pids = fPid.trim() ? fPid.split(/[\s,，]+/).filter(Boolean) : null;
+    return rows.filter((r) => {
+      if (fCountry.length && !fCountry.includes(r.country)) return false;
+      if (fStaff.length && !fStaff.includes(r.staff_name)) return false;
+      if (fSource.length && !fSource.includes(r.source_type)) return false;
+      if (vids && !vids.some((v) => r.vid?.includes(v))) return false;
+      if (skus && !skus.some((s) => r.merchant_sku?.includes(s))) return false;
+      if (pids && !pids.some((p) => r.product_id?.includes(p))) return false;
+      return true;
+    });
+  }, [rows, fCountry, fStaff, fSource, fVid, fSku, fPid]);
+
+  React.useEffect(() => { setPage(1); }, [filteredRows.length]);
+
+  const paged = filteredRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
 
   const doSync = async (fn: string, body: Record<string, unknown> = {}, label: string) => {
     setBusy(label);
@@ -131,6 +142,7 @@ function MaterialPerformancePage() {
       toast.success(`${label} 完成：${summary}`);
       const errs = (r as { errors?: { error: string }[] }).errors;
       if (errs?.length) toast.warning(`${errs.length} 条错误：${errs[0].error}`);
+      await runQuery();
     } catch (e) {
       toast.error(`${label} 失败：${(e as Error).message}`);
     } finally { setBusy(null); }
@@ -142,7 +154,7 @@ function MaterialPerformancePage() {
       "消耗", "收入", "订单", "展现", "点击", "ROI", "CTR", "CVR",
     ];
     const csv = [headers.join(",")]
-      .concat(rows.map((r) => [
+      .concat(filteredRows.map((r) => [
         r.country, r.staff_name, r.source_type, r.vid, r.item_group_id, r.registered_sku, r.merchant_sku,
         r.cost, r.gross_revenue, r.orders, r.product_impressions, r.product_clicks,
         r.roi ?? "", r.ctr ?? "", r.cvr ?? "",
@@ -166,6 +178,21 @@ function MaterialPerformancePage() {
           <p className="text-sm text-muted-foreground mt-1">GMV Max VID 维度数据 · 关联剪辑/BD 飞书表与 SKU 匹配表</p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-muted-foreground">起始</span>
+            <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-8 w-40" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-muted-foreground">结束</span>
+            <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-8 w-40" />
+          </div>
+          <DateRangeQuickSelect onPick={(s, e) => { setStartDate(s); setEndDate(e); }} />
+          <Button size="sm" onClick={runQuery} disabled={loading}>
+            <RotateCw className={`h-4 w-4 mr-1.5 ${loading ? "animate-spin" : ""}`} />查询
+          </Button>
+          <Button size="sm" variant="outline" onClick={exportCsv} disabled={filteredRows.length === 0}>
+            <Download className="h-4 w-4 mr-1.5" />导出CSV
+          </Button>
           <Button size="sm" variant="outline" disabled={!!busy} onClick={() => {
             const end = today;
             const start = new Date(Date.now() - 3 * 86400 * 1000).toISOString().slice(0, 10);
@@ -173,23 +200,13 @@ function MaterialPerformancePage() {
           }}>
             <Database className={`h-4 w-4 mr-1.5 ${busy === "拉取最近3天" ? "animate-spin" : ""}`} />拉取最近3天
           </Button>
-          <p className="text-xs text-muted-foreground self-center">完整同步/回溯请到「设置 → 数据同步」</p>
         </div>
       </div>
 
       <Card>
         <CardHeader className="pb-3 space-y-3">
-          <CardTitle className="text-base">筛选与查询</CardTitle>
+          <CardTitle className="text-base">筛选当前结果</CardTitle>
           <div className="flex flex-wrap items-end gap-2">
-            <div className="flex flex-col gap-1">
-              <span className="text-xs text-muted-foreground">起始</span>
-              <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-8 w-40" />
-            </div>
-            <div className="flex flex-col gap-1">
-              <span className="text-xs text-muted-foreground">结束</span>
-              <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-8 w-40" />
-            </div>
-            <DateRangeQuickSelect onPick={(s, e) => { setStartDate(s); setEndDate(e); }} />
             <MultiSelect label="国家" options={countries} value={fCountry} onChange={setFCountry} />
             <MultiSelect label="同事" options={staffs} value={fStaff} onChange={setFStaff} />
             <MultiSelect label="来源" options={sources} value={fSource} onChange={setFSource} />
@@ -205,12 +222,11 @@ function MaterialPerformancePage() {
               <span className="text-xs text-muted-foreground">商品ID</span>
               <Input value={fPid} onChange={(e) => setFPid(e.target.value)} placeholder="可多个" className="h-8 w-40" />
             </div>
-            <Button size="sm" onClick={runQuery} disabled={loading}>
-              <RotateCw className={`h-4 w-4 mr-1.5 ${loading ? "animate-spin" : ""}`} />查询
-            </Button>
-            <Button size="sm" variant="outline" onClick={exportCsv} disabled={rows.length === 0}>
-              <Download className="h-4 w-4 mr-1.5" />导出CSV
-            </Button>
+            {(fCountry.length || fStaff.length || fSource.length || fVid || fSku || fPid) ? (
+              <Button size="sm" variant="ghost" onClick={() => { setFCountry([]); setFStaff([]); setFSource([]); setFVid(""); setFSku(""); setFPid(""); }}>
+                清空筛选
+              </Button>
+            ) : null}
           </div>
         </CardHeader>
       </Card>
