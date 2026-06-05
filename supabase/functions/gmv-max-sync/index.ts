@@ -126,7 +126,7 @@ export async function fetchCampaigns(
       filtering,
       page: String(page),
       page_size: String(page_size),
-    });
+    }, undefined, undefined, _ensureTime);
     const list = (data.list ?? []) as Array<Record<string, unknown>>;
     for (const c of list) {
       const cid = c.campaign_id ?? c.id;
