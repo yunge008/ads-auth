@@ -99,7 +99,16 @@ Deno.serve(async (req) => {
     }
 
     const all = Array.from(groups.values())
-      .map((g) => ({ ...g, advertiser_name: nameMap.get(g.advertiser_id) ?? null }))
+      .map((g) => ({
+        country: g.country,
+        advertiser_id: g.advertiser_id,
+        advertiser_name: nameMap.get(g.advertiser_id) ?? null,
+        stat_date: g.stat_date,
+        row_count: g.vids.size,
+        status_counts: Object.fromEntries(
+          STATUS_KEYS.map((k) => [k, g.vidsByStatus.get(k)!.size]),
+        ) as Record<StatusKey, number>,
+      }))
       .sort((a, b) => b.stat_date.localeCompare(a.stat_date)
         || String(a.country ?? "").localeCompare(String(b.country ?? ""))
         || a.advertiser_id.localeCompare(b.advertiser_id));
