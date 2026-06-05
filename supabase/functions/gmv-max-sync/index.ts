@@ -183,14 +183,29 @@ export async function fetchReport(
       advertiser_id,
       store_ids: JSON.stringify([store_id]),
       dimensions: JSON.stringify(dimensions),
-      metrics: JSON.stringify(selectedMetrics),
+      metrics: JSON.stringify(activeMetrics),
       start_date: start,
       end_date: end,
       page: String(page),
       page_size: String(page_size),
       filtering,
     };
-    const data = await _ttGet(token, "/gmv_max/report/get/", params);
+    let data: Record<string, unknown>;
+    try {
+      data = await _ttGet(token, "/gmv_max/report/get/", params);
+    } catch (err) {
+      const msg = (err as Error).message ?? "";
+      const m = msg.match(/Invalid metric\(s\):\s*'\[([^\]]+)\]'/);
+      if (m) {
+        const bad = m[1].split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+        const next = activeMetrics.filter((x) => !bad.includes(x));
+        if (next.length && next.length < activeMetrics.length) {
+          activeMetrics = next;
+          continue; // retry same page with reduced metrics
+        }
+      }
+      throw err;
+    }
     const list = (data.list ?? []) as RawRow[];
     for (const row of list) {
       const key = JSON.stringify((row.dimensions ?? row) as Record<string, unknown>);
