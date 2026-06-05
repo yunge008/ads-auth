@@ -283,7 +283,7 @@ function MaterialPerformancePage() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">
-            汇总表 <span className="text-xs font-normal text-muted-foreground ml-1">（共 {rows.length} 行）</span>
+            汇总表 <span className="text-xs font-normal text-muted-foreground ml-1">（筛选后 {filteredRows.length} / 共 {rows.length} 行）</span>
           </CardTitle>
         </CardHeader>
         <CardContent>
