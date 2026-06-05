@@ -17,7 +17,18 @@ export const Route = createFileRoute("/feishu-data")({
 
 type StaffVidRow = { country: string | null; staff_name: string | null; vid: string; source_type: string; source_sheet: string | null; updated_at: string };
 type SkuRow = { country: string | null; product_id: string; product_name: string | null; sku_id: string | null; merchant_sku: string | null; updated_at: string };
-type GmvRow = { country: string | null; advertiser_id: string; vid: string; stat_date: string; cost: number; gross_revenue: number; orders: number; product_impressions: number; product_clicks: number; roi: number | null; ctr: number | null; cvr: number | null };
+type GmvRow = {
+  country: string | null; advertiser_id: string; vid: string; item_id: string | null; stat_date: string;
+  tt_account_name: string | null; tt_account_authorization_type: string | null; shop_content_type: string | null;
+  creative_delivery_status: string | null;
+  cost: number; orders: number; gross_revenue: number;
+  product_impressions: number; product_clicks: number;
+  roi: number | null; ctr: number | null; cvr: number | null;
+  ad_video_view_rate_2s: number | null; ad_video_view_rate_6s: number | null;
+  ad_video_view_rate_p25: number | null; ad_video_view_rate_p50: number | null;
+  ad_video_view_rate_p75: number | null; ad_video_view_rate_p100: number | null;
+};
+const pct = (v: number | null | undefined) => v == null ? "—" : (Number(v) * 100).toFixed(2) + "%";
 
 function FeishuDataPage() {
   return (
