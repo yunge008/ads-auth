@@ -8,14 +8,21 @@
 // - backfill:    last 30 days
 // - incremental: last 3 days
 // - custom:      requires start_date / end_date
-// Optimized: drops the intermediate item_group enumeration; batches campaign_ids
-// directly into the creative-level report. Adds QPS sleep + 429 retry.
+// Serial single-token sync. It stops before the Edge runtime hard timeout and
+// returns the remaining advertiser_ids so the caller can resume without a 504.
 import { corsHeaders } from "../_shared/feishu.ts";
 import { admin, checkAdminPasscode, type ConnRow } from "../_shared/auth.ts";
 
 const TT = "https://business-api.tiktok.com/open_api/v1.3";
 
 const sleep = (ms: number): Promise<void> => new Promise<void>((r) => setTimeout(() => r(), ms));
+
+class TimeBudgetExceeded extends Error {
+  constructor(stage: string) {
+    super(`time budget exceeded at ${stage}`);
+    this.name = "TimeBudgetExceeded";
+  }
+}
 
 function addDays(d: string, n: number): string {
   const t = new Date(d + "T00:00:00Z");
@@ -49,6 +56,7 @@ function chunk<T>(arr: T[], size: number): T[][] {
 }
 
 type RawRow = Record<string, unknown>;
+type TimeBudgetChecker = () => void;
 
 // Rate-limited (≤ ~3 QPS) + retry on "Too many requests" with exponential backoff.
 // Other errors fail fast (don't waste QPD on bad filters / invalid metrics).
@@ -62,8 +70,21 @@ export async function ttGet(
   for (let attempt = 0; attempt < retries; attempt++) {
     const url = new URL(`${TT}${path}`);
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-    const res = await fetch(url, { headers: { "Access-Token": token } });
-    const j = await res.json().catch(() => ({}));
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
+    let j: Record<string, unknown>;
+    try {
+      const res = await fetch(url, { headers: { "Access-Token": token }, signal: controller.signal });
+      j = await res.json().catch(() => ({}));
+    } catch (err) {
+      if (attempt < retries - 1) {
+        await _sleep(1000 * Math.pow(2, attempt));
+        continue;
+      }
+      throw new Error(`${path}: network/timeout ${(err as Error).message}`);
+    } finally {
+      clearTimeout(timeoutId);
+    }
     if (j.code === 0) {
       await _sleep(300);
       return (j.data ?? {}) as Record<string, unknown>;
@@ -84,12 +105,14 @@ export async function fetchCampaigns(
   token: string,
   advertiser_id: string,
   _ttGet: typeof ttGet = ttGet,
+  _ensureTime?: TimeBudgetChecker,
 ): Promise<string[]> {
   const ids: string[] = [];
   let page = 1;
   const page_size = 100;
   const filtering = JSON.stringify({ gmv_max_promotion_types: ["PRODUCT_GMV_MAX"] });
   for (let i = 0; i < 50; i++) {
+    _ensureTime?.();
     const data = await _ttGet(token, "/gmv_max/campaign/get/", {
       advertiser_id,
       filtering,
@@ -125,6 +148,7 @@ export async function fetchReport(
   extraFilter: Record<string, unknown> = {},
   metrics?: string[],
   _ttGet: typeof ttGet = ttGet,
+  _ensureTime?: TimeBudgetChecker,
 ): Promise<RawRow[]> {
   const out: RawRow[] = [];
   const seen = new Set<string>();
@@ -135,6 +159,7 @@ export async function fetchReport(
     : ["cost", "orders", "gross_revenue"]);
   const filtering = JSON.stringify({ ...extraFilter });
   for (let i = 0; i < 100; i++) {
+    _ensureTime?.();
     const params: Record<string, string> = {
       advertiser_id,
       store_ids: JSON.stringify([store_id]),
@@ -175,9 +200,13 @@ Deno.serve(async (req) => {
       advertiser_ids?: string[];
       mode?: "backfill" | "incremental" | "custom";
       batch_size?: number;
-      concurrency?: number;
+      max_runtime_ms?: number;
     };
-    const concurrency = Math.max(1, Math.min(16, Number(body.concurrency ?? 6)));
+    const startedAt = Date.now();
+    const maxRuntimeMs = Math.max(30000, Math.min(120000, Number(body.max_runtime_ms ?? 110000)));
+    const ensureTime = (stage: string) => {
+      if (Date.now() - startedAt > maxRuntimeMs) throw new TimeBudgetExceeded(stage);
+    };
     const mode = body.mode ?? "custom";
     const today = new Date().toISOString().slice(0, 10);
     let start_date = body.start_date ?? "";
@@ -232,14 +261,19 @@ Deno.serve(async (req) => {
       saturated: boolean;
     }[] = [];
 
+    const processedAdvertisers: string[] = [];
+    let stoppedBeforeTimeout: { reason: string; remaining_advertiser_ids: string[] } | null = null;
+
     const runAdvertiser = async (adv: string): Promise<void> => {
+      ensureTime(`advertiser ${adv} start`);
       const tok = tokenByAdv.get(adv)!;
       const shopId = shopByAdv.get(adv)!;
 
       let campaigns: string[] = [];
       try {
-        campaigns = await fetchCampaigns(tok, adv);
+        campaigns = await fetchCampaigns(tok, adv, ttGet, () => ensureTime(`advertiser ${adv} campaigns`));
       } catch (err) {
+        if (err instanceof TimeBudgetExceeded) throw err;
         errors.push({ advertiser_id: adv, error: `campaign/get: ${(err as Error).message}` });
         return;
       }
@@ -255,12 +289,16 @@ Deno.serve(async (req) => {
 
       const groupStart = addDays(end_date, -364);
       for (const batch of campaignBatches) {
+        ensureTime(`advertiser ${adv} group discovery`);
         groupBatches++;
         try {
           const groups = await fetchReport(
             tok, adv, shopId, groupStart, end_date,
             ["campaign_id", "item_group_id"],
             { campaign_ids: batch },
+            undefined,
+            ttGet,
+            () => ensureTime(`advertiser ${adv} group pages`),
           );
           for (const r of groups) {
             const dims = (r.dimensions ?? {}) as Record<string, unknown>;
@@ -271,6 +309,7 @@ Deno.serve(async (req) => {
             campaignGroups.get(cid)!.add(gid);
           }
         } catch (err) {
+          if (err instanceof TimeBudgetExceeded) throw err;
           errors.push({
             advertiser_id: adv,
             error: `group batch[${batch[0]}...x${batch.length}]: ${(err as Error).message}`,
@@ -280,6 +319,7 @@ Deno.serve(async (req) => {
 
       for (const [s, e] of windows) {
         for (const cid of campaigns) {
+          ensureTime(`advertiser ${adv} creative fetch`);
           const groupIds = Array.from(campaignGroups.get(cid) ?? []);
           if (groupIds.length === 0) continue;
           for (const igidBatch of chunk(groupIds, 100)) {
@@ -289,6 +329,9 @@ Deno.serve(async (req) => {
                 tok, adv, shopId, s, e,
                 ["campaign_id", "item_group_id", "item_id", "stat_time_day"],
                 { campaign_ids: [cid], item_group_ids: igidBatch },
+                undefined,
+                ttGet,
+                () => ensureTime(`advertiser ${adv} creative pages`),
               );
               totalRows += list.length;
               if (list.length > maxRows) maxRows = list.length;
@@ -325,6 +368,7 @@ Deno.serve(async (req) => {
                 });
               }
             } catch (err) {
+              if (err instanceof TimeBudgetExceeded) throw err;
               errors.push({
                 advertiser_id: adv,
                 window: `${s}~${e}`,
@@ -345,17 +389,22 @@ Deno.serve(async (req) => {
       });
     };
 
-    // Concurrency pool: process up to `concurrency` advertisers in parallel.
-    // TikTok rate limits are per advertiser_id, so cross-account parallelism is safe.
-    let cursor = 0;
-    const workers = Array.from({ length: Math.min(concurrency, targets.length) }, async () => {
-      while (true) {
-        const i = cursor++;
-        if (i >= targets.length) return;
-        await runAdvertiser(targets[i]);
+    for (let i = 0; i < targets.length; i++) {
+      const adv = targets[i];
+      try {
+        await runAdvertiser(adv);
+        processedAdvertisers.push(adv);
+      } catch (err) {
+        if (err instanceof TimeBudgetExceeded) {
+          stoppedBeforeTimeout = {
+            reason: err.message,
+            remaining_advertiser_ids: targets.slice(i),
+          };
+          break;
+        }
+        errors.push({ advertiser_id: adv, error: (err as Error).message });
       }
-    });
-    await Promise.all(workers);
+    }
 
     let upserted = 0;
     if (upsertRows.length) {
@@ -379,8 +428,11 @@ Deno.serve(async (req) => {
         end_date,
         windows: windows.length,
         advertisers: targets.length,
+        processed_advertisers: processedAdvertisers.length,
+        remaining_advertiser_ids: stoppedBeforeTimeout?.remaining_advertiser_ids ?? [],
         batch_size: batchSize,
-        concurrency,
+        max_runtime_ms: maxRuntimeMs,
+        stopped_before_timeout: stoppedBeforeTimeout,
         upserted,
         batch_stats: batchStats,
         errors,
