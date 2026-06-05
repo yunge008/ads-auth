@@ -249,7 +249,7 @@ Deno.serve(async (req) => {
       max_runtime_ms?: number;
     };
     const startedAt = Date.now();
-    const maxRuntimeMs = Math.max(30000, Math.min(120000, Number(body.max_runtime_ms ?? 110000)));
+    const maxRuntimeMs = Math.max(20000, Math.min(110000, Number(body.max_runtime_ms ?? 80000)));
     const ensureTime = (stage: string) => {
       if (Date.now() - startedAt > maxRuntimeMs) throw new TimeBudgetExceeded(stage);
     };
