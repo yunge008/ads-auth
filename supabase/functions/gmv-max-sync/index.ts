@@ -424,7 +424,7 @@ Deno.serve(async (req) => {
       }
 
       for (const [s, e] of windows) {
-        for (const cid of campaigns) {
+        for (const cid of campaignIds) {
           ensureTime(`advertiser ${adv} creative fetch`);
           const groupIds = Array.from(campaignGroups.get(cid) ?? []);
           if (groupIds.length === 0) continue;
