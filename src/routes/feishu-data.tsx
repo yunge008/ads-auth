@@ -45,8 +45,11 @@ type CountryProgressRow = {
   days?: number;
   error?: string;
 };
-const pct = (v: number | null | undefined) => v == null ? "—" : (Number(v) * 100).toFixed(2) + "%";
-const safeDiv = (a: number, b: number) => b > 0 ? a / b : null;
+const DELIVERY_STATUSES = ["IN_QUEUE", "LEARNING", "DELIVERING", "NOT_DELIVERYING", "NOT_ACTIVE", "AUTHORIZATION_NEEDED", "Unavailable", "Excluded", "Rejected"] as const;
+const STATUS_LABELS: Record<string, string> = {
+  IN_QUEUE: "排队中", LEARNING: "学习中", DELIVERING: "投放中", NOT_DELIVERYING: "未投放",
+  NOT_ACTIVE: "不活跃", AUTHORIZATION_NEEDED: "需要授权", Unavailable: "不可用", Excluded: "已排除", Rejected: "已拒绝",
+};
 const daysBetweenInclusive = (a: string, b: string) =>
   Math.round((new Date(b + "T00:00:00Z").getTime() - new Date(a + "T00:00:00Z").getTime()) / 86400000) + 1;
 
