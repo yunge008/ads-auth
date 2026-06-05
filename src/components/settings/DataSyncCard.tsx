@@ -97,8 +97,10 @@ export function DataSyncCard() {
           for (const id of queue) updateRow(id, { status: "running" });
         }
         const resp = await invokeFn<SyncResp>("gmv-max-sync", reqBody);
+        mergeNames(resp.advertiser_names);
         totalUpserted += resp.upserted ?? 0;
         totalErrors += resp.errors?.length ?? 0;
+
 
         const processedThisRound = new Set<string>();
         for (const st of resp.batch_stats ?? []) {
