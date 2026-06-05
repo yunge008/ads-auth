@@ -50,11 +50,59 @@ export async function verifyPasscode(
   const gotName = (req.headers.get("x-admin-name") ?? "").trim();
   if (!got) throw unauthorized();
 
-  // Root env passcode (always admin; survives empty DB). Name is ignored.
+  // Root env passcode (always admin; bootstraps a DB-managed admin row so
+  // it shows up in 账号管理 and can be renamed / have its password changed.
+  // Env remains a rescue path even after the DB row is edited.
   const envCode = Deno.env.get("ADMIN_PASSCODE");
   if (envCode && got === envCode) {
+    const db = admin();
+    const hash = await sha256Hex(got);
+    // If an admin row already matches this exact (name + env hash), prefer it.
+    let q = db
+      .from("app_accounts")
+      .select("id,name,is_admin,tab_permissions,active")
+      .eq("passcode_hash", hash)
+      .eq("is_admin", true);
+    if (gotName) q = q.eq("name", gotName);
+    const { data: existing } = await q.maybeSingle();
+    if (existing && existing.active) {
+      return {
+        id: existing.id,
+        name: existing.name,
+        isAdmin: true,
+        tabs: Array.isArray(existing.tab_permissions) ? existing.tab_permissions : [],
+      };
+    }
+    // No matching row — bootstrap one only if there is no admin in DB yet.
+    const { count } = await db
+      .from("app_accounts")
+      .select("id", { count: "exact", head: true })
+      .eq("is_admin", true);
+    if (!count || count === 0) {
+      const { data: created } = await db
+        .from("app_accounts")
+        .insert({
+          name: gotName || ROOT_ACCOUNT.name,
+          passcode_hash: hash,
+          is_admin: true,
+          tab_permissions: [],
+          active: true,
+        })
+        .select("id,name,is_admin,tab_permissions,active")
+        .single();
+      if (created) {
+        return {
+          id: created.id,
+          name: created.name,
+          isAdmin: true,
+          tabs: [],
+        };
+      }
+    }
+    // Rescue path: env still works as a virtual root admin.
     return { ...ROOT_ACCOUNT, name: gotName || ROOT_ACCOUNT.name };
   }
+
 
   const hash = await sha256Hex(got);
   const db = admin();
