@@ -463,7 +463,7 @@ Deno.serve(async (req) => {
                   campaign_operation_status: meta?.operation_status ?? null,
                   item_group_id: String(dims.item_group_id ?? ""),
                   vid,
-                  item_id: vid,
+                  
                   stat_date: String(dims.stat_time_day ?? "").slice(0, 10),
                   creative_delivery_status: strOrNull("creative_delivery_status"),
                   currency: strOrNull("currency"),
