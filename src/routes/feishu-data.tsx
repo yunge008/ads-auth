@@ -25,6 +25,8 @@ type SyncResp = {
   advertisers: number;
   processed_advertisers: number;
   remaining_advertiser_ids: string[];
+  remaining_campaign_ids?: string[];
+  stopped_before_timeout?: { advertiser_id: string; remaining_campaign_ids: string[]; remaining_advertiser_ids: string[] } | null;
   advertiser_names?: Record<string, string>;
   batch_stats: Array<{ advertiser_id: string; campaigns: number; rows: number }>;
   errors: Array<{ advertiser_id: string; error: string }>;
@@ -189,23 +191,30 @@ function GmvMaxSection() {
         const country = adv.country ?? "—";
         updateCountryRow(adv.advertiser_id, { status: "running", error: undefined });
         let finished = false;
-        for (let attempt = 1; attempt <= 3 && !finished; attempt++) {
+        let campaignQueue: string[] | undefined;
+        let previousRemainingKey = "";
+        for (let attempt = 1; attempt <= 10 && !finished; attempt++) {
           if (stopRequestedRef.current) { stopped = true; break; }
           setProgress({ label, current: country, done: i, total: targets.length, attempt });
           try {
             const controller = new AbortController();
             abortRef.current = controller;
-            const resp = await invokeFn<SyncResp>("gmv-max-sync", {
+            const reqBody: Record<string, unknown> = {
               start_date: s,
               end_date: e,
               advertiser_ids: [adv.advertiser_id],
-              max_runtime_ms: 60000,
-            }, { signal: controller.signal, timeout: 70000 });
+              max_runtime_ms: 110000,
+            };
+            if (campaignQueue?.length) reqBody.campaign_ids = campaignQueue;
+            const resp = await invokeFn<SyncResp>("gmv-max-sync", reqBody, { signal: controller.signal, timeout: 120000 });
             if (abortRef.current === controller) abortRef.current = null;
             mergeNames(resp.advertiser_names);
             upserted += resp.upserted ?? 0;
             const stat = resp.batch_stats?.find((x) => x.advertiser_id === adv.advertiser_id);
             const err = resp.errors?.find((x) => x.advertiser_id === adv.advertiser_id);
+            const remainingCampaigns = resp.stopped_before_timeout?.advertiser_id === adv.advertiser_id
+              ? resp.stopped_before_timeout.remaining_campaign_ids
+              : (resp.remaining_campaign_ids ?? []);
             if (stat) {
               const noRowsWithError = (stat.rows ?? 0) === 0 && !!err;
               updateCountryRow(adv.advertiser_id, {
@@ -222,7 +231,20 @@ function GmvMaxSection() {
               if (!err.error.includes("店铺ID")) failed++;
               finished = true;
             } else if (resp.remaining_advertiser_ids?.includes(adv.advertiser_id)) {
-              updateCountryRow(adv.advertiser_id, { error: `第 ${attempt} 次仍在处理，继续重试` });
+              if (remainingCampaigns.length) {
+                const remainingKey = remainingCampaigns.join(",");
+                if (remainingKey === previousRemainingKey) {
+                  updateCountryRow(adv.advertiser_id, { status: "failed", error: "续跑未推进，请稍后单独重试", days });
+                  failed++;
+                  finished = true;
+                } else {
+                  previousRemainingKey = remainingKey;
+                  campaignQueue = remainingCampaigns;
+                  updateCountryRow(adv.advertiser_id, { error: `已写入 ${upserted} 行，剩余 ${remainingCampaigns.length} 个广告继续续跑`, days });
+                }
+              } else {
+                updateCountryRow(adv.advertiser_id, { error: `第 ${attempt} 次仍在处理，继续重试`, days });
+              }
             } else {
               updateCountryRow(adv.advertiser_id, { status: "success", rows: 0, campaigns: 0, days });
               finished = true;
