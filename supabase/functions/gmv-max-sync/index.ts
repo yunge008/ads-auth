@@ -175,7 +175,9 @@ Deno.serve(async (req) => {
       advertiser_ids?: string[];
       mode?: "backfill" | "incremental" | "custom";
       batch_size?: number;
+      concurrency?: number;
     };
+    const concurrency = Math.max(1, Math.min(16, Number(body.concurrency ?? 6)));
     const mode = body.mode ?? "custom";
     const today = new Date().toISOString().slice(0, 10);
     let start_date = body.start_date ?? "";
@@ -230,7 +232,7 @@ Deno.serve(async (req) => {
       saturated: boolean;
     }[] = [];
 
-    for (const adv of targets) {
+    const runAdvertiser = async (adv: string): Promise<void> => {
       const tok = tokenByAdv.get(adv)!;
       const shopId = shopByAdv.get(adv)!;
 
@@ -239,9 +241,9 @@ Deno.serve(async (req) => {
         campaigns = await fetchCampaigns(tok, adv);
       } catch (err) {
         errors.push({ advertiser_id: adv, error: `campaign/get: ${(err as Error).message}` });
-        continue;
+        return;
       }
-      if (campaigns.length === 0) continue;
+      if (campaigns.length === 0) return;
 
       const campaignGroups = new Map<string, Set<string>>();
       const campaignBatches = chunk(campaigns, batchSize);
@@ -251,8 +253,6 @@ Deno.serve(async (req) => {
       let maxRows = 0;
       let saturated = false;
 
-      // Step 2: batch campaigns once to collect item_group_ids. No stat_time_day,
-      // use a wider 365-day lookback so creative-level calls can include both IDs.
       const groupStart = addDays(end_date, -364);
       for (const batch of campaignBatches) {
         groupBatches++;
@@ -292,7 +292,6 @@ Deno.serve(async (req) => {
               );
               totalRows += list.length;
               if (list.length > maxRows) maxRows = list.length;
-              // 1000 page_size * 100 max pages = 100000; warn if approaching
               if (list.length >= 95000) saturated = true;
               for (const r of list) {
                 const dims = (r.dimensions ?? {}) as Record<string, unknown>;
@@ -344,7 +343,19 @@ Deno.serve(async (req) => {
         rows_max_batch: maxRows,
         saturated,
       });
-    }
+    };
+
+    // Concurrency pool: process up to `concurrency` advertisers in parallel.
+    // TikTok rate limits are per advertiser_id, so cross-account parallelism is safe.
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(concurrency, targets.length) }, async () => {
+      while (true) {
+        const i = cursor++;
+        if (i >= targets.length) return;
+        await runAdvertiser(targets[i]);
+      }
+    });
+    await Promise.all(workers);
 
     let upserted = 0;
     if (upsertRows.length) {
@@ -369,6 +380,7 @@ Deno.serve(async (req) => {
         windows: windows.length,
         advertisers: targets.length,
         batch_size: batchSize,
+        concurrency,
         upserted,
         batch_stats: batchStats,
         errors,
