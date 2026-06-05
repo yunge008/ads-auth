@@ -132,48 +132,55 @@ Deno.serve(async (req) => {
     for (const advId of targets) {
       const token = tokenByAdv.get(advId)!;
       try {
-        for (let page = 1; page <= max_pages; page++) {
-          const j = await fetchPage(token, advId, page, startDate, endDate);
-          if (j.code !== 0) {
-            errors.push({ advertiser_id: advId, error: String(j.message ?? `code=${j.code}`) });
-            break;
+        const adgroups = await fetchAdgroups(token, advId);
+        for (const agId of adgroups) {
+          for (let page = 1; page <= max_pages; page++) {
+            const j = await fetchPage(token, advId, agId, page, startDate, endDate);
+            if (j.code !== 0) {
+              errors.push({ advertiser_id: advId, error: `adgroup ${agId}: ${j.message ?? `code=${j.code}`}` });
+              break;
+            }
+            const list = (j.data?.comments ?? []) as Record<string, unknown>[];
+            if (!list.length) break;
+            for (const c of list) {
+              const cid = String(c.comment_id ?? "");
+              if (!cid) continue;
+              const created = c.create_time;
+              let createdIso: string | null = null;
+              if (typeof created === "number") createdIso = new Date(created * 1000).toISOString();
+              else if (typeof created === "string" && created) {
+                const d = new Date(created);
+                createdIso = isNaN(d.getTime()) ? null : d.toISOString();
+              }
+              all.push({
+                advertiser_id: advId,
+                country: countryByAdv.get(advId) ?? null,
+                comment_id: cid,
+                parent_comment_id: (c.original_comment_id as string) ?? null,
+                vid: (c.tiktok_item_id ?? null) as string | null,
+                text: (c.content ?? null) as string | null,
+                like_count: Number(c.likes ?? 0) || 0,
+                reply_count: Number(c.replies ?? 0) || 0,
+                username: (c.user_name ?? null) as string | null,
+                avatar_url: (c.user_avatar_url ?? null) as string | null,
+                comment_type: (c.comment_type ?? null) as string | null,
+                comment_create_time: createdIso,
+                pulled_at: nowIso,
+              });
+            }
+            const pi = j.data?.page_info;
+            const totalPage = Number(pi?.total_page ?? 1);
+            if (page >= totalPage) break;
+            await sleep(200);
           }
-          const list = (j.data?.comments ?? j.data?.list ?? []) as Record<string, unknown>[];
-          if (!list.length) break;
-          for (const c of list) {
-            const cid = String(c.comment_id ?? c.id ?? "");
-            if (!cid) continue;
-            const created = c.create_time ?? c.comment_create_time;
-            let createdIso: string | null = null;
-            if (typeof created === "number") createdIso = new Date(created * 1000).toISOString();
-            else if (typeof created === "string" && created)
-              createdIso = new Date(created).toISOString();
-            all.push({
-              advertiser_id: advId,
-              country: countryByAdv.get(advId) ?? null,
-              comment_id: cid,
-              parent_comment_id: (c.parent_comment_id as string) ?? null,
-              vid: (c.item_id ?? c.video_id ?? c.vid ?? null) as string | null,
-              text: (c.text ?? c.content ?? null) as string | null,
-              like_count: Number(c.like_count ?? 0) || 0,
-              reply_count: Number(c.reply_count ?? 0) || 0,
-              username: (c.user_name ?? c.username ?? c.commenter_name ?? null) as string | null,
-              avatar_url: (c.avatar_url ?? c.user_avatar ?? null) as string | null,
-              comment_type: (c.comment_type ?? c.type ?? null) as string | null,
-              comment_create_time: createdIso,
-              pulled_at: nowIso,
-            });
-          }
-          const pageInfo = j.data?.page_info ?? j.data?.pagination;
-          const total = pageInfo?.total_number ?? pageInfo?.total ?? 0;
-          if (page * 50 >= Number(total)) break;
-          await sleep(300);
+          await sleep(150);
         }
       } catch (e) {
         errors.push({ advertiser_id: advId, error: (e as Error).message });
       }
-      await sleep(500);
+      await sleep(400);
     }
+
 
     let upserted = 0;
     if (all.length) {
