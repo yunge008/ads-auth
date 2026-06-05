@@ -143,8 +143,8 @@ function AuthorizePage() {
     return c;
   }, [materials]);
   const statusOptions = React.useMemo(
-    () => Object.keys(statusCounts).sort((a, b) => (STATUS_RANK[a as MaterialStatus] ?? 99) - (STATUS_RANK[b as MaterialStatus] ?? 99)),
-    [statusCounts],
+    () => [...ALL_STATUSES].sort((a, b) => (STATUS_RANK[a] ?? 99) - (STATUS_RANK[b] ?? 99)),
+    [],
   );
 
 
