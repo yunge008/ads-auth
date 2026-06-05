@@ -27,6 +27,8 @@ type Row = {
   source_type: string;
   vid: string;
   item_group_id: string;
+  advertiser_id: string;
+  advertiser_name: string;
   registered_sku: string;
   merchant_sku: string;
   product_id: string;
@@ -62,7 +64,7 @@ const METRICS = [
   { key: "product_clicks", label: "Click", color: "#06b6d4", axis: "right" as const, defaultOn: false },
 ];
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 20;
 const fmtNum = (n: number) => (n ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
 const fmtPct = (n: number | null) => (n == null ? "—" : (n * 100).toFixed(2) + "%");
 const fmtRoi = (n: number | null) => (n == null ? "—" : n.toFixed(2));
@@ -150,12 +152,12 @@ function MaterialPerformancePage() {
 
   const exportCsv = () => {
     const headers = [
-      "国家", "同事", "来源", "VID", "商品ID", "登记SKU", "商家SKU",
+      "国家", "广告户", "同事", "来源", "VID", "商品ID", "登记SKU", "商家SKU",
       "消耗", "收入", "订单", "展现", "点击", "ROI", "CTR", "CVR",
     ];
     const csv = [headers.join(",")]
       .concat(filteredRows.map((r) => [
-        r.country, r.staff_name, r.source_type, r.vid, r.item_group_id, r.registered_sku, r.merchant_sku,
+        r.country, r.advertiser_name || r.advertiser_id, r.staff_name, r.source_type, r.vid, r.item_group_id, r.registered_sku, r.merchant_sku,
         r.cost, r.gross_revenue, r.orders, r.product_impressions, r.product_clicks,
         r.roi ?? "", r.ctr ?? "", r.cvr ?? "",
       ].map((x) => `"${String(x ?? "").replace(/"/g, '""')}"`).join(",")))
@@ -292,6 +294,7 @@ function MaterialPerformancePage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>国家</TableHead>
+                  <TableHead>广告户</TableHead>
                   <TableHead>同事</TableHead>
                   <TableHead>来源</TableHead>
                   <TableHead>VID</TableHead>
@@ -311,12 +314,13 @@ function MaterialPerformancePage() {
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableRow><TableCell colSpan={15} className="h-20 text-center text-sm text-muted-foreground">加载中…</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={16} className="h-20 text-center text-sm text-muted-foreground">加载中…</TableCell></TableRow>
                 ) : paged.length === 0 ? (
-                  <TableRow><TableCell colSpan={15} className="h-20 text-center text-sm text-muted-foreground">暂无数据</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={16} className="h-20 text-center text-sm text-muted-foreground">暂无数据</TableCell></TableRow>
                 ) : paged.map((r, i) => (
-                  <TableRow key={`${r.country}-${r.staff_name}-${r.source_type}-${r.vid}-${r.item_group_id}-${i}`}>
+                  <TableRow key={`${r.country}-${r.staff_name}-${r.source_type}-${r.vid}-${r.item_group_id}-${r.advertiser_id}-${i}`}>
                     <TableCell>{r.country || "—"}</TableCell>
+                    <TableCell className="text-xs" title={r.advertiser_id}>{r.advertiser_name || r.advertiser_id || "—"}</TableCell>
                     <TableCell>{r.staff_name}</TableCell>
                     <TableCell className="text-xs">{r.source_type}</TableCell>
                     <TableCell className="font-mono text-xs">{r.vid}</TableCell>
@@ -335,6 +339,7 @@ function MaterialPerformancePage() {
                   </TableRow>
                 ))}
               </TableBody>
+
             </Table>
           </div>
           {filteredRows.length > PAGE_SIZE && (

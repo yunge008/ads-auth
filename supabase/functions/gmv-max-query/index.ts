@@ -52,6 +52,18 @@ Deno.serve(async (req) => {
 
     const db = admin();
 
+    // Load advertiser_id -> name map
+    const nameByAdv = new Map<string, string>();
+    {
+      const { data: ac, error: aerr } = await db
+        .from("advertiser_countries")
+        .select("advertiser_id, advertiser_name");
+      if (aerr) throw new Error(aerr.message);
+      for (const r of (ac ?? []) as { advertiser_id: string; advertiser_name: string | null }[]) {
+        if (r.advertiser_name) nameByAdv.set(r.advertiser_id, r.advertiser_name);
+      }
+    }
+
     // 1) Load staff_vid_map (primary) — paginate to bypass 1000-row default.
     const staff: StaffRow[] = [];
     {
@@ -71,6 +83,7 @@ Deno.serve(async (req) => {
         from += PAGE;
       }
     }
+
     const vidsInScope = Array.from(new Set(staff.map((s) => s.vid)));
 
     // 2) Load daily data for those vids in date range
@@ -121,7 +134,7 @@ Deno.serve(async (req) => {
     const skuByPid = new Map<string, SkuRow>();
     for (const s of sku) if (!skuByPid.has(s.product_id)) skuByPid.set(s.product_id, s);
 
-    // 4) Aggregate per (vid) -> we group by (country, staff, source, vid, item_group_id)
+    // 4) Aggregate per (vid) -> group by (country, staff, source, vid, item_group_id, advertiser_id)
     type AggKey = string;
     type Agg = {
       country: string;
@@ -129,6 +142,8 @@ Deno.serve(async (req) => {
       source_type: string;
       vid: string;
       item_group_id: string;
+      advertiser_id: string;
+      advertiser_name: string;
       registered_sku: string;
       merchant_sku: string;
       product_id: string;
@@ -152,7 +167,7 @@ Deno.serve(async (req) => {
       const ds = dailyByVid.get(s.vid) ?? [];
       if (ds.length === 0) {
         // include row with zeros so unmatched VIDs still show
-        const key = `${s.country}|${s.staff_name}|${s.source_type}|${s.vid}|`;
+        const key = `${s.country}|${s.staff_name}|${s.source_type}|${s.vid}||`;
         if (!aggMap.has(key))
           aggMap.set(key, {
             country: s.country,
@@ -160,6 +175,8 @@ Deno.serve(async (req) => {
             source_type: s.source_type,
             vid: s.vid,
             item_group_id: "",
+            advertiser_id: "",
+            advertiser_name: "",
             registered_sku: s.registered_sku ?? "",
             merchant_sku: "",
             product_id: "",
@@ -175,7 +192,7 @@ Deno.serve(async (req) => {
           const merchant_sku = skuMeta?.merchant_sku ?? "";
           if (body.merchant_skus?.length && !body.merchant_skus.includes(merchant_sku)) continue;
           if (body.product_ids?.length && !body.product_ids.includes(d.item_group_id)) continue;
-          const key = `${s.country}|${s.staff_name}|${s.source_type}|${s.vid}|${d.item_group_id}`;
+          const key = `${s.country}|${s.staff_name}|${s.source_type}|${s.vid}|${d.item_group_id}|${d.advertiser_id}`;
           let agg = aggMap.get(key);
           if (!agg) {
             agg = {
@@ -184,6 +201,8 @@ Deno.serve(async (req) => {
               source_type: s.source_type,
               vid: s.vid,
               item_group_id: d.item_group_id,
+              advertiser_id: d.advertiser_id,
+              advertiser_name: nameByAdv.get(d.advertiser_id) ?? d.advertiser_id,
               registered_sku: s.registered_sku ?? "",
               merchant_sku,
               product_id: d.item_group_id,
@@ -203,6 +222,7 @@ Deno.serve(async (req) => {
         }
       }
     }
+
 
     const rows = Array.from(aggMap.values()).map((a) => ({
       ...a,
