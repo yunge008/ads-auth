@@ -340,7 +340,7 @@ function AuthorizePage() {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={() => handleFetch(true)} disabled={loading}>
-            <Download className={cn("h-4 w-4 mr-1.5", loading && "animate-spin")} />
+            <RotateCw className={cn("h-4 w-4 mr-1.5", loading && "animate-spin")} />
             获取所有素材
           </Button>
           <Button onClick={() => handleFetch(false)} disabled={loading}>
