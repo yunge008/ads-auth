@@ -33,7 +33,8 @@ export async function invokeFn<T = unknown>(
     body: body ?? {},
     headers: {
       "x-admin-passcode": getPasscode(),
-      "x-admin-name": getAdminName(),
+      // Header values must be ASCII; encode in case of CJK names.
+      "x-admin-name": encodeURIComponent(getAdminName()),
     },
   });
   if (error) {

@@ -26,10 +26,13 @@ import {
 import {
   Download,
   RefreshCw,
+  RotateCw,
   Send,
   Upload,
   AlertTriangle,
   Copy,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useBCAdvertisers, useMaterials, useStaff } from "@/lib/store";
@@ -142,9 +145,29 @@ function AuthorizePage() {
     for (const m of materials) c[m.status] = (c[m.status] ?? 0) + 1;
     return c;
   }, [materials]);
+  const staffCounts = React.useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const m of materials) c[m.staff_name] = (c[m.staff_name] ?? 0) + 1;
+    return c;
+  }, [materials]);
+  const countryCounts = React.useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const m of materials) c[m.country] = (c[m.country] ?? 0) + 1;
+    return c;
+  }, [materials]);
   const statusOptions = React.useMemo(
     () => [...ALL_STATUSES].sort((a, b) => (STATUS_RANK[a] ?? 99) - (STATUS_RANK[b] ?? 99)),
     [],
+  );
+
+  // Pagination (50 rows / page)
+  const PAGE_SIZE = 50;
+  const [page, setPage] = React.useState(1);
+  const pageCount = Math.max(1, Math.ceil(visibleMaterials.length / PAGE_SIZE));
+  React.useEffect(() => { setPage(1); }, [fStaff, fCountry, fStatus, fVid, fAuth, materials]);
+  const pagedMaterials = React.useMemo(
+    () => visibleMaterials.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [visibleMaterials, page],
   );
 
 
@@ -337,7 +360,7 @@ function AuthorizePage() {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={() => handleFetch(true)} disabled={loading}>
-            <Download className={cn("h-4 w-4 mr-1.5", loading && "animate-spin")} />
+            <RotateCw className={cn("h-4 w-4 mr-1.5", loading && "animate-spin")} />
             获取所有素材
           </Button>
           <Button onClick={() => handleFetch(false)} disabled={loading}>
@@ -473,12 +496,14 @@ function AuthorizePage() {
                 options={staff.map((s) => s.name)}
                 value={fStaff}
                 onChange={setFStaff}
+                counts={staffCounts}
               />
               <MultiSelect
                 label="国家"
                 options={countriesInData}
                 value={fCountry}
                 onChange={setFCountry}
+                counts={countryCounts}
               />
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-muted-foreground">VID</span>
@@ -551,7 +576,7 @@ function AuthorizePage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  visibleMaterials.map((m) => (
+                  pagedMaterials.map((m) => (
                     <MaterialRow
                       key={m.id}
                       m={m}
@@ -578,6 +603,22 @@ function AuthorizePage() {
               </TableBody>
             </Table>
           </div>
+          {visibleMaterials.length > PAGE_SIZE && (
+            <div className="flex items-center justify-between mt-3 text-xs text-muted-foreground">
+              <div>
+                第 {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, visibleMaterials.length)} / 共 {visibleMaterials.length} 条
+              </div>
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="outline" className="h-7" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </Button>
+                <span>{page} / {pageCount}</span>
+                <Button size="sm" variant="outline" className="h-7" disabled={page >= pageCount} onClick={() => setPage((p) => Math.min(pageCount, p + 1))}>
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
