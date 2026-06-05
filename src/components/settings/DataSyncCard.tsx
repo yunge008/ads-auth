@@ -248,11 +248,11 @@ export function DataSyncCard() {
             </Button>
             <Button size="sm" variant="outline" disabled={!!busy} onClick={() => {
               const e2 = today;
-              const s2 = new Date(Date.now() - 3 * 86400 * 1000).toISOString().slice(0, 10);
-              runLoop("最近3天", s2, e2);
+              const s2 = new Date(Date.now() - 1 * 86400 * 1000).toISOString().slice(0, 10);
+              runLoop("今天+昨天", s2, e2);
             }}>
-              <RotateCw className={`h-4 w-4 mr-1.5 ${busy === "最近3天" ? "animate-spin" : ""}`} />
-              最近3天
+              <RotateCw className={`h-4 w-4 mr-1.5 ${busy === "今天+昨天" ? "animate-spin" : ""}`} />
+              今天+昨天
             </Button>
           </div>
 
