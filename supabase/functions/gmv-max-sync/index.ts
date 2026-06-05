@@ -231,6 +231,7 @@ Deno.serve(async (req) => {
       start_date?: string;
       end_date?: string;
       advertiser_ids?: string[];
+      campaign_ids?: string[];
       mode?: "backfill" | "incremental" | "custom";
       batch_size?: number;
       max_runtime_ms?: number;
@@ -255,6 +256,8 @@ Deno.serve(async (req) => {
 
     const batchSize = Math.max(1, Math.min(100, Number(body.batch_size ?? 20)));
     const filterIds = body.advertiser_ids;
+    const presetCampaignIds = (body.campaign_ids ?? []).map(String).filter(Boolean);
+    const hasPresetCampaigns = presetCampaignIds.length > 0;
 
     const db = admin();
     const [{ data: conns, error: ce }, { data: acRows, error: ae }] = await Promise.all([
