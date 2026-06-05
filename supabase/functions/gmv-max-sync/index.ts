@@ -664,6 +664,7 @@ Deno.serve(async (req) => {
         max_runtime_ms: maxRuntimeMs,
         stopped_before_timeout: stoppedBeforeTimeout,
         upserted,
+        meta_upserted: metaUpserted,
         batch_stats: batchStats,
         advertiser_names,
         errors,
