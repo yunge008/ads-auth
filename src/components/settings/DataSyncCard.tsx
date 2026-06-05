@@ -57,17 +57,15 @@ export function DataSyncCard() {
   const [progress, setProgress] = React.useState<{ iter: number; remaining: number; total: number } | null>(null);
   const [nameMap, setNameMap] = React.useState<Map<string, string>>(new Map());
 
-  // Load advertiser names once for display.
-  React.useEffect(() => {
-    invokeFn<{ rows: { advertiser_id: string; advertiser_name: string | null }[] }>("data-preview", {
-      table: "advertiser_countries",
-      limit: 1000,
-    }).then((r) => {
-      const m = new Map<string, string>();
-      for (const x of r.rows ?? []) if (x.advertiser_name) m.set(x.advertiser_id, x.advertiser_name);
-      setNameMap(m);
-    }).catch(() => {});
-  }, []);
+  const mergeNames = (names?: Record<string, string>) => {
+    if (!names) return;
+    setNameMap((prev) => {
+      const next = new Map(prev);
+      for (const [k, v] of Object.entries(names)) if (v) next.set(k, v);
+      return next;
+    });
+  };
+
 
   const nameOf = (id: string) => nameMap.get(id) ?? id;
 
