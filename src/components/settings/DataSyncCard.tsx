@@ -56,6 +56,22 @@ export function DataSyncCard() {
   const [results, setResults] = React.useState<Map<string, AdvRow>>(new Map());
   const [progress, setProgress] = React.useState<{ iter: number; remaining: number; total: number } | null>(null);
   const [nameMap, setNameMap] = React.useState<Map<string, string>>(new Map());
+  const [allAdvs, setAllAdvs] = React.useState<{ advertiser_id: string; advertiser_name: string | null }[]>([]);
+
+  // Preload advertiser list so the status table can show all rows immediately.
+  React.useEffect(() => {
+    invokeFn<{ rows: { advertiser_id: string; advertiser_name: string | null }[] }>(
+      "data-preview", { table: "advertiser_countries", page: 1, page_size: 500 },
+    ).then((r) => {
+      const rows = r.rows ?? [];
+      setAllAdvs(rows);
+      setNameMap((prev) => {
+        const next = new Map(prev);
+        for (const a of rows) if (a.advertiser_name) next.set(a.advertiser_id, a.advertiser_name);
+        return next;
+      });
+    }).catch(() => {});
+  }, []);
 
   const mergeNames = (names?: Record<string, string>) => {
     if (!names) return;
@@ -81,8 +97,14 @@ export function DataSyncCard() {
   // Run a sync loop until remaining is empty (max 10 iterations).
   const runLoop = async (label: string, s: string, e: string, initialIds?: string[]) => {
     setBusy(label);
-    setResults(new Map());
-    setProgress({ iter: 0, remaining: 0, total: 0 });
+    // Pre-populate all advertisers as "pending" so the table shows immediately.
+    const initialMap = new Map<string, AdvRow>();
+    const seedIds = initialIds && initialIds.length ? initialIds : allAdvs.map((a) => a.advertiser_id);
+    for (const id of seedIds) {
+      initialMap.set(id, { advertiser_id: id, advertiser_name: nameOf(id), status: "pending" });
+    }
+    setResults(initialMap);
+    setProgress({ iter: 0, remaining: seedIds.length, total: seedIds.length });
     const days = daysBetween(s, e);
     let queue = initialIds ? [...initialIds] : undefined; // undefined = first call syncs all
     let iter = 0;
@@ -95,6 +117,9 @@ export function DataSyncCard() {
         if (queue && queue.length) {
           reqBody.advertiser_ids = queue;
           for (const id of queue) updateRow(id, { status: "running" });
+        } else {
+          // First call: mark all seeded rows as running so user sees activity.
+          for (const id of seedIds) updateRow(id, { status: "running" });
         }
         const resp = await invokeFn<SyncResp>("gmv-max-sync", reqBody);
         mergeNames(resp.advertiser_names);

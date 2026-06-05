@@ -71,6 +71,16 @@ function GmvMaxSection() {
   const [end, setEnd] = React.useState(today);
   const [busy, setBusy] = React.useState<string | null>(null);
   const preview = usePreview<GmvRow>("gmv_max_vid_daily");
+  const [nameMap, setNameMap] = React.useState<Map<string, string>>(new Map());
+  React.useEffect(() => {
+    invokeFn<{ rows: { advertiser_id: string; advertiser_name: string | null }[] }>(
+      "data-preview", { table: "advertiser_countries", page: 1, page_size: 500 },
+    ).then((r) => {
+      const m = new Map<string, string>();
+      for (const a of r.rows ?? []) if (a.advertiser_name) m.set(a.advertiser_id, a.advertiser_name);
+      setNameMap(m);
+    }).catch(() => {});
+  }, []);
 
   const run = async (label: string, work: () => Promise<unknown>) => {
     setBusy(label);
@@ -127,7 +137,7 @@ function GmvMaxSection() {
           <TableBody>{preview.rows.map((r, i) => (
             <TableRow key={`${r.advertiser_id}-${r.vid}-${r.stat_date}-${i}`}>
               <TableCell>{r.country ?? "—"}</TableCell>
-              <TableCell className="font-mono text-xs">{r.advertiser_id}</TableCell>
+              <TableCell className="text-xs"><div>{nameMap.get(r.advertiser_id) ?? r.advertiser_id}</div><div className="text-[10px] text-muted-foreground font-mono">{r.advertiser_id}</div></TableCell>
               <TableCell className="font-mono text-xs">{r.vid}</TableCell>
               <TableCell className="text-xs">{r.stat_date}</TableCell>
               <TableCell className="text-right">{Number(r.cost).toFixed(2)}</TableCell>

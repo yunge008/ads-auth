@@ -155,7 +155,14 @@ export async function fetchReport(
   let page = 1;
   const page_size = 1000;
   const selectedMetrics = metrics ?? (dimensions.includes("item_id")
-    ? ["creative_delivery_status", "cost", "orders", "gross_revenue", "product_impressions", "product_clicks", "currency"]
+    ? [
+        "creative_delivery_status", "cost", "orders", "gross_revenue",
+        "product_impressions", "product_clicks", "currency",
+        "tt_account_name", "tt_account_authorization_type", "shop_content_type",
+        "ad_video_view_rate_2s", "ad_video_view_rate_6s",
+        "ad_video_view_rate_p25", "ad_video_view_rate_p50",
+        "ad_video_view_rate_p75", "ad_video_view_rate_p100",
+      ]
     : ["cost", "orders", "gross_revenue"]);
   const filtering = JSON.stringify({ ...extraFilter });
   for (let i = 0; i < 100; i++) {
@@ -416,15 +423,26 @@ Deno.serve(async (req) => {
                 const clks = Number(mets.product_clicks ?? 0) || 0;
                 const vid = String(dims.item_id ?? "");
                 if (!vid) continue;
+                const numOrNull = (k: string) => mets[k] == null ? null : Number(mets[k]);
                 upsertRows.push({
                   country: countryByAdv.get(adv) ?? "",
                   advertiser_id: adv,
                   campaign_id: String(dims.campaign_id ?? ""),
                   item_group_id: String(dims.item_group_id ?? ""),
                   vid,
+                  item_id: vid,
                   stat_date: String(dims.stat_time_day ?? "").slice(0, 10),
                   creative_delivery_status: mets.creative_delivery_status == null ? null : String(mets.creative_delivery_status),
                   currency: mets.currency == null ? null : String(mets.currency),
+                  tt_account_name: mets.tt_account_name == null ? null : String(mets.tt_account_name),
+                  tt_account_authorization_type: mets.tt_account_authorization_type == null ? null : String(mets.tt_account_authorization_type),
+                  shop_content_type: mets.shop_content_type == null ? null : String(mets.shop_content_type),
+                  ad_video_view_rate_2s: numOrNull("ad_video_view_rate_2s"),
+                  ad_video_view_rate_6s: numOrNull("ad_video_view_rate_6s"),
+                  ad_video_view_rate_p25: numOrNull("ad_video_view_rate_p25"),
+                  ad_video_view_rate_p50: numOrNull("ad_video_view_rate_p50"),
+                  ad_video_view_rate_p75: numOrNull("ad_video_view_rate_p75"),
+                  ad_video_view_rate_p100: numOrNull("ad_video_view_rate_p100"),
                   cost,
                   gross_revenue: rev,
                   orders,

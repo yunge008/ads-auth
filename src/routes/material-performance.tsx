@@ -133,20 +133,47 @@ function MaterialPerformancePage() {
   const paged = filteredRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
 
-  const doSync = async (fn: string, body: Record<string, unknown> = {}, label: string) => {
+  // Iterative sync that auto-continues remaining_advertiser_ids and surfaces
+  // per-round progress as toasts, so the user can see which accounts finished.
+  const syncLoop = async (label: string, s: string, e: string) => {
     setBusy(label);
+    let iter = 0;
+    let totalUpserted = 0;
+    let queue: string[] | undefined = undefined;
     try {
-      const r = await invokeFn<Record<string, unknown>>(fn, body);
-      const summary = Object.entries(r)
-        .filter(([k]) => k !== "errors")
-        .map(([k, v]) => `${k}=${typeof v === "number" ? v : JSON.stringify(v)}`)
-        .join(" / ");
-      toast.success(`${label} 完成：${summary}`);
-      const errs = (r as { errors?: { error: string }[] }).errors;
-      if (errs?.length) toast.warning(`${errs.length} 条错误：${errs[0].error}`);
+      while (iter < 10) {
+        iter++;
+        const reqBody: Record<string, unknown> = { start_date: s, end_date: e };
+        if (queue && queue.length) reqBody.advertiser_ids = queue;
+        const resp = await invokeFn<{
+          upserted: number;
+          advertisers: number;
+          processed_advertisers: number;
+          remaining_advertiser_ids: string[];
+          advertiser_names?: Record<string, string>;
+          batch_stats?: { advertiser_id: string; rows: number }[];
+          errors?: { error: string }[];
+        }>("gmv-max-sync", reqBody);
+        totalUpserted += resp.upserted ?? 0;
+        const done = (resp.batch_stats ?? [])
+          .map((b) => `${resp.advertiser_names?.[b.advertiser_id] ?? b.advertiser_id}(${b.rows})`)
+          .join("、");
+        toast.success(
+          `${label} 第${iter}轮：完成 ${resp.processed_advertisers}/${resp.advertisers}，剩余 ${resp.remaining_advertiser_ids?.length ?? 0}${done ? ` · ${done}` : ""}`,
+          { duration: 4000 },
+        );
+        const remaining = resp.remaining_advertiser_ids ?? [];
+        if (remaining.length === 0) break;
+        if (queue && queue.length === remaining.length && queue.every((x) => remaining.includes(x))) {
+          toast.warning(`${label} 续跑未推进，已停止`);
+          break;
+        }
+        queue = remaining;
+      }
+      toast.success(`${label} 全部完成：写入 ${totalUpserted} 行`);
       await runQuery();
-    } catch (e) {
-      toast.error(`${label} 失败：${(e as Error).message}`);
+    } catch (err) {
+      toast.error(`${label} 失败：${(err as Error).message}`);
     } finally { setBusy(null); }
   };
 
@@ -198,7 +225,7 @@ function MaterialPerformancePage() {
           <Button size="sm" variant="outline" disabled={!!busy} onClick={() => {
             const end = today;
             const start = new Date(Date.now() - 3 * 86400 * 1000).toISOString().slice(0, 10);
-            doSync("gmv-max-sync", { start_date: start, end_date: end }, "拉取最近3天");
+            syncLoop("拉取最近3天", start, end);
           }}>
             <Database className={`h-4 w-4 mr-1.5 ${busy === "拉取最近3天" ? "animate-spin" : ""}`} />拉取最近3天
           </Button>
@@ -261,7 +288,14 @@ function MaterialPerformancePage() {
                 <XAxis dataKey="stat_date" tick={{ fontSize: 11 }} />
                 <YAxis yAxisId="left" tick={{ fontSize: 11 }} />
                 <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} />
-                <Tooltip />
+                <Tooltip
+                  formatter={(value: number | string, name: string) => {
+                    const n = Number(value);
+                    if (!Number.isFinite(n)) return [String(value), name];
+                    if (name === "CTR" || name === "CVR") return [(n * 100).toFixed(2) + "%", name];
+                    return [n.toFixed(2), name];
+                  }}
+                />
                 <Legend />
                 {METRICS.filter((m) => enabledMetrics.includes(m.key)).map((m) => (
                   <Line
