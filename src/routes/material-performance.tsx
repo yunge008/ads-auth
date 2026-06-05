@@ -261,7 +261,14 @@ function MaterialPerformancePage() {
                 <XAxis dataKey="stat_date" tick={{ fontSize: 11 }} />
                 <YAxis yAxisId="left" tick={{ fontSize: 11 }} />
                 <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} />
-                <Tooltip />
+                <Tooltip
+                  formatter={(value: number | string, name: string) => {
+                    const n = Number(value);
+                    if (!Number.isFinite(n)) return [String(value), name];
+                    if (name === "CTR" || name === "CVR") return [(n * 100).toFixed(2) + "%", name];
+                    return [n.toFixed(2), name];
+                  }}
+                />
                 <Legend />
                 {METRICS.filter((m) => enabledMetrics.includes(m.key)).map((m) => (
                   <Line
