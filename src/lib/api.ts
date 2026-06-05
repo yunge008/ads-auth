@@ -28,9 +28,12 @@ export function setAdminName(v: string) {
 export async function invokeFn<T = unknown>(
   name: string,
   body?: Record<string, unknown>,
+  options?: { signal?: AbortSignal; timeout?: number },
 ): Promise<T> {
   const { data, error } = await supabase.functions.invoke<T>(name, {
     body: body ?? {},
+    signal: options?.signal,
+    timeout: options?.timeout,
     headers: {
       "x-admin-passcode": getPasscode(),
       // Header values must be ASCII; encode in case of CJK names.

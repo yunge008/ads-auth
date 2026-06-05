@@ -1,6 +1,6 @@
 import * as React from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { RefreshCw, ChevronLeft, ChevronRight, Database, RotateCw, CheckCircle2, XCircle, Clock, Loader2 } from "lucide-react";
+import { RefreshCw, ChevronLeft, ChevronRight, Database, RotateCw, CheckCircle2, XCircle, Clock, Loader2, StopCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,7 +29,7 @@ type SyncResp = {
   batch_stats: Array<{ advertiser_id: string; campaigns: number; rows: number }>;
   errors: Array<{ advertiser_id: string; error: string }>;
 };
-type CountryStatus = "pending" | "running" | "success" | "failed" | "skipped";
+type CountryStatus = "pending" | "running" | "success" | "failed" | "skipped" | "stopped";
 type CountryProgressRow = {
   advertiser_id: string;
   country: string;
@@ -104,6 +104,8 @@ function GmvMaxSection() {
   const [advertisers, setAdvertisers] = React.useState<AdvertiserRow[]>([]);
   const [countryRows, setCountryRows] = React.useState<Map<string, CountryProgressRow>>(new Map());
   const [progress, setProgress] = React.useState<{ label: string; current: string; done: number; total: number; attempt: number } | null>(null);
+  const abortRef = React.useRef<AbortController | null>(null);
+  const stopRequestedRef = React.useRef(false);
 
   const fetchAdvertisers = React.useCallback(async () => {
     const r = await invokeFn<{ rows: AdvertiserRow[] }>(
@@ -143,7 +145,24 @@ function GmvMaxSection() {
     });
   };
 
+  const markUnfinishedStopped = () => {
+    setCountryRows((prev) => {
+      const next = new Map(prev);
+      for (const [id, row] of next) {
+        if (row.status === "pending" || row.status === "running") next.set(id, { ...row, status: "stopped", error: "已停止" });
+      }
+      return next;
+    });
+  };
+
+  const stopRun = () => {
+    stopRequestedRef.current = true;
+    abortRef.current?.abort();
+    setProgress((prev) => prev ? { ...prev, current: "正在停止" } : prev);
+  };
+
   const run = async (label: string, s: string, e: string) => {
+    stopRequestedRef.current = false;
     setBusy(label);
     setProgress(null);
     const source = advertisers.length ? advertisers : await fetchAdvertisers();
@@ -163,26 +182,40 @@ function GmvMaxSection() {
     try {
       let upserted = 0;
       let failed = 0;
+      let stopped = false;
       for (let i = 0; i < targets.length; i++) {
+        if (stopRequestedRef.current) { stopped = true; break; }
         const adv = targets[i];
         const country = adv.country ?? "—";
         updateCountryRow(adv.advertiser_id, { status: "running", error: undefined });
         let finished = false;
         for (let attempt = 1; attempt <= 3 && !finished; attempt++) {
+          if (stopRequestedRef.current) { stopped = true; break; }
           setProgress({ label, current: country, done: i, total: targets.length, attempt });
           try {
+            const controller = new AbortController();
+            abortRef.current = controller;
             const resp = await invokeFn<SyncResp>("gmv-max-sync", {
               start_date: s,
               end_date: e,
               advertiser_ids: [adv.advertiser_id],
               max_runtime_ms: 60000,
-            });
+            }, { signal: controller.signal, timeout: 70000 });
+            if (abortRef.current === controller) abortRef.current = null;
             mergeNames(resp.advertiser_names);
             upserted += resp.upserted ?? 0;
             const stat = resp.batch_stats?.find((x) => x.advertiser_id === adv.advertiser_id);
             const err = resp.errors?.find((x) => x.advertiser_id === adv.advertiser_id);
             if (stat) {
-              updateCountryRow(adv.advertiser_id, { status: "success", rows: stat.rows, campaigns: stat.campaigns, days });
+              const noRowsWithError = (stat.rows ?? 0) === 0 && !!err;
+              updateCountryRow(adv.advertiser_id, {
+                status: noRowsWithError ? "failed" : "success",
+                rows: stat.rows,
+                campaigns: stat.campaigns,
+                days,
+                error: err?.error,
+              });
+              if (noRowsWithError) failed++;
               finished = true;
             } else if (err) {
               updateCountryRow(adv.advertiser_id, { status: err.error.includes("店铺ID") ? "skipped" : "failed", error: err.error, days });
@@ -195,29 +228,42 @@ function GmvMaxSection() {
               finished = true;
             }
           } catch (err) {
+            abortRef.current = null;
+            if (stopRequestedRef.current || (err as Error).name === "AbortError" || (err as Error).message.toLowerCase().includes("aborted")) {
+              updateCountryRow(adv.advertiser_id, { status: "stopped", error: "已停止", days });
+              stopped = true;
+              finished = true;
+              break;
+            }
             updateCountryRow(adv.advertiser_id, { status: "failed", error: (err as Error).message, days });
             failed++;
             finished = true;
           }
         }
+        if (stopped) break;
         if (!finished) {
           updateCountryRow(adv.advertiser_id, { status: "failed", error: "单个国家超过即时抓取时间预算，请单独重试", days });
           failed++;
         }
         setProgress({ label, current: country, done: i + 1, total: targets.length, attempt: 0 });
       }
-      toast.success(`${label} 完成：${targets.length} 个国家 / 写入 ${upserted} 行${failed ? ` / ${failed} 个失败` : ""}`);
+      if (stopped) {
+        markUnfinishedStopped();
+        toast.warning(`${label} 已停止：已写入 ${upserted} 行${failed ? ` / ${failed} 个失败` : ""}`);
+      }
+      else toast.success(`${label} 完成：${targets.length} 个国家 / 写入 ${upserted} 行${failed ? ` / ${failed} 个失败` : ""}`);
       reportRef.current.reload();
     } catch (e) {
       toast.error(`${label} 失败：${(e as Error).message}`);
     } finally {
+      abortRef.current = null;
       setBusy(null);
       setProgress(null);
     }
   };
 
   const progressRows = Array.from(countryRows.values()).sort((a, b) => {
-    const order = { running: 0, pending: 1, failed: 2, skipped: 3, success: 4 } as Record<CountryStatus, number>;
+    const order = { running: 0, pending: 1, stopped: 2, failed: 3, skipped: 4, success: 5 } as Record<CountryStatus, number>;
     return order[a.status] - order[b.status] || a.country.localeCompare(b.country);
   });
 
@@ -239,18 +285,24 @@ function GmvMaxSection() {
               <Input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className="h-8 w-40" />
             </div>
             <DateRangeQuickSelect onPick={(s, e) => { setStart(s); setEnd(e); }} />
-            <Button size="sm" disabled={!!busy} onClick={() => run("GMV Max 回溯", start, end)}>
-              <Database className={`h-4 w-4 mr-1.5 ${busy === "GMV Max 回溯" ? "animate-spin" : ""}`} />
-              开始回溯
-            </Button>
-            <Button size="sm" variant="outline" disabled={!!busy} onClick={() => {
-              const e2 = today;
-              const s2 = new Date(Date.now() - 3 * 86400 * 1000).toISOString().slice(0, 10);
-              run("拉取最近3天", s2, e2);
-            }}>
-              <RotateCw className={`h-4 w-4 mr-1.5 ${busy === "拉取最近3天" ? "animate-spin" : ""}`} />
-              最近3天
-            </Button>
+            {busy ? (
+              <Button size="sm" variant="destructive" onClick={stopRun}>
+                <StopCircle className="h-4 w-4 mr-1.5" />停止
+              </Button>
+            ) : (
+              <>
+                <Button size="sm" onClick={() => run("GMV Max 回溯", start, end)}>
+                  <Database className="h-4 w-4 mr-1.5" />开始回溯
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => {
+                  const e2 = today;
+                  const s2 = new Date(Date.now() - 3 * 86400 * 1000).toISOString().slice(0, 10);
+                  run("拉取最近3天", s2, e2);
+                }}>
+                  <RotateCw className="h-4 w-4 mr-1.5" />最近3天
+                </Button>
+              </>
+            )}
           </div>
           {progress && (
             <div className="mt-3 text-xs text-muted-foreground">
@@ -283,6 +335,7 @@ function GmvMaxSection() {
                         {r.status === "success" && <span className="inline-flex items-center gap-1 text-xs text-foreground"><CheckCircle2 className="h-3.5 w-3.5" />成功</span>}
                         {r.status === "failed" && <span className="inline-flex items-center gap-1 text-xs text-destructive"><XCircle className="h-3.5 w-3.5" />失败</span>}
                         {r.status === "skipped" && <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Clock className="h-3.5 w-3.5" />跳过</span>}
+                        {r.status === "stopped" && <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><StopCircle className="h-3.5 w-3.5" />已停止</span>}
                         {r.status === "pending" && <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Clock className="h-3.5 w-3.5" />排队</span>}
                         {r.status === "running" && <span className="inline-flex items-center gap-1 text-xs text-primary"><Loader2 className="h-3.5 w-3.5 animate-spin" />抓取中</span>}
                       </TableCell>
