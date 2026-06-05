@@ -687,6 +687,7 @@ Deno.serve(async (req) => {
         advertisers: targets.length,
         processed_advertisers: processedAdvertisers.length,
         remaining_advertiser_ids: stoppedBeforeTimeout?.remaining_advertiser_ids ?? [],
+        remaining_campaign_ids: stoppedBeforeTimeout?.remaining_campaign_ids ?? [],
         batch_size: batchSize,
         max_runtime_ms: maxRuntimeMs,
         stopped_before_timeout: stoppedBeforeTimeout,
