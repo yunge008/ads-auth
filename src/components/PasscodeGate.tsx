@@ -80,10 +80,10 @@ export function PasscodeGate({ children }: { children: ReactNode }) {
     }
   };
 
-  if (checking) {
+  if (!mounted || checking) {
     return (
       <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
-        正在校验访问权限…
+        {checking ? "正在校验访问权限…" : ""}
       </div>
     );
   }
