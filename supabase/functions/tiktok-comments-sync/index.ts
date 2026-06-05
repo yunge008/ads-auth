@@ -1,5 +1,7 @@
 // Sync TikTok ad comments for all advertisers across tiktok_connections.
-// Body: { advertiser_ids?: string[]; max_pages?: number }  (default: all known; 5 pages each)
+// Body: { advertiser_ids?: string[]; max_pages?: number; days?: number; start_date?: string; end_date?: string; incremental?: boolean }
+// Auto-splits date range into <=30-day windows (TikTok API hard limit).
+// If incremental=true (default), uses tiktok_comment_sync_state.last_synced_until as the window start when newer than start_date.
 import { corsHeaders } from "../_shared/feishu.ts";
 import { admin, checkAdminPasscode, type ConnRow } from "../_shared/auth.ts";
 
@@ -27,10 +29,28 @@ function fmtDate(d: Date) {
   const day = String(d.getUTCDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
-
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
+function addDays(s: string, n: number) {
+  const t = new Date(s + "T00:00:00Z");
+  t.setUTCDate(t.getUTCDate() + n);
+  return fmtDate(t);
 }
+function daysBetween(a: string, b: string) {
+  const t1 = new Date(a + "T00:00:00Z").getTime();
+  const t2 = new Date(b + "T00:00:00Z").getTime();
+  return Math.round((t2 - t1) / 86400000);
+}
+function splitWindows(start: string, end: string, max = 30): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  let cur = start;
+  while (daysBetween(cur, end) >= 0) {
+    const next = addDays(cur, max - 1);
+    const stop = daysBetween(next, end) > 0 ? end : next;
+    out.push([cur, stop]);
+    cur = addDays(stop, 1);
+  }
+  return out;
+}
+function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
 
 async function fetchAdgroups(token: string, advertiser_id: string): Promise<string[]> {
   const ids: string[] = [];
@@ -76,33 +96,40 @@ async function fetchPage(
   url.searchParams.set("page", String(page));
   url.searchParams.set("page_size", String(page_size));
   const res = await fetch(url, { headers: { "Access-Token": token } });
-  const j = await res.json().catch(() => ({}));
-  return j;
+  return await res.json().catch(() => ({}));
 }
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     await checkAdminPasscode(req, "comments");
-    const { advertiser_ids: filterIds, max_pages = 5, days = 30, start_date, end_date } = (await req
-      .json()
-      .catch(() => ({}))) as {
+    const {
+      advertiser_ids: filterIds,
+      max_pages = 10,
+      days = 30,
+      start_date,
+      end_date,
+      incremental = true,
+    } = (await req.json().catch(() => ({}))) as {
       advertiser_ids?: string[];
       max_pages?: number;
       days?: number;
       start_date?: string;
       end_date?: string;
+      incremental?: boolean;
     };
 
     const endDate = end_date ?? fmtDate(new Date());
-    const startDate =
+    const reqStartDate =
       start_date ?? fmtDate(new Date(Date.now() - Math.max(1, days) * 86400 * 1000));
 
     const db = admin();
-    const [{ data: conns, error: cErr }, { data: acRows, error: aErr }] = await Promise.all([
-      db.from("tiktok_connections").select("*"),
-      db.from("advertiser_countries").select("advertiser_id, country"),
-    ]);
+    const [{ data: conns, error: cErr }, { data: acRows, error: aErr }, { data: stateRows }] =
+      await Promise.all([
+        db.from("tiktok_connections").select("*"),
+        db.from("advertiser_countries").select("advertiser_id, country"),
+        db.from("tiktok_comment_sync_state").select("advertiser_id, last_synced_until"),
+      ]);
     if (cErr) throw new Error(cErr.message);
     if (aErr) throw new Error(aErr.message);
 
@@ -112,92 +139,117 @@ Deno.serve(async (req) => {
         r.country,
       ]),
     );
-
-    // advertiser_id -> token (first wins)
-    const tokenByAdv = new Map<string, string>();
-    for (const c of (conns ?? []) as ConnRow[]) {
-      for (const id of c.advertiser_ids) {
-        if (!tokenByAdv.has(id)) tokenByAdv.set(id, c.access_token);
-      }
+    const lastByAdv = new Map<string, string>();
+    for (const s of (stateRows ?? []) as { advertiser_id: string; last_synced_until: string | null }[]) {
+      if (s.last_synced_until) lastByAdv.set(s.advertiser_id, s.last_synced_until.slice(0, 10));
     }
+
+    const tokenByAdv = new Map<string, string>();
+    for (const c of (conns ?? []) as ConnRow[])
+      for (const id of c.advertiser_ids)
+        if (!tokenByAdv.has(id)) tokenByAdv.set(id, c.access_token);
 
     const targets = (filterIds && filterIds.length ? filterIds : [...tokenByAdv.keys()]).filter(
       (id) => tokenByAdv.has(id),
     );
 
-    const all: CommentRow[] = [];
     const errors: { advertiser_id: string; error: string }[] = [];
     const nowIso = new Date().toISOString();
+    let totalUpserted = 0;
 
     for (const advId of targets) {
       const token = tokenByAdv.get(advId)!;
+      // Incremental: bump window start if we already synced past it
+      let advStart = reqStartDate;
+      if (incremental) {
+        const last = lastByAdv.get(advId);
+        if (last && daysBetween(last, advStart) < 0) advStart = last;
+      }
+      const windows = splitWindows(advStart, endDate, 30);
+
+      const advRows: CommentRow[] = [];
       try {
         const adgroups = await fetchAdgroups(token, advId);
         for (const agId of adgroups) {
-          for (let page = 1; page <= max_pages; page++) {
-            const j = await fetchPage(token, advId, agId, page, startDate, endDate);
-            if (j.code !== 0) {
-              errors.push({ advertiser_id: advId, error: `adgroup ${agId}: ${j.message ?? `code=${j.code}`}` });
-              break;
-            }
-            const list = (j.data?.comments ?? []) as Record<string, unknown>[];
-            if (!list.length) break;
-            for (const c of list) {
-              const cid = String(c.comment_id ?? "");
-              if (!cid) continue;
-              const created = c.create_time;
-              let createdIso: string | null = null;
-              if (typeof created === "number") createdIso = new Date(created * 1000).toISOString();
-              else if (typeof created === "string" && created) {
-                const d = new Date(created);
-                createdIso = isNaN(d.getTime()) ? null : d.toISOString();
+          for (const [ws, we] of windows) {
+            for (let page = 1; page <= max_pages; page++) {
+              const j = await fetchPage(token, advId, agId, page, ws, we);
+              if (j.code !== 0) {
+                errors.push({
+                  advertiser_id: advId,
+                  error: `adgroup ${agId} ${ws}~${we}: ${j.message ?? `code=${j.code}`}`,
+                });
+                break;
               }
-              all.push({
-                advertiser_id: advId,
-                country: countryByAdv.get(advId) ?? null,
-                comment_id: cid,
-                parent_comment_id: (c.original_comment_id as string) ?? null,
-                vid: (c.tiktok_item_id ?? null) as string | null,
-                text: (c.content ?? null) as string | null,
-                like_count: Number(c.likes ?? 0) || 0,
-                reply_count: Number(c.replies ?? 0) || 0,
-                username: (c.user_name ?? null) as string | null,
-                avatar_url: (c.user_avatar_url ?? null) as string | null,
-                comment_type: (c.comment_type ?? null) as string | null,
-                comment_create_time: createdIso,
-                pulled_at: nowIso,
-              });
+              const list = (j.data?.comments ?? []) as Record<string, unknown>[];
+              if (!list.length) break;
+              for (const c of list) {
+                const cid = String(c.comment_id ?? "");
+                if (!cid) continue;
+                const created = c.create_time;
+                let createdIso: string | null = null;
+                if (typeof created === "number") createdIso = new Date(created * 1000).toISOString();
+                else if (typeof created === "string" && created) {
+                  const d = new Date(created);
+                  createdIso = isNaN(d.getTime()) ? null : d.toISOString();
+                }
+                advRows.push({
+                  advertiser_id: advId,
+                  country: countryByAdv.get(advId) ?? null,
+                  comment_id: cid,
+                  parent_comment_id: (c.original_comment_id as string) ?? null,
+                  vid: (c.tiktok_item_id ?? null) as string | null,
+                  text: (c.content ?? null) as string | null,
+                  like_count: Number(c.likes ?? 0) || 0,
+                  reply_count: Number(c.replies ?? 0) || 0,
+                  username: (c.user_name ?? null) as string | null,
+                  avatar_url: (c.user_avatar_url ?? null) as string | null,
+                  comment_type: (c.comment_type ?? null) as string | null,
+                  comment_create_time: createdIso,
+                  pulled_at: nowIso,
+                });
+              }
+              const pi = j.data?.page_info;
+              const totalPage = Number(pi?.total_page ?? 1);
+              if (page >= totalPage) break;
+              await sleep(200);
             }
-            const pi = j.data?.page_info;
-            const totalPage = Number(pi?.total_page ?? 1);
-            if (page >= totalPage) break;
-            await sleep(200);
+            await sleep(120);
           }
-          await sleep(150);
+          await sleep(120);
         }
       } catch (e) {
         errors.push({ advertiser_id: advId, error: (e as Error).message });
       }
-      await sleep(400);
-    }
 
-
-    let upserted = 0;
-    if (all.length) {
-      // upsert in chunks
-      const CHUNK = 500;
-      for (let i = 0; i < all.length; i += CHUNK) {
-        const batch = all.slice(i, i + CHUNK);
-        const { error } = await db
-          .from("tiktok_comments")
-          .upsert(batch, { onConflict: "comment_id" });
-        if (error) throw new Error(error.message);
-        upserted += batch.length;
+      if (advRows.length) {
+        const CHUNK = 500;
+        for (let i = 0; i < advRows.length; i += CHUNK) {
+          const batch = advRows.slice(i, i + CHUNK);
+          const { error } = await db
+            .from("tiktok_comments")
+            .upsert(batch, { onConflict: "comment_id" });
+          if (error) throw new Error(error.message);
+          totalUpserted += batch.length;
+        }
       }
+      // Update sync state to endDate (use end-of-day)
+      await db.from("tiktok_comment_sync_state").upsert(
+        { advertiser_id: advId, last_synced_until: `${endDate}T23:59:59Z`, last_run_at: nowIso },
+        { onConflict: "advertiser_id" },
+      );
+
+      await sleep(300);
     }
 
     return new Response(
-      JSON.stringify({ advertisers: targets.length, upserted, errors }),
+      JSON.stringify({
+        advertisers: targets.length,
+        upserted: totalUpserted,
+        start_date: reqStartDate,
+        end_date: endDate,
+        errors,
+      }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {
