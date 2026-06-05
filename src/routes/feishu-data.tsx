@@ -145,6 +145,16 @@ function GmvMaxSection() {
     });
   };
 
+  const markUnfinishedStopped = () => {
+    setCountryRows((prev) => {
+      const next = new Map(prev);
+      for (const [id, row] of next) {
+        if (row.status === "pending" || row.status === "running") next.set(id, { ...row, status: "stopped", error: "已停止" });
+      }
+      return next;
+    });
+  };
+
   const stopRun = () => {
     stopRequestedRef.current = true;
     abortRef.current?.abort();
@@ -229,7 +239,10 @@ function GmvMaxSection() {
         }
         setProgress({ label, current: country, done: i + 1, total: targets.length, attempt: 0 });
       }
-      if (stopped) toast.warning(`${label} 已停止：已写入 ${upserted} 行${failed ? ` / ${failed} 个失败` : ""}`);
+      if (stopped) {
+        markUnfinishedStopped();
+        toast.warning(`${label} 已停止：已写入 ${upserted} 行${failed ? ` / ${failed} 个失败` : ""}`);
+      }
       else toast.success(`${label} 完成：${targets.length} 个国家 / 写入 ${upserted} 行${failed ? ` / ${failed} 个失败` : ""}`);
       reportRef.current.reload();
     } catch (e) {
