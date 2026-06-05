@@ -90,7 +90,7 @@ export async function ttGet(
       return (j.data ?? {}) as Record<string, unknown>;
     }
     const msg = String(j.message ?? "");
-    const isRate = msg.includes("Too many requests") || j.code === 40100 || j.code === 50002;
+    const isRate = msg.includes("Too many requests") || msg.includes("Request too frequent") || msg.toLowerCase().includes("frequent") || j.code === 40100 || j.code === 50002;
     if (isRate && attempt < retries - 1) {
       await _sleep(3000 * Math.pow(2, attempt));
       continue;
