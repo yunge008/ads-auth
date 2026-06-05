@@ -1,6 +1,6 @@
 // Unit tests for gmv-max-sync.
 // - fetchCampaigns: filtering enum + total_page pagination, per advertiser
-// - fetchReport (creative-level batch): omits gmv_max_promotion_types, batched campaign_ids
+// - fetchReport: omits gmv_max_promotion_types, auto metrics, empty filters, de-dupes pages
 // - ttGet: retries on "Too many requests" with backoff, fails fast on other errors
 import { assertEquals, assert, assertRejects } from "https://deno.land/std@0.208.0/assert/mod.ts";
 import { fetchCampaigns, fetchReport, ttGet } from "./index.ts";
@@ -41,10 +41,11 @@ for (const adv of ADVERTISERS) {
   });
 }
 
-// ---------- fetchReport creative-level batch: drops gmv_max_promotion_types ----------
+// ---------- fetchReport: drops gmv_max_promotion_types + auto creative metrics ----------
 for (const adv of ADVERTISERS) {
-  Deno.test(`fetchReport[${adv}] creative-level batch omits gmv_max_promotion_types`, async () => {
+  Deno.test(`fetchReport[${adv}] creative-level omits gmv_max_promotion_types`, async () => {
     const batch = [`${adv}_c1`, `${adv}_c2`, `${adv}_c3`];
+    const igids = [`${adv}_g1`, `${adv}_g2`];
     const { fn, calls } = makeTtGet((path, params) => {
       assertEquals(path, "/gmv_max/report/get/");
       assertEquals(params.advertiser_id, adv);
@@ -52,8 +53,12 @@ for (const adv of ADVERTISERS) {
       assert(!Array.isArray(filt), "filtering must be object");
       assert(!("gmv_max_promotion_types" in filt), "creative-level must omit promotion type");
       assertEquals(filt.campaign_ids, batch);
+      assertEquals(filt.item_group_ids, igids);
       const dims = JSON.parse(params.dimensions);
       assert(dims.includes("item_id"));
+      const metrics = JSON.parse(params.metrics);
+      assert(metrics.includes("creative_delivery_status"));
+      assertEquals(params.page_size, "1000");
       return {
         list: [
           { dimensions: { campaign_id: batch[0], item_group_id: "g1", item_id: "v1", stat_time_day: "2026-01-01" }, metrics: { cost: 1, gross_revenue: 2 } },
@@ -64,14 +69,48 @@ for (const adv of ADVERTISERS) {
     const rows = await fetchReport(
       "tok", adv, "shop", "2026-01-01", "2026-01-02",
       ["campaign_id", "item_group_id", "item_id", "stat_time_day"],
-      { campaign_ids: batch },
-      ["cost", "orders", "gross_revenue", "product_impressions", "product_clicks"],
+      { campaign_ids: batch, item_group_ids: igids },
+      undefined,
       fn,
     );
     assertEquals(calls.length, 1);
     assertEquals(rows.length, 1);
   });
 }
+
+Deno.test("fetchReport sends empty extraFilter as a legal object", async () => {
+  const { fn, calls } = makeTtGet((_path, params) => {
+    assertEquals(params.filtering, "{}");
+    return { list: [], page_info: { page: 1, total_page: 0 } };
+  });
+  await fetchReport("t", "a", "s", "2026-01-01", "2026-01-02", ["campaign_id"], {}, undefined, fn);
+  assertEquals(calls.length, 1);
+});
+
+Deno.test("fetchReport non-creative metrics exclude creative fields", async () => {
+  const { fn } = makeTtGet((_path, params) => {
+    const metrics = JSON.parse(params.metrics);
+    assertEquals(metrics, ["cost", "orders", "gross_revenue"]);
+    assert(!metrics.includes("creative_delivery_status"));
+    return { list: [], page_info: { page: 1, total_page: 0 } };
+  });
+  await fetchReport("t", "a", "s", "2026-01-01", "2026-01-02", ["campaign_id", "item_group_id"], {}, undefined, fn);
+});
+
+Deno.test("fetchReport de-dupes duplicate rows across pages", async () => {
+  const { fn, calls } = makeTtGet((_path, params) => {
+    const page = Number(params.page);
+    return {
+      list: [
+        { dimensions: { campaign_id: "c1", item_group_id: "g1", item_id: "v1", stat_time_day: "2026-01-01" }, metrics: { cost: page } },
+      ],
+      page_info: { page, total_page: 2, total_number: 2 },
+    };
+  });
+  const rows = await fetchReport("t", "a", "s", "2026-01-01", "2026-01-02", ["campaign_id", "item_group_id", "item_id", "stat_time_day"], {}, undefined, fn);
+  assertEquals(calls.length, 2);
+  assertEquals(rows.length, 1);
+});
 
 // ---------- pagination short-circuit ----------
 Deno.test("fetchReport stops after one page when total_page=1", async () => {
