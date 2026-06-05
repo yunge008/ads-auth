@@ -56,6 +56,7 @@ function chunk<T>(arr: T[], size: number): T[][] {
 }
 
 type RawRow = Record<string, unknown>;
+type TimeBudgetChecker = () => void;
 
 // Rate-limited (≤ ~3 QPS) + retry on "Too many requests" with exponential backoff.
 // Other errors fail fast (don't waste QPD on bad filters / invalid metrics).
@@ -104,12 +105,14 @@ export async function fetchCampaigns(
   token: string,
   advertiser_id: string,
   _ttGet: typeof ttGet = ttGet,
+  _ensureTime?: TimeBudgetChecker,
 ): Promise<string[]> {
   const ids: string[] = [];
   let page = 1;
   const page_size = 100;
   const filtering = JSON.stringify({ gmv_max_promotion_types: ["PRODUCT_GMV_MAX"] });
   for (let i = 0; i < 50; i++) {
+    _ensureTime?.();
     const data = await _ttGet(token, "/gmv_max/campaign/get/", {
       advertiser_id,
       filtering,
@@ -145,6 +148,7 @@ export async function fetchReport(
   extraFilter: Record<string, unknown> = {},
   metrics?: string[],
   _ttGet: typeof ttGet = ttGet,
+  _ensureTime?: TimeBudgetChecker,
 ): Promise<RawRow[]> {
   const out: RawRow[] = [];
   const seen = new Set<string>();
@@ -155,6 +159,7 @@ export async function fetchReport(
     : ["cost", "orders", "gross_revenue"]);
   const filtering = JSON.stringify({ ...extraFilter });
   for (let i = 0; i < 100; i++) {
+    _ensureTime?.();
     const params: Record<string, string> = {
       advertiser_id,
       store_ids: JSON.stringify([store_id]),
