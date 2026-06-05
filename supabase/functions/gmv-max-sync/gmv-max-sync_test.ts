@@ -78,7 +78,7 @@ Deno.test("fetchReport stops after one page when total_page=1", async () => {
     list: [{ dimensions: {}, metrics: {} }],
     page_info: { page: 1, total_page: 1, total_number: 1 },
   }));
-  await fetchReport("t", "a", "s", "2026-01-01", "2026-01-02", ["item_id"], {}, fn);
+  await fetchReport("t", "a", "s", "2026-01-01", "2026-01-02", ["item_id"], {}, undefined, fn);
   assertEquals(calls.length, 1);
 });
 
