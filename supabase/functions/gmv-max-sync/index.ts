@@ -93,7 +93,7 @@ Deno.serve(async (req) => {
     const db = admin();
     const [{ data: conns, error: ce }, { data: acRows, error: ae }] = await Promise.all([
       db.from("tiktok_connections").select("*"),
-      db.from("advertiser_countries").select("advertiser_id, country"),
+      db.from("advertiser_countries").select("advertiser_id, country, shop_id"),
     ]);
     if (ce) throw new Error(ce.message);
     if (ae) throw new Error(ae.message);
@@ -102,27 +102,29 @@ Deno.serve(async (req) => {
     for (const c of (conns ?? []) as ConnRow[])
       for (const id of c.advertiser_ids)
         if (!tokenByAdv.has(id)) tokenByAdv.set(id, c.access_token);
-    const countryByAdv = new Map<string, string>(
-      ((acRows ?? []) as { advertiser_id: string; country: string }[]).map((r) => [
-        r.advertiser_id,
-        r.country,
-      ]),
-    );
+    const countryByAdv = new Map<string, string>();
+    const shopByAdv = new Map<string, string>();
+    for (const r of (acRows ?? []) as { advertiser_id: string; country: string; shop_id: string | null }[]) {
+      countryByAdv.set(r.advertiser_id, r.country);
+      if (r.shop_id) shopByAdv.set(r.advertiser_id, r.shop_id);
+    }
 
-    const targets = (filterIds && filterIds.length ? filterIds : [...tokenByAdv.keys()]).filter(
-      (id) => tokenByAdv.has(id),
-    );
+    const requested = filterIds && filterIds.length ? filterIds : [...tokenByAdv.keys()];
+    const targets = requested.filter((id) => tokenByAdv.has(id) && shopByAdv.has(id));
+    const skipped = requested.filter((id) => tokenByAdv.has(id) && !shopByAdv.has(id));
     const windows = splitWindows(start_date, end_date, 30);
 
     const errors: { advertiser_id: string; window?: string; error: string }[] = [];
+    for (const id of skipped) errors.push({ advertiser_id: id, error: "缺少店铺ID（shop_id），已跳过" });
     const upsertRows: Record<string, unknown>[] = [];
     const nowIso = new Date().toISOString();
 
     for (const adv of targets) {
       const tok = tokenByAdv.get(adv)!;
+      const shopId = shopByAdv.get(adv)!;
       for (const [s, e] of windows) {
         try {
-          const list = await fetchReport(tok, adv, s, e);
+          const list = await fetchReport(tok, adv, shopId, s, e);
           for (const r of list) {
             const dims = (r.dimensions ?? {}) as Record<string, unknown>;
             const mets = (r.metrics ?? {}) as Record<string, unknown>;
