@@ -138,10 +138,12 @@ Deno.serve(async (req) => {
         const colF = cellText(r[5]);
         const colG = cellText(r[6]);
         const colH = cellText(r[7]);
+        // Auth code may live in H (standard) or G (legacy). VID is the cell immediately to its left.
         const authCode = CODE_RE.test(colH) ? colH : CODE_RE.test(colG) ? colG : "";
-        if (!CODE_RE.test(authCode)) continue;
-        const vid = authCode === colG ? colF : colG;
-        const product = authCode === colG ? colH : cellText(r[8]);
+        if (!authCode) continue;
+        const vid = authCode === colH ? colG : colF;
+        if (!vid) continue;
+        const product = authCode === colH ? cellText(r[8]) : colH;
         const pCell = cellText(r[15]);
         if (!include_done && pCell) continue;
 
