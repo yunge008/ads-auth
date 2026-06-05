@@ -52,6 +52,18 @@ Deno.serve(async (req) => {
 
     const db = admin();
 
+    // Load advertiser_id -> name map
+    const nameByAdv = new Map<string, string>();
+    {
+      const { data: ac, error: aerr } = await db
+        .from("advertiser_countries")
+        .select("advertiser_id, advertiser_name");
+      if (aerr) throw new Error(aerr.message);
+      for (const r of (ac ?? []) as { advertiser_id: string; advertiser_name: string | null }[]) {
+        if (r.advertiser_name) nameByAdv.set(r.advertiser_id, r.advertiser_name);
+      }
+    }
+
     // 1) Load staff_vid_map (primary) — paginate to bypass 1000-row default.
     const staff: StaffRow[] = [];
     {
@@ -71,6 +83,7 @@ Deno.serve(async (req) => {
         from += PAGE;
       }
     }
+
     const vidsInScope = Array.from(new Set(staff.map((s) => s.vid)));
 
     // 2) Load daily data for those vids in date range
