@@ -150,6 +150,7 @@ export function DataSyncCard() {
       const resp = await invokeFn<SyncResp>("gmv-max-sync", {
         start_date: start, end_date: end, advertiser_ids: [id],
       });
+      mergeNames(resp.advertiser_names);
       const st = resp.batch_stats?.find((x) => x.advertiser_id === id);
       const err = resp.errors?.find((x) => x.advertiser_id === id);
       if (st) updateRow(id, { status: "success", rows: st.rows, campaigns: st.campaigns, days: daysBetween(start, end) });
