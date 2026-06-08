@@ -21,6 +21,9 @@ type RawRow = {
   vid: string;
   stat_date: string;
   creative_delivery_status: string | null;
+  cost: number | null;
+  gross_revenue: number | null;
+  orders: number | null;
 };
 
 Deno.serve(async (req) => {
@@ -52,7 +55,7 @@ Deno.serve(async (req) => {
     const buildQuery = () => {
       let q = db
         .from("gmv_max_vid_daily")
-        .select("country,advertiser_id,vid,stat_date,creative_delivery_status")
+        .select("country,advertiser_id,vid,stat_date,creative_delivery_status,cost,gross_revenue,orders")
         .order("stat_date", { ascending: false })
         .gte("stat_date", startDate)
         .lte("stat_date", endDate);
@@ -81,6 +84,9 @@ Deno.serve(async (req) => {
       stat_date: string;
       vids: Set<string>;
       vidsByStatus: Map<StatusKey, Set<string>>;
+      cost: number;
+      gross_revenue: number;
+      orders: number;
     }>();
     for (const r of rows) {
       const key = `${r.country ?? ""}|${r.advertiser_id}|${r.stat_date}`;
@@ -92,9 +98,15 @@ Deno.serve(async (req) => {
           stat_date: r.stat_date,
           vids: new Set<string>(),
           vidsByStatus: new Map(STATUS_KEYS.map((k) => [k, new Set<string>()])),
+          cost: 0,
+          gross_revenue: 0,
+          orders: 0,
         };
         groups.set(key, g);
       }
+      g.cost += Number(r.cost ?? 0);
+      g.gross_revenue += Number(r.gross_revenue ?? 0);
+      g.orders += Number(r.orders ?? 0);
       const vid = (r.vid ?? "").trim();
       if (!vid) continue;
       g.vids.add(vid);
@@ -123,6 +135,10 @@ Deno.serve(async (req) => {
         advertiser_id: g.advertiser_id,
         advertiser_name: nameMap.get(g.advertiser_id) ?? null,
         stat_date: g.stat_date,
+        gross_revenue: g.gross_revenue,
+        cost: g.cost,
+        roi: g.cost > 0 ? g.gross_revenue / g.cost : null,
+        orders: g.orders,
         row_count: g.vids.size,
         status_counts: Object.fromEntries(
           STATUS_KEYS.map((k) => [k, g.vidsByStatus.get(k)!.size]),
