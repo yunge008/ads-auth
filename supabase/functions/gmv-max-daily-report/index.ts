@@ -55,7 +55,7 @@ Deno.serve(async (req) => {
     const buildQuery = () => {
       let q = db
         .from("gmv_max_vid_daily")
-        .select("country,advertiser_id,vid,stat_date,creative_delivery_status")
+        .select("country,advertiser_id,vid,stat_date,creative_delivery_status,cost,gross_revenue,orders")
         .order("stat_date", { ascending: false })
         .gte("stat_date", startDate)
         .lte("stat_date", endDate);
