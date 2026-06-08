@@ -499,6 +499,10 @@ function GmvDailyReport({ advertisers, reportRef }: { advertisers: AdvertiserRow
                 <TableHead>国家</TableHead>
                 <TableHead>广告户名称</TableHead>
                 <TableHead>日期</TableHead>
+                <TableHead className="text-right">GMV</TableHead>
+                <TableHead className="text-right">消耗</TableHead>
+                <TableHead className="text-right">ROI</TableHead>
+                <TableHead className="text-right">订单量</TableHead>
                 <TableHead className="text-right">数据行数</TableHead>
                 {DELIVERY_STATUSES.map((s) => (
                   <TableHead key={s} className="text-right text-xs" title={s}>{STATUS_LABELS[s]}</TableHead>
@@ -514,6 +518,10 @@ function GmvDailyReport({ advertisers, reportRef }: { advertisers: AdvertiserRow
                     <div className="text-[10px] text-muted-foreground font-mono">{r.advertiser_id}</div>
                   </TableCell>
                   <TableCell className="text-xs">{r.stat_date}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtNum(r.gross_revenue)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtNum(r.cost)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{r.roi == null ? "—" : r.roi.toFixed(2)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtInt(r.orders)}</TableCell>
                   <TableCell className="text-right tabular-nums">{r.row_count}</TableCell>
                   {DELIVERY_STATUSES.map((s) => {
                     const v = r.status_counts?.[s] ?? 0;
@@ -522,7 +530,7 @@ function GmvDailyReport({ advertisers, reportRef }: { advertisers: AdvertiserRow
                 </TableRow>
               ))}
               {!rows.length && !loading && (
-                <TableRow><TableCell colSpan={4 + DELIVERY_STATUSES.length} className="text-center text-xs text-muted-foreground py-6">暂无数据</TableCell></TableRow>
+                <TableRow><TableCell colSpan={8 + DELIVERY_STATUSES.length} className="text-center text-xs text-muted-foreground py-6">暂无数据</TableCell></TableRow>
               )}
             </TableBody>
           </Table>
