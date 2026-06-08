@@ -407,9 +407,18 @@ type DailyReportRow = {
   advertiser_id: string;
   advertiser_name: string | null;
   stat_date: string;
+  gross_revenue?: number;
+  cost?: number;
+  roi?: number | null;
+  orders?: number;
   row_count: number;
   status_counts: Record<string, number>;
 };
+
+const fmtNum = (v: number | null | undefined, digits = 2) =>
+  v == null || !isFinite(v) ? "—" : v.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+const fmtInt = (v: number | null | undefined) =>
+  v == null ? "—" : Math.round(v).toLocaleString();
 
 function GmvDailyReport({ advertisers, reportRef }: { advertisers: AdvertiserRow[]; reportRef: React.MutableRefObject<{ reload: () => void }> }) {
   const today = new Date().toISOString().slice(0, 10);
