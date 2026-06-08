@@ -16,6 +16,7 @@ import { Route as CommentsRouteImport } from './routes/comments'
 import { Route as ApiTestRouteImport } from './routes/api-test'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as OauthTiktokCallbackRouteImport } from './routes/oauth.tiktok.callback'
+import { Route as ApiPublicHooksGmvMaxCronRouteImport } from './routes/api/public/hooks/gmv-max-cron'
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
@@ -52,6 +53,12 @@ const OauthTiktokCallbackRoute = OauthTiktokCallbackRouteImport.update({
   path: '/oauth/tiktok/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicHooksGmvMaxCronRoute =
+  ApiPublicHooksGmvMaxCronRouteImport.update({
+    id: '/api/public/hooks/gmv-max-cron',
+    path: '/api/public/hooks/gmv-max-cron',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -61,6 +68,7 @@ export interface FileRoutesByFullPath {
   '/material-performance': typeof MaterialPerformanceRoute
   '/settings': typeof SettingsRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
+  '/api/public/hooks/gmv-max-cron': typeof ApiPublicHooksGmvMaxCronRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -70,6 +78,7 @@ export interface FileRoutesByTo {
   '/material-performance': typeof MaterialPerformanceRoute
   '/settings': typeof SettingsRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
+  '/api/public/hooks/gmv-max-cron': typeof ApiPublicHooksGmvMaxCronRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -80,6 +89,7 @@ export interface FileRoutesById {
   '/material-performance': typeof MaterialPerformanceRoute
   '/settings': typeof SettingsRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
+  '/api/public/hooks/gmv-max-cron': typeof ApiPublicHooksGmvMaxCronRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -91,6 +101,7 @@ export interface FileRouteTypes {
     | '/material-performance'
     | '/settings'
     | '/oauth/tiktok/callback'
+    | '/api/public/hooks/gmv-max-cron'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -100,6 +111,7 @@ export interface FileRouteTypes {
     | '/material-performance'
     | '/settings'
     | '/oauth/tiktok/callback'
+    | '/api/public/hooks/gmv-max-cron'
   id:
     | '__root__'
     | '/'
@@ -109,6 +121,7 @@ export interface FileRouteTypes {
     | '/material-performance'
     | '/settings'
     | '/oauth/tiktok/callback'
+    | '/api/public/hooks/gmv-max-cron'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -119,6 +132,7 @@ export interface RootRouteChildren {
   MaterialPerformanceRoute: typeof MaterialPerformanceRoute
   SettingsRoute: typeof SettingsRoute
   OauthTiktokCallbackRoute: typeof OauthTiktokCallbackRoute
+  ApiPublicHooksGmvMaxCronRoute: typeof ApiPublicHooksGmvMaxCronRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -172,6 +186,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OauthTiktokCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/hooks/gmv-max-cron': {
+      id: '/api/public/hooks/gmv-max-cron'
+      path: '/api/public/hooks/gmv-max-cron'
+      fullPath: '/api/public/hooks/gmv-max-cron'
+      preLoaderRoute: typeof ApiPublicHooksGmvMaxCronRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -183,6 +204,7 @@ const rootRouteChildren: RootRouteChildren = {
   MaterialPerformanceRoute: MaterialPerformanceRoute,
   SettingsRoute: SettingsRoute,
   OauthTiktokCallbackRoute: OauthTiktokCallbackRoute,
+  ApiPublicHooksGmvMaxCronRoute: ApiPublicHooksGmvMaxCronRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
