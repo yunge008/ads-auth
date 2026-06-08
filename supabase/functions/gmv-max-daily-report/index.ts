@@ -21,6 +21,9 @@ type RawRow = {
   vid: string;
   stat_date: string;
   creative_delivery_status: string | null;
+  cost: number | null;
+  gross_revenue: number | null;
+  orders: number | null;
 };
 
 Deno.serve(async (req) => {
