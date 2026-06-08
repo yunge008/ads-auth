@@ -1,93 +1,86 @@
-## 目标
+## 三项改动计划
 
-新增两个 Tab：**评论内容**、**素材成效**，复用现有 BC / 飞书 / 鉴权基础设施，不改动现有表与逻辑。
+### 1. 已获取数据查询 TAB 默认行为
 
----
+`src/routes/feishu-data.tsx`：
 
-## 一、TAB「评论内容」
-
-### 数据来源
-
-- 复用 `tiktok_connections` 表中所有 connection 的 `advertiser_ids`
-- 调用 TikTok BC API `/comment/list/`（按 advertiser_id 分页拉取）
-
-### 新增 Supabase 表 `tiktok_comments`
-
-字段：`id`, `advertiser_id`, `country`, `comment_id`(unique), `parent_comment_id`, `vid`, `text`, `text_zh`(翻译缓存), `like_count`, `reply_count`, `username`, `avatar_url`, `comment_type`, `comment_create_time`, `pulled_at`, `created_at`, `updated_at`
-唯一键：`comment_id`；写入用 upsert。
-
-### 新增 Edge Function
-
-- `tiktok-comments-sync`：遍历所有 connections + advertiser_ids，分页拉取评论 upsert 入库
-- `tiktok-comments-translate`：找出 `text_zh IS NULL` 的评论，调用 **Lovable AI Gateway (google/gemini-2.5-flash)** 翻译，结果写回（批量 20 条/请求）
-
-### 前端 `/comments` Route
-
-- 筛选：国家、广告户、评论类型、关键词
-- 列：国家 / 广告户 / 评论内容（副行显示中文翻译，灰色小字）/ 点赞 / 回复 / 用户名 / 头像（`<img>`）/ 类型 / 创建时间 / parent_comment_id / VID / 视频URL（`https://www.tiktok.com/@tiktok/video/{vid}`，点击新窗口打开）
-- 分页 50 行/页
-- 按钮：「同步评论」「翻译未翻译评论」
-- Tab key = `"comments"`，加入 `TABS`，纳入账户权限控制
+- `<Tabs defaultValue="vids">` → 改为 `defaultValue="gmv"`，进入页面默认打开 GMV Max。
+- `GmvDailyReport` 初始日期由 "近 7 天" 改为 "昨天"：`start = end = 昨日 (today - 1)`。
+- 国家筛选默认 "全部"（已是该值，无需改动）。
 
 ---
 
-## 二、TAB「素材成效」
+### 2. GMV Max 抓取规则与自动调度
 
-### 新增 Supabase 表
+#### 现有抓取逻辑（先说明给你看，不改）
 
-**`staff_vid_map`**：`id, country, staff_name, vid, source_type('BD'|'EDITOR'), source_sheet, created_at, updated_at`
-唯一键：`(country, staff_name, vid, source_type)`
+- **入口**：Edge Function `gmv-max-sync`，单令牌串行，每次 HTTP 请求 15 s 超时，整次调用默认 ≤ 80 s（留 20 s 给 upsert 与回包），超时前返回 `remaining_advertiser_ids / remaining_campaign_ids`，由前端续跑。
+- **节流**：≤ 3 QPS + "Too many requests" 指数退避（3/6/12/24 s）。
+- **抓取维度**：`campaign_id × item_group_id × item_id × stat_time_day`，每个广告户先取所有 campaigns，再分批拉报表，按窗口 ≤ 30 天拆分。
+- **写入**：先按 `(country, advertiser_id, stat_date)` 删除该范围内旧行，再 upsert，避免重复累计。
+- **当前调度**：**没有任何 pg_cron / 计划任务**，全靠前端按钮（"开始回溯 / 最近 3 天"）触发；之前对话提到"每小时刷新"实际上没有落地为 cron。
 
-**`sku_product_map`**：`id, country, product_id, product_name, sku_id, merchant_sku, created_at, updated_at`
-唯一键：`(country, product_id, merchant_sku)`
+#### 你提出的调度计划评估
 
-**`gmv_max_vid_daily`**：`id, country, advertiser_id, campaign_id, item_group_id, vid, stat_date, creative_delivery_status, cost, gross_revenue, orders, product_impressions, product_clicks, roi, ctr, cvr, cpm, raw_payload, pulled_at, created_at, updated_at`
-唯一键：`(advertiser_id, campaign_id, item_group_id, vid, stat_date)`
+- 凌晨 3:00 跑昨天 1 天数据；
+- 当天 08:00–次日 02:00 每小时跑当日 1 天数据 → 共 **19 次/天**，加凌晨 1 次 = 每天 **20 次** 全量同步。
 
-### 扩展设置页
+**API 量评估**：
+- 每次仅 1 天窗口，每个 advertiser 调用次数 ≈ `1（campaign 列表）+ ceil(campaigns/20)（报表批次）`。
+- 以现有最大账号 PH（≈ 2400 campaigns）为例：单次 ≈ 1 + 120 = 121 次调用 / advertiser。其他账号小得多，整体一次全量假设均值 ≈ 200–400 调用。
+- 一天 20 次 ≈ **4000–8000 次 API 调用**，仍在 TikTok BC API 默认 QPD 限额（通常单 token 数万）之内，**节奏合理**。
+- **风险点**：大账号单次 80 s 跑不完，过去靠前端续跑兜底。在 cron 场景需要后端自己续跑。
 
-- 「剪辑同事」配置（复用 `staff_sheets` 模式，加 `role` 字段 `'BD'|'EDITOR'`）**建议**：加 `role` 字段到现有 `staff_sheets`，减少表数量
-- 同一 sheet 名匹配规则保持一致
+#### 实施方案
 
-### 飞书列位（按你的回答）
+1. **新增公开路由** `src/routes/api/public/hooks/gmv-max-cron.ts`（HTTP POST）：
+   - 鉴权：`apikey` header = Supabase anon key（`/api/public/*` 已绕过平台层鉴权；额外校验 anon key 防误调）。
+   - 入参 `{ mode: "yesterday" | "today" }`：
+     - `yesterday` → `start_date = end_date = today_local - 1`（按账号时区或统一 UTC+8，下文用 UTC+8）；
+     - `today` → `start_date = end_date = today_local`。
+   - 内部循环调用 `gmv-max-sync`（HTTP 调用 Edge Function），遇到 `remaining_advertiser_ids / remaining_campaign_ids` 自动续跑，最多 10 轮、整体硬上限 5 分钟，超时记录到日志后退出（下一小时自然补齐）。
+   - 写入 `gmv_max_sync_state` 一行 `last_cron_run_at / mode / rows / errors`，前端可显示"上次自动刷新时间"。
 
-- **剪辑表**：B=同事, C=日期, D=国家, E=账号, F=SKU, G=VID, H=备注 → 读取 D/B/G 入 `staff_vid_map`，source_type='EDITOR'
-- **BD 表**：复用现有逻辑，写入 source_type='BD'
-- **SKU 匹配表**（sheet 名固定 "SKU匹配表"）：A=国家, B=商品ID, C=商品名称, D=SKU ID, F=商家SKU
+2. **pg_cron 调度**（用 `supabase--insert` 写两条 job，不进 migration）：
+   - `gmv-max-sync-yesterday` `0 3 * * *`（UTC+8 ⇒ cron 用 `0 19 * * *` UTC）→ POST `{mode:"yesterday"}`；
+   - `gmv-max-sync-today-hourly` `0 0-18,23 * * *` UTC（= UTC+8 的 08:00–次日 02:00 每小时）→ POST `{mode:"today"}`。
+   - 提前 `CREATE EXTENSION IF NOT EXISTS pg_cron, pg_net;`（一般已开）。
 
-### 新增 Edge Functions
-
-- `feishu-read-editors`：从剪辑同事 sheet 读取 → upsert `staff_vid_map`
-- `feishu-read-bd-vids`：复用 `feishu-read` 数据，额外抽取 country/staff/vid → upsert `staff_vid_map` (source='BD')
-- `feishu-read-sku`：读取 SKU 匹配表 → upsert `sku_product_map`
-- `gmv-max-sync`：参数 `{start_date, end_date}`，按 30 天自动拆分；遍历所有 advertiser_ids 调用 `/gmv_max/report/get/`（维度 campaign_id/item_group_id/item_id/stat_time_day，指标见 MD），计算 roi/ctr/cvr/cpm（分母 0 → null），upsert `gmv_max_vid_daily`
-- 不做定时任务，前端手动触发"拉取最近3天"按钮即可
-
-### 前端 `/material-performance` Route
-
-- 顶部按钮：同步剪辑表 / 同步BD表(VID) / 同步SKU表 / 首次回溯(日期范围) / 拉取最近3天
-- 筛选：国家、同事、来源类型、VID、商家SKU、商品ID、日期范围
-- 折线图：默认按日期展示「消耗 / 收入 / 订单 / ROI」4 条线（recharts，已在依赖中）；选中单 VID 或单同事后图表跟随
-- 汇总表（以 `staff_vid_map` 为主表 LEFT JOIN `gmv_max_vid_daily`，再 LEFT JOIN `sku_product_map` on item_group_id=product_id）：国家/同事/来源/VID/商家SKU/商品ID/订单/ROI/消耗/收入/CTR/CVR/展现/点击
-- 分页 50 行/页
-
-### 查询接口
-
-- `gmv-max-query` edge function：接收筛选条件，服务端在 Supabase 中做 join + 聚合返回（避免前端拉全表）
+3. **前端**：保留"开始回溯 / 最近 3 天"按钮做手动补数；GMV Max 卡片右上角显示"上次自动刷新：HH:mm（昨日 / 今日）"。
 
 ---
 
-## 三、不做的事情
+### 3. 数据量增长后的查询性能优化
 
-- 不动现有 `feishu-read` / `authorize-batch` / 执行授权页面
-- 不引入新 secret（TikTok / 飞书 / Lovable AI Key 都已存在）
-- 不做定时调度（先用按钮，后续要再加 pg_cron）
+当前慢的根因：`gmv_max_vid_daily` 行数线性增长（≈ advertisers × campaigns × item_groups × items × days），所有筛选都是表扫描 + 聚合。
+
+#### 短期（成本低，立即做）
+
+1. **索引**（migration）：
+   - `gmv_max_vid_daily(country, stat_date)`
+   - `gmv_max_vid_daily(advertiser_id, stat_date)`
+   - `gmv_max_vid_daily(vid)`
+   - `gmv_max_vid_daily(stat_date)` BRIN（按时间顺序写入，BRIN 比 B-tree 省空间）
+2. **服务端聚合已存在**（`gmv-max-daily-report`），继续保持前端只调聚合接口，不要在前端做 group by。
+3. **分页严格走服务端**，`page_size ≤ 100`；列筛选前置（先 `stat_date BETWEEN` + `country = ?`，再其它）。
+4. **历史归档**：>180 天的明细可以归档到 `gmv_max_vid_daily_archive`，主表只留近 180 天，查询默认范围限制。
+
+#### 中期（数据量再上一个量级时）
+
+5. **预聚合物化表** `gmv_max_daily_rollup(country, advertiser_id, stat_date, cost, gross_revenue, orders, row_count, status_counts jsonb)`：
+   - 由 `gmv-max-sync` 在写完明细后顺手 `INSERT ... ON CONFLICT DO UPDATE` 维护；
+   - 「GMV Max 日报」直接查 rollup，量级从百万→千级，瞬时返回。
+6. **VID 级 rollup**（可选）`gmv_max_vid_rollup(country, vid, stat_date, ...)` 服务素材成效页。
+7. **分区表**：`gmv_max_vid_daily` 按 `stat_date` 月分区（PARTITION BY RANGE），配合 BRIN + 分区裁剪，单次查询只扫当月。
+
+#### 建议执行顺序
+
+立即做：1 + 2 + 3；本次只加索引 migration，业务代码不动。  
+观察 2–4 周，如果日报/素材成效仍卡，再上 5（rollup 表，工作量中）；再卡上 7（分区，工作量大）。
 
 ---
 
-## 待你确认
+### 待你确认
 
-1. 翻译方案确定走 **Lovable AI + 入库缓存**？是
-2. 「剪辑同事」放在 `staff_sheets` 表新增 `role` 字段，还是新建 `editor_sheets`？**默认采纳：加 role 字段**
-3. 「素材成效」的"首次回溯"按钮是否也按 sheet 内 staff_vid_map 全量拉取（即拉所有 advertiser）？默认是
-4. 是否需要在「评论内容」Tab 加导出 CSV？默认加
+- 调度时区按 **UTC+8** 计算？（cron.schedule 用 UTC 表达式，我会自动换算）
+- 索引这次先只加 1+2+3 中的 4 条索引，不动业务代码？还是直接把 rollup 也做了？

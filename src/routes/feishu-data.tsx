@@ -57,7 +57,7 @@ function FeishuDataPage() {
         <h2 className="text-xl font-semibold tracking-tight">已获取数据查阅</h2>
         <p className="text-sm text-muted-foreground mt-1">查看已同步到数据库的 BD、剪辑素材、SKU 匹配与 GMV Max 数据。</p>
       </div>
-      <Tabs defaultValue="vids" className="space-y-4">
+      <Tabs defaultValue="gmv" className="space-y-4">
         <TabsList>
           <TabsTrigger value="vids">BD+剪辑素材表</TabsTrigger>
           <TabsTrigger value="sku">SKU匹配表</TabsTrigger>
@@ -422,9 +422,10 @@ const fmtInt = (v: number | null | undefined) =>
 
 function GmvDailyReport({ advertisers, reportRef }: { advertisers: AdvertiserRow[]; reportRef: React.MutableRefObject<{ reload: () => void }> }) {
   const today = new Date().toISOString().slice(0, 10);
-  const ago7 = new Date(Date.now() - 7 * 86400 * 1000).toISOString().slice(0, 10);
-  const [start, setStart] = React.useState(ago7);
-  const [end, setEnd] = React.useState(today);
+  const yesterday = new Date(Date.now() - 1 * 86400 * 1000).toISOString().slice(0, 10);
+  const ago7 = yesterday;
+  const [start, setStart] = React.useState(yesterday);
+  const [end, setEnd] = React.useState(yesterday);
   const [country, setCountry] = React.useState("");
   const [vid, setVid] = React.useState("");
   const [vidInput, setVidInput] = React.useState("");
