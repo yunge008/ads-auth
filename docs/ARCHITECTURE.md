@@ -22,6 +22,7 @@
 | `/api-test` | API 测试 |
 | `/oauth/tiktok/callback` | TikTok OAuth 回调 |
 | `/api/public/hooks/gmv-max-cron` | **服务端路由**：pg_cron 调用入口，循环驱动 gmv-max-sync 续跑（apikey=anon key 鉴权，5 分钟硬预算） |
+| `/api/public/hooks/authorize-cron` | **服务端路由**：每日 08:00 自动授权入口，循环 feishu-read → authorize-batch → feishu-writeback，结束发飞书机器人通知（apikey 鉴权，10 分钟硬预算 / 最多 4 轮） |
 
 `routeTree.gen.ts` 自动生成，禁止手改。
 
