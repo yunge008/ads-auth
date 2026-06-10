@@ -33,7 +33,14 @@ import {
   Copy,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
 } from "lucide-react";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { useBCAdvertisers, useMaterials, useStaff } from "@/lib/store";
 import {
@@ -369,6 +376,166 @@ function AuthorizePage() {
           </Button>
         </div>
       </div>
+
+      <Collapsible>
+        <Card>
+          <CollapsibleTrigger className="w-full">
+            <CardHeader className="py-3 flex-row items-center justify-between space-y-0 cursor-pointer hover:bg-muted/40 transition-colors">
+              <CardTitle className="text-sm font-medium">📖 使用说明</CardTitle>
+              <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform data-[state=open]:rotate-180" />
+            </CardHeader>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <CardContent className="pt-0">
+              <Tabs defaultValue="flow">
+                <TabsList>
+                  <TabsTrigger value="flow">操作指引与执行逻辑</TabsTrigger>
+                  <TabsTrigger value="read">飞书原表列位置与读取</TabsTrigger>
+                  <TabsTrigger value="writeback">回写飞书位置与逻辑</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="flow" className="text-sm space-y-3 leading-relaxed">
+                  <div>
+                    <div className="font-medium mb-1">操作流程</div>
+                    <p className="text-muted-foreground">获取素材 →（可选筛选 / 手动指派国家）→ 执行授权 → 回写飞书。</p>
+                  </div>
+                  <div>
+                    <div className="font-medium mb-1">两种拉取模式</div>
+                    <ul className="list-disc pl-5 text-muted-foreground space-y-1">
+                      <li><b>获取未授权素材</b>：只拉 P 列为空的待办行，适用于每日授权。</li>
+                      <li><b>获取所有素材</b>：不跳过 P 列已有日期的行，适用于批量授权新账户。</li>
+                    </ul>
+                  </div>
+                  <div>
+                    <div className="font-medium mb-1">广告户匹配</div>
+                    <p className="text-muted-foreground">
+                      素材 C 列国家 → 查 advertiser_countries 表得到该国家的广告户（且广告户须存在于某条 TikTok 连接中），取第一个匹配；
+                      无匹配 → 状态「无授权账号」（红色警告行，可手动下拉指派国家补救）。
+                    </p>
+                  </div>
+                  <div>
+                    <div className="font-medium mb-1">执行授权的目标筛选</div>
+                    <p className="text-muted-foreground">
+                      仅当前筛选可见、状态为「待授权」或「API错误」（用于重试）、且同时有广告户ID和授权码的行。调用 TikTok 授权接口：
+                    </p>
+                    <ul className="list-disc pl-5 text-muted-foreground space-y-1 mt-1">
+                      <li>成功 → 已授权</li>
+                      <li>失败按报错映射：过期→代码过期；已删除/不存在→代码删除；视频不公开→视频不可见；无效→代码有误；涉及多素材→代码涉及多素材；其他→API错误</li>
+                      <li>限速自动退避重试 4 次；同一广告户串行，不同广告户最多 8 个并行</li>
+                    </ul>
+                  </div>
+                  <div>
+                    <div className="font-medium mb-1">排序</div>
+                    <p className="text-muted-foreground">拉取后按 状态 → 人员 → 行号 排序，之后冻结不再动态重排。</p>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="read" className="text-sm space-y-3 leading-relaxed">
+                  <div>
+                    <div className="font-medium mb-1">读取范围</div>
+                    <p className="text-muted-foreground">
+                      按「设置」中启用人员的 sheet 名定位，读 A2:Q；sheet 找不到会提示。
+                    </p>
+                  </div>
+                  <div>
+                    <div className="font-medium mb-1">固定列布局</div>
+                    <div className="border rounded-md overflow-hidden">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-16 text-xs">列</TableHead>
+                            <TableHead className="text-xs">内容</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {[
+                            ["B", "登记日期"],
+                            ["C", "国家"],
+                            ["D", "达人名称"],
+                            ["F", "佣金率"],
+                            ["G", "VID"],
+                            ["H", "授权码(# + 63 位字符 + =)"],
+                            ["I", "SKU"],
+                            ["P", "投放日期（回写）"],
+                            ["Q", "回写状态（回写）"],
+                          ].map(([c, v]) => (
+                            <TableRow key={c}>
+                              <TableCell className="font-mono text-xs py-1.5">{c}</TableCell>
+                              <TableCell className="text-xs py-1.5">{v}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="font-medium mb-1">行筛选条件（全部满足才纳入）</div>
+                    <ul className="list-disc pl-5 text-muted-foreground space-y-1">
+                      <li>B 列若有值必须是可识别日期</li>
+                      <li>C 列国家：1–10 字符，仅中英文/数字/横杠/空格</li>
+                      <li>H 列授权码格式合法，且 G 列 VID 非空</li>
+                      <li>未授权模式下：P 列为空，且行号在该 sheet 第一个 P 列非空行之后</li>
+                    </ul>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="writeback" className="text-sm space-y-3 leading-relaxed">
+                  <div>
+                    <div className="font-medium mb-1">回写触发状态</div>
+                    <p className="text-muted-foreground">
+                      已授权、代码过期、代码删除、代码有误、代码涉及多素材、视频不可见、API错误。
+                    </p>
+                  </div>
+                  <div>
+                    <div className="font-medium mb-1">① 各同事原表（按 sheet 名 + 行号定位）</div>
+                    <ul className="list-disc pl-5 text-muted-foreground space-y-1">
+                      <li><b>已授权</b> → P 列写当天日期 <span className="font-mono">yyyy/mm/dd</span></li>
+                      <li><b>代码有误 / 代码删除 / 代码过期 / 代码涉及多素材 / 视频不可见</b> → P 列写日期 + Q 列写中文状态</li>
+                      <li><b>API错误</b> → 不写原表，仅记录到汇总表；回写后仍保留在页面列表中可重试（其他状态回写后从列表移除）</li>
+                    </ul>
+                  </div>
+                  <div>
+                    <div className="font-medium mb-1">② 汇总表「授权记录」sheet（所有有 VID+授权码 的回写项都记录）</div>
+                    <div className="border rounded-md overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="text-xs">列</TableHead>
+                            <TableHead className="text-xs">内容</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {[
+                            ["A", "序号"],
+                            ["B", "国家"],
+                            ["C", "达人名字"],
+                            ["D", "VID"],
+                            ["E", "视频CODE（授权码）"],
+                            ["F", "产品"],
+                            ["G", "投放时间（北京时间 YYYYMMDD HH:MM:SS）"],
+                            ["H", "投手备注"],
+                            ["I", "同事"],
+                          ].map(([c, v]) => (
+                            <TableRow key={c}>
+                              <TableCell className="font-mono text-xs py-1.5 w-16">{c}</TableCell>
+                              <TableCell className="text-xs py-1.5">{v}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                    <ul className="list-disc pl-5 text-muted-foreground space-y-1 mt-2">
+                      <li>去重键 <span className="font-mono">VID+授权码</span>：已存在则更新原行 B:I，否则末尾追加（序号 = 最大值 + 1）</li>
+                      <li>H 投手备注 = 状态文本；API错误附带报错信息</li>
+                      <li>「授权记录」sheet 不存在时跳过不报错</li>
+                    </ul>
+                  </div>
+                </TabsContent>
+              </Tabs>
+            </CardContent>
+          </CollapsibleContent>
+        </Card>
+      </Collapsible>
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
         <Card className="lg:col-span-2">

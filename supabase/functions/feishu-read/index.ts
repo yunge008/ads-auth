@@ -1,14 +1,14 @@
 // Read pending materials from Feishu spreadsheet (strict validation).
-// Body: { staff: [{name, sheet_name}], accounts: [{country, advertiser_name, advertiser_id}] }
-// Column mapping (1-indexed):
-//   A=序号  B=登记日期  C=国家  D=达人名称  E-F=其他  G=VID  H=授权码
-//   I=产品  ...  P=投放日期(状态/回写日期)  Q=回写状态+错误
-//   Also supports current source rows where F=视频CODE, G=授权码, H=产品/SKU.
+// Body: { staff: [{name, sheet_name}], include_done?: boolean }
+// Fixed column mapping (1-indexed):
+//   A=序号  B=登记日期  C=国家  D=达人名称  E=其他  F=佣金率(忽略)
+//   G=VID  H=授权码(# + 63 chars + =)  I=SKU(产品)
+//   ...  P=投放日期(回写)  Q=回写状态+错误
 // Filtering rules (all must pass):
-//   - B is a recognizable date (string parseable OR Excel serial number)
-//   - C is country: length<=10, only Chinese/English letters/space
-//   - 授权码 is valid in H (old layout) or G (current layout)
-//   - P is empty AND there exists an earlier row in same sheet with non-empty P
+//   - B is a recognizable date (string parseable OR Excel serial number) when present
+//   - C is country: 1-10 chars, Chinese/English letters/digits/dash/space
+//   - H matches the auth code format, AND G (VID) is non-empty
+//   - When include_done=false: P is empty AND row sits after the first non-empty P row
 
 import {
   corsHeaders,
@@ -142,15 +142,11 @@ Deno.serve(async (req) => {
         const country = cellText(r[2]);
         if (!COUNTRY_RE.test(country)) continue;
         const creator = cellText(r[3]);
-        const colF = cellText(r[5]);
-        const colG = cellText(r[6]);
-        const colH = cellText(r[7]);
-        // Auth code may live in H (standard) or G (legacy). VID is the cell immediately to its left.
-        const authCode = CODE_RE.test(colH) ? colH : CODE_RE.test(colG) ? colG : "";
-        if (!authCode) continue;
-        const vid = authCode === colH ? colG : colF;
+        const vid = cellText(r[6]);
+        const authCode = cellText(r[7]);
+        if (!CODE_RE.test(authCode)) continue;
         if (!vid) continue;
-        const product = authCode === colH ? cellText(r[8]) : colH;
+        const product = cellText(r[8]);
         const pCell = cellText(r[15]);
         if (!include_done && pCell) continue;
 
