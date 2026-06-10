@@ -15,8 +15,8 @@ function mapErr(msg: string) {
     return "代码删除" as const;
   if (m.includes("not visible") || m.includes("invisible") || m.includes("video not visible") || m.includes("not publicly accessible") || m.includes("not public"))
     return "视频不可见" as const;
+  if (m.includes("mention other videos") || m.includes("multi") || m.includes("multiple")) return "代码涉及多素材" as const;
   if (m.includes("invalid") || m.includes("incorrect")) return "代码有误" as const;
-  if (m.includes("multi") || m.includes("multiple")) return "代码涉及多素材" as const;
   return "API错误" as const;
 }
 
