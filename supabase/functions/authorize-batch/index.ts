@@ -11,16 +11,25 @@ type Item = { id: string; advertiser_id: string; auth_code: string; vid?: string
 function mapErr(msg: string) {
   const m = msg.toLowerCase();
   if (m.includes("expire")) return "代码过期" as const;
-  if (m.includes("delete") || m.includes("not exist") || m.includes("not found"))
-    return "代码删除" as const;
-  if (m.includes("not visible") || m.includes("invisible") || m.includes("video not visible") || m.includes("not publicly accessible") || m.includes("not public"))
+  if (m.includes("delete") || m.includes("not exist") || m.includes("not found")) return "代码删除" as const;
+  if (
+    m.includes("not visible") ||
+    m.includes("invisible") ||
+    m.includes("video not visible") ||
+    m.includes("not publicly accessible") ||
+    m.includes("not public")
+  )
     return "视频不可见" as const;
-  if (m.includes("mention other videos") || m.includes("multi") || m.includes("multiple")) return "代码涉及多素材" as const;
   if (m.includes("invalid") || m.includes("incorrect")) return "代码有误" as const;
+  if (m.includes("multi") || m.includes("mention other videos")) return "代码涉及多素材" as const;
   return "API错误" as const;
 }
 
-async function authOne(token: string, it: Item, attempt = 0): Promise<{ id: string; status: string; error_message?: string }> {
+async function authOne(
+  token: string,
+  it: Item,
+  attempt = 0,
+): Promise<{ id: string; status: string; error_message?: string }> {
   const res = await fetch(`${TT}/tt_video/authorize/`, {
     method: "POST",
     headers: { "Access-Token": token, "Content-Type": "application/json" },
@@ -40,13 +49,7 @@ async function authOne(token: string, it: Item, attempt = 0): Promise<{ id: stri
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    const cronKey = req.headers.get("x-cron-key") ?? "";
-    let cronAuthed = false;
-    if (cronKey) {
-      const { data: ok } = await admin().rpc("verify_gmv_cron_key", { _key: cronKey });
-      if (ok === true) cronAuthed = true;
-    }
-    if (!cronAuthed) await checkAdminPasscode(req, "home");
+    await checkAdminPasscode(req, "home");
     const { items } = (await req.json()) as { items: Item[] };
     if (!items?.length) throw new Error("items 不能为空");
 
