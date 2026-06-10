@@ -1,86 +1,164 @@
-## 三项改动计划
+## 现状校准（先把 PLAN.md 摆正）
 
-### 1. 已获取数据查询 TAB 默认行为
+线上实际状态（已核查）：
 
-`src/routes/feishu-data.tsx`：
+| 旧任务 | 真实状态 | 依据 |
+| --- | --- | --- |
+| feishu-data 默认 tab=gmv、日期=昨天 | ✅ | 早前已合入 |
+| pg_cron 两条 job 已写入 | ✅ | `cron.job` 查到 `gmv-max-sync-yesterday`(0 19 * * *) + `gmv-max-sync-today-hourly`(0 0-18 * * *)，另外还有第三条 `gmv-max-hourly-refresh`(5 * * * *) 直接打 sync |
+| gmv_max_vid_daily 加 4 条索引 | ✅ | 8 条索引齐全：`country_stat_date / adv_stat_date / vid / stat_date(brin)` 全在 |
+| 前端「上次自动刷新时间」 | ⬜ 未做 | grep 不到对应文案，不动它，保持待办 |
 
-- `<Tabs defaultValue="vids">` → 改为 `defaultValue="gmv"`，进入页面默认打开 GMV Max。
-- `GmvDailyReport` 初始日期由 "近 7 天" 改为 "昨天"：`start = end = 昨日 (today - 1)`。
-- 国家筛选默认 "全部"（已是该值，无需改动）。
-
----
-
-### 2. GMV Max 抓取规则与自动调度
-
-#### 现有抓取逻辑（先说明给你看，不改）
-
-- **入口**：Edge Function `gmv-max-sync`，单令牌串行，每次 HTTP 请求 15 s 超时，整次调用默认 ≤ 80 s（留 20 s 给 upsert 与回包），超时前返回 `remaining_advertiser_ids / remaining_campaign_ids`，由前端续跑。
-- **节流**：≤ 3 QPS + "Too many requests" 指数退避（3/6/12/24 s）。
-- **抓取维度**：`campaign_id × item_group_id × item_id × stat_time_day`，每个广告户先取所有 campaigns，再分批拉报表，按窗口 ≤ 30 天拆分。
-- **写入**：先按 `(country, advertiser_id, stat_date)` 删除该范围内旧行，再 upsert，避免重复累计。
-- **当前调度**：**没有任何 pg_cron / 计划任务**，全靠前端按钮（"开始回溯 / 最近 3 天"）触发；之前对话提到"每小时刷新"实际上没有落地为 cron。
-
-#### 你提出的调度计划评估
-
-- 凌晨 3:00 跑昨天 1 天数据；
-- 当天 08:00–次日 02:00 每小时跑当日 1 天数据 → 共 **19 次/天**，加凌晨 1 次 = 每天 **20 次** 全量同步。
-
-**API 量评估**：
-- 每次仅 1 天窗口，每个 advertiser 调用次数 ≈ `1（campaign 列表）+ ceil(campaigns/20)（报表批次）`。
-- 以现有最大账号 PH（≈ 2400 campaigns）为例：单次 ≈ 1 + 120 = 121 次调用 / advertiser。其他账号小得多，整体一次全量假设均值 ≈ 200–400 调用。
-- 一天 20 次 ≈ **4000–8000 次 API 调用**，仍在 TikTok BC API 默认 QPD 限额（通常单 token 数万）之内，**节奏合理**。
-- **风险点**：大账号单次 80 s 跑不完，过去靠前端续跑兜底。在 cron 场景需要后端自己续跑。
-
-#### 实施方案
-
-1. **新增公开路由** `src/routes/api/public/hooks/gmv-max-cron.ts`（HTTP POST）：
-   - 鉴权：`apikey` header = Supabase anon key（`/api/public/*` 已绕过平台层鉴权；额外校验 anon key 防误调）。
-   - 入参 `{ mode: "yesterday" | "today" }`：
-     - `yesterday` → `start_date = end_date = today_local - 1`（按账号时区或统一 UTC+8，下文用 UTC+8）；
-     - `today` → `start_date = end_date = today_local`。
-   - 内部循环调用 `gmv-max-sync`（HTTP 调用 Edge Function），遇到 `remaining_advertiser_ids / remaining_campaign_ids` 自动续跑，最多 10 轮、整体硬上限 5 分钟，超时记录到日志后退出（下一小时自然补齐）。
-   - 写入 `gmv_max_sync_state` 一行 `last_cron_run_at / mode / rows / errors`，前端可显示"上次自动刷新时间"。
-
-2. **pg_cron 调度**（用 `supabase--insert` 写两条 job，不进 migration）：
-   - `gmv-max-sync-yesterday` `0 3 * * *`（UTC+8 ⇒ cron 用 `0 19 * * *` UTC）→ POST `{mode:"yesterday"}`；
-   - `gmv-max-sync-today-hourly` `0 0-18,23 * * *` UTC（= UTC+8 的 08:00–次日 02:00 每小时）→ POST `{mode:"today"}`。
-   - 提前 `CREATE EXTENSION IF NOT EXISTS pg_cron, pg_net;`（一般已开）。
-
-3. **前端**：保留"开始回溯 / 最近 3 天"按钮做手动补数；GMV Max 卡片右上角显示"上次自动刷新：HH:mm（昨日 / 今日）"。
+→ 实施阶段先在 PLAN.md 把前 3 条移到「已完成」，第 4 条保留 ⬜。
 
 ---
 
-### 3. 数据量增长后的查询性能优化
+## 新需求：每日北京 08:00 自动授权 + 飞书机器人通知
 
-当前慢的根因：`gmv_max_vid_daily` 行数线性增长（≈ advertisers × campaigns × item_groups × items × days），所有筛选都是表扫描 + 聚合。
+### 1. 鉴权（采纳 Claude 修正）
 
-#### 短期（成本低，立即做）
+复用现成的 vault secret 机制：
 
-1. **索引**（migration）：
-   - `gmv_max_vid_daily(country, stat_date)`
-   - `gmv_max_vid_daily(advertiser_id, stat_date)`
-   - `gmv_max_vid_daily(vid)`
-   - `gmv_max_vid_daily(stat_date)` BRIN（按时间顺序写入，BRIN 比 B-tree 省空间）
-2. **服务端聚合已存在**（`gmv-max-daily-report`），继续保持前端只调聚合接口，不要在前端做 group by。
-3. **分页严格走服务端**，`page_size ≤ 100`；列筛选前置（先 `stat_date BETWEEN` + `country = ?`，再其它）。
-4. **历史归档**：>180 天的明细可以归档到 `gmv_max_vid_daily_archive`，主表只留近 180 天，查询默认范围限制。
+- 新路由 `src/routes/api/public/hooks/authorize-cron.ts` 从 `vault.decrypted_secrets` 读 `gmv_max_cron_secret`（直接抄 gmv-max-cron.ts 第 55–66 行）。
+- 给 `feishu-read` / `authorize-batch` / `feishu-writeback` 三个函数加 8 行 cron bypass（抄 gmv-max-sync 第 234–242 行）：
+  ```ts
+  const cronKey = req.headers.get("x-cron-key") ?? "";
+  let cronAuthed = false;
+  if (cronKey) {
+    const { data: ok } = await admin().rpc("verify_gmv_cron_key", { _key: cronKey });
+    if (ok === true) cronAuthed = true;
+  }
+  if (!cronAuthed) await checkAdminPasscode(req, "home");
+  ```
+- 不引入 `ADMIN_PASSCODE` 注入假设。
 
-#### 中期（数据量再上一个量级时）
+### 2. authorize-cron 路由逻辑
 
-5. **预聚合物化表** `gmv_max_daily_rollup(country, advertiser_id, stat_date, cost, gross_revenue, orders, row_count, status_counts jsonb)`：
-   - 由 `gmv-max-sync` 在写完明细后顺手 `INSERT ... ON CONFLICT DO UPDATE` 维护；
-   - 「GMV Max 日报」直接查 rollup，量级从百万→千级，瞬时返回。
-6. **VID 级 rollup**（可选）`gmv_max_vid_rollup(country, vid, stat_date, ...)` 服务素材成效页。
-7. **分区表**：`gmv_max_vid_daily` 按 `stat_date` 月分区（PARTITION BY RANGE），配合 BRIN + 分区裁剪，单次查询只扫当月。
+```text
+1. apikey 校验（== SUPABASE_PUBLISHABLE_KEY，沿用 gmv-max-cron）
+2. 读 vault → cronKey
+3. 读 staff_sheets where active=true（service role）
+4. POST feishu-read { staff:[...], include_done:false } → materials
+5. 若 materials 内 status ∈ {待授权,API错误} 且有 advertiser_id+auth_code 的为 0
+   → 走"今日无待授权素材"通知 + 落库 + 返回
+6. 循环最多 4 轮、整体硬预算 10 分钟：
+   - 取本轮 targets = materials 中 status∈{待授权,API错误} 且有 advertiser_id+auth_code
+   - 若 targets 为 0 → 收敛，break
+   - POST authorize-batch { items: targets } → results
+   - 把 results merge 回 materials（按 id）
+   - 「无授权账号」不参与循环、不计入失败、不重试
+7. POST feishu-writeback { items: materials.filter(WRITE_STATUSES) }
+8. 统计：
+   success = count(status=='已授权')
+   no_account = count(status=='无授权账号')
+   failed = total - success - no_account  // 即各种"代码*/视频不可见/API错误"
+   failedBreakdown = groupBy(失败行, status) → {状态: 数量}
+9. 发飞书机器人通知（见下）
+10. upsert authorize_cron_state（id='daily'）
+```
 
-#### 建议执行顺序
+特殊处理：
+- 「无授权账号」素材在 step 5 计数时已排除在 targets 之外，所以**不会浪费轮数**（采纳 Claude 第 2 条）。
+- 内存物料 id 使用 feishu-read 返回的现成 `id`。
+- 10 分钟硬预算超时 → 记 `errors.push({error:'budget exceeded at round N'})`，继续走 step 7–10，保证一定有通知。
 
-立即做：1 + 2 + 3；本次只加索引 migration，业务代码不动。  
-观察 2–4 周，如果日报/素材成效仍卡，再上 5（rollup 表，工作量中）；再卡上 7（分区，工作量大）。
+### 3. 飞书机器人通知（富文本 post）
 
----
+读 `FEISHU_BOT_WEBHOOK` secret（用户已给值）；未配置 → `console.warn` 跳过、路由仍正常返回。
 
-### 待你确认
+正常消息 payload：
+```json
+{
+  "msg_type": "post",
+  "content": {"post": {"zh_cn": {
+    "title": "📋 自动授权完成（20260610 08:07）",
+    "content": [
+      [{"tag":"text","text":"✅ 成功 12 条 ｜ ❌ 失败 3 条 ｜ ⚠️ 无授权账号 1 条"}],
+      [{"tag":"text","text":"失败原因：代码过期 ×2、视频不可见 ×1"}],
+      [{"tag":"a","text":"查看授权记录","href":"https://lnihysziqd.feishu.cn/sheets/ZWA7s1iqTh63j1t6PJfcuPnunBe?sheet=1SBV4u&rangeId=1SBV4u_pPvTdlNlkj&rangeVer=1"}]
+    ]
+  }}}
+}
+```
+- 第 2 行（失败原因）仅当 failed>0 才追加；
+- 第 3 行（链接）仅当 failed>0 才追加；
+- 「今日无待授权素材」场景：标题相同，content 只有一行 `今日无待授权素材`。
 
-- 调度时区按 **UTC+8** 计算？（cron.schedule 用 UTC 表达式，我会自动换算）
-- 索引这次先只加 1+2+3 中的 4 条索引，不动业务代码？还是直接把 rollup 也做了？
+### 4. 数据库
+
+新 migration `supabase/migrations/<ts>_create_authorize_cron_state.sql`：
+
+```sql
+CREATE TABLE public.authorize_cron_state (
+  id           text PRIMARY KEY,
+  last_run_at  timestamptz NOT NULL DEFAULT now(),
+  success      integer NOT NULL DEFAULT 0,
+  failed       integer NOT NULL DEFAULT 0,
+  no_account   integer NOT NULL DEFAULT 0,
+  rounds       integer NOT NULL DEFAULT 0,
+  errors       jsonb   NOT NULL DEFAULT '[]'::jsonb,
+  note         text,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  updated_at   timestamptz NOT NULL DEFAULT now()
+);
+
+GRANT ALL ON public.authorize_cron_state TO service_role;
+ALTER TABLE public.authorize_cron_state ENABLE ROW LEVEL SECURITY;
+-- 不加 SELECT TO authenticated：本项目不用 Supabase Auth，前端读数走 edge function（service role）
+-- 与 gmv_max_sync_state 一致
+
+CREATE TRIGGER authorize_cron_state_touch
+  BEFORE UPDATE ON public.authorize_cron_state
+  FOR EACH ROW EXECUTE FUNCTION public.touch_updated_at();
+```
+
+采纳 Claude 第 4 条：不发明无用的 authenticated 权限。
+
+### 5. pg_cron Job（SQL 走 supabase--insert，不入 migration）
+
+北京 08:00 = UTC 00:00 → cron `0 0 * * *`。仿照现有两条 job 写法，**额外加 `timeout_milliseconds`**：
+
+```sql
+select cron.schedule(
+  'authorize-daily-0800',
+  '0 0 * * *',  -- UTC 00:00 = 北京 08:00
+  $$
+  SELECT net.http_post(
+    url := 'https://project--1cc99db7-f223-464e-9d06-be2aad0bd229.lovable.app/api/public/hooks/authorize-cron',
+    headers := '{"Content-Type":"application/json","apikey":"sb_publishable_3EjrcsK9Xp3ILAzRnhED1g_PGogg4VK"}'::jsonb,
+    body := '{}'::jsonb,
+    timeout_milliseconds := 600000
+  );
+  $$
+);
+```
+
+采纳 Claude 第 3 条。
+
+### 6. Secret
+
+build 模式下执行 `secrets--add_secret(["FEISHU_BOT_WEBHOOK"])`，让用户在表单里粘贴 webhook URL。
+
+### 7. 协同文档同步
+
+- `docs/ARCHITECTURE.md`：
+  - 「页面」表追加 `/api/public/hooks/authorize-cron`
+  - 「关键数据流」追加：`pg_cron(北京 08:00) → authorize-cron → feishu-read → authorize-batch(≤4 轮) → feishu-writeback → 飞书机器人通知 + authorize_cron_state`
+  - 「数据库主要表」追加 `authorize_cron_state`
+  - 在 `gmv-max-sync` 后注明 cron bypass 同样应用于 `feishu-read / authorize-batch / feishu-writeback`
+- `docs/PLAN.md`：把 3 条已完成任务移到「已完成」，新增本次任务并标 ✅
+- `docs/WORKLOG.md`：追加一行
+
+## 实施顺序
+
+1. `secrets--add_secret(["FEISHU_BOT_WEBHOOK"])`
+2. `supabase--migration`：建 `authorize_cron_state` 表
+3. 改 `feishu-read / authorize-batch / feishu-writeback` 各加 8 行 cron bypass
+4. 新建 `src/routes/api/public/hooks/authorize-cron.ts`
+5. `supabase--insert` 写 pg_cron job（带 timeout_milliseconds=600000）
+6. 用 `invoke-server-function`（POST `/api/public/hooks/authorize-cron` 带 apikey）冒烟一次，看飞书有没有收到 + 表里有没有写入；不行就看 `server-function-logs`
+7. 同步 3 份 docs；commit & push
+
+## 待你点头
+
+无新疑问，按上述执行。
