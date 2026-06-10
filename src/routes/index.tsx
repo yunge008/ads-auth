@@ -33,7 +33,14 @@ import {
   Copy,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
 } from "lucide-react";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { useBCAdvertisers, useMaterials, useStaff } from "@/lib/store";
 import {
