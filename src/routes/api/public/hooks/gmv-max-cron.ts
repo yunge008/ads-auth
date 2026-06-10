@@ -52,18 +52,13 @@ export const Route = createFileRoute("/api/public/hooks/gmv-max-cron")({
         } catch { /* empty body ok */ }
         const date = mode === "yesterday" ? localDate(-1) : localDate(0);
 
-        // 3. Fetch vault secret for x-cron-key
+        // 3. Fetch vault secret for x-cron-key via SECURITY DEFINER RPC
+        // (vault schema isn't exposed through PostgREST).
         const admin = createClient(supabaseUrl, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
-        const { data: secretRow, error: secretErr } = await admin
-          .schema("vault")
-          .from("decrypted_secrets")
-          .select("decrypted_secret")
-          .eq("name", "gmv_max_cron_secret")
-          .maybeSingle();
-        if (secretErr || !secretRow?.decrypted_secret) {
-          return new Response(JSON.stringify({ error: "missing vault secret gmv_max_cron_secret" }), { status: 500, headers: { "Content-Type": "application/json" } });
+        const { data: cronKey, error: secretErr } = await admin.rpc("get_gmv_cron_secret");
+        if (secretErr || !cronKey) {
+          return new Response(JSON.stringify({ error: "missing vault secret gmv_max_cron_secret", detail: secretErr?.message }), { status: 500, headers: { "Content-Type": "application/json" } });
         }
-        const cronKey = secretRow.decrypted_secret as string;
 
         // 4. Loop calling gmv-max-sync
         const syncUrl = `${supabaseUrl}/functions/v1/gmv-max-sync`;

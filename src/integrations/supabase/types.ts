@@ -478,6 +478,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_gmv_cron_secret: { Args: never; Returns: string }
       verify_gmv_cron_key: { Args: { _key: string }; Returns: boolean }
     }
     Enums: {

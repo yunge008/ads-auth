@@ -115,20 +115,19 @@ export const Route = createFileRoute("/api/public/hooks/authorize-cron")({
           auth: { autoRefreshToken: false, persistSession: false },
         });
 
-        // 2. Vault cron key
-        const { data: secretRow, error: secretErr } = await admin
-          .schema("vault")
-          .from("decrypted_secrets")
-          .select("decrypted_secret")
-          .eq("name", "gmv_max_cron_secret")
-          .maybeSingle();
-        if (secretErr || !secretRow?.decrypted_secret) {
+        // 2. Vault cron key via SECURITY DEFINER RPC (vault schema is not
+        // exposed through PostgREST, so direct table reads fail even with
+        // service role).
+        const { data: cronKey, error: secretErr } = await admin.rpc("get_gmv_cron_secret");
+        if (secretErr || !cronKey) {
           return new Response(
-            JSON.stringify({ error: "missing vault secret gmv_max_cron_secret" }),
+            JSON.stringify({
+              error: "missing vault secret gmv_max_cron_secret",
+              detail: secretErr?.message,
+            }),
             { status: 500, headers: { "Content-Type": "application/json" } },
           );
         }
-        const cronKey = secretRow.decrypted_secret as string;
 
         const fnHeaders = {
           "Content-Type": "application/json",
