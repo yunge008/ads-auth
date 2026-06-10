@@ -42,9 +42,10 @@
 
 ## 关键数据流
 
-1. **授权流**：飞书素材表 → `feishu-read` → 前端筛选 → `authorize-batch`（TikTok API）→ `feishu-writeback` 回写状态列
-2. **报表流**：pg_cron → `/api/public/hooks/gmv-max-cron` → `gmv-max-sync`（循环续跑）→ `gmv_max_vid_daily` → `gmv-max-daily-report` 聚合 → 前端
-3. **Token 流**：OAuth 授权 → callback → `tiktok-oauth-exchange` → `tiktok_connections`
+1. **授权流**（手动）：飞书素材表 → `feishu-read` → 前端筛选 → `authorize-batch`（TikTok API）→ `feishu-writeback` 回写状态列
+2. **自动授权流**：pg_cron(北京 08:00) → `/api/public/hooks/authorize-cron` → `feishu-read` → `authorize-batch`（最多 4 轮收敛，无授权账号不参与）→ `feishu-writeback` → 飞书自定义机器人（`FEISHU_BOT_WEBHOOK`）富文本通知 → upsert `authorize_cron_state`
+3. **报表流**：pg_cron → `/api/public/hooks/gmv-max-cron` → `gmv-max-sync`（循环续跑）→ `gmv_max_vid_daily` → `gmv-max-daily-report` 聚合 → 前端
+4. **Token 流**：OAuth 授权 → callback → `tiktok-oauth-exchange` → `tiktok_connections`
 
 ## 已知约束 / 风险点
 
