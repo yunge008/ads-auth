@@ -17,7 +17,7 @@ import {
   readRange,
   writeValues,
 } from "../_shared/feishu.ts";
-import { checkAdminPasscode } from "../_shared/auth.ts";
+import { admin, checkAdminPasscode } from "../_shared/auth.ts";
 
 type Item = {
   sheet_name: string;
