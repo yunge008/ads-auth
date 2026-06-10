@@ -22,6 +22,7 @@
 | `/api-test` | API 测试 |
 | `/oauth/tiktok/callback` | TikTok OAuth 回调 |
 | `/api/public/hooks/gmv-max-cron` | **服务端路由**：pg_cron 调用入口，循环驱动 gmv-max-sync 续跑（apikey=anon key 鉴权，5 分钟硬预算） |
+| `/api/public/hooks/authorize-cron` | **服务端路由**：每日 08:00 自动授权入口，循环 feishu-read → authorize-batch → feishu-writeback，结束发飞书机器人通知（apikey 鉴权，10 分钟硬预算 / 最多 4 轮） |
 
 `routeTree.gen.ts` 自动生成，禁止手改。
 
@@ -33,16 +34,18 @@
 - **评论**：`tiktok-comments-sync` / `tiktok-comments-translate`（暂停用）
 - **其他**：`app-accounts`（账号 CRUD）、`data-preview`
 - **共享**：`_shared/auth.ts`（口令校验 + service role client）、`_shared/feishu.ts`（tenant token、分页读 sheet、CORS）
+- **Cron bypass**：`gmv-max-sync` / `feishu-read` / `authorize-batch` / `feishu-writeback` 均支持 `x-cron-key` header（值=vault secret `gmv_max_cron_secret`，通过 `verify_gmv_cron_key` RPC 校验），用于跳过 admin 口令校验，仅给上述两个 cron 路由使用
 
 ## 数据库主要表
 
-`app_accounts`（账号/权限）、`staff_sheets`、`staff_vid_map`、`sku_product_map`、`advertiser_countries`、`tiktok_connections`（token）、`gmv_max_vid_daily`（明细大表，country×advertiser×campaign×item×day）、`gmv_max_vid_meta`、`gmv_max_sync_state`、`tiktok_comments`(+sync_state)
+`app_accounts`（账号/权限）、`staff_sheets`、`staff_vid_map`、`sku_product_map`、`advertiser_countries`、`tiktok_connections`（token）、`gmv_max_vid_daily`（明细大表，country×advertiser×campaign×item×day）、`gmv_max_vid_meta`、`gmv_max_sync_state`、`authorize_cron_state`（每日自动授权运行记录）、`tiktok_comments`(+sync_state)
 
 ## 关键数据流
 
-1. **授权流**：飞书素材表 → `feishu-read` → 前端筛选 → `authorize-batch`（TikTok API）→ `feishu-writeback` 回写状态列
-2. **报表流**：pg_cron → `/api/public/hooks/gmv-max-cron` → `gmv-max-sync`（循环续跑）→ `gmv_max_vid_daily` → `gmv-max-daily-report` 聚合 → 前端
-3. **Token 流**：OAuth 授权 → callback → `tiktok-oauth-exchange` → `tiktok_connections`
+1. **授权流**（手动）：飞书素材表 → `feishu-read` → 前端筛选 → `authorize-batch`（TikTok API）→ `feishu-writeback` 回写状态列
+2. **自动授权流**：pg_cron(北京 08:00) → `/api/public/hooks/authorize-cron` → `feishu-read` → `authorize-batch`（最多 4 轮收敛，无授权账号不参与）→ `feishu-writeback` → 飞书自定义机器人（`FEISHU_BOT_WEBHOOK`）富文本通知 → upsert `authorize_cron_state`
+3. **报表流**：pg_cron → `/api/public/hooks/gmv-max-cron` → `gmv-max-sync`（循环续跑）→ `gmv_max_vid_daily` → `gmv-max-daily-report` 聚合 → 前端
+4. **Token 流**：OAuth 授权 → callback → `tiktok-oauth-exchange` → `tiktok_connections`
 
 ## 已知约束 / 风险点
 

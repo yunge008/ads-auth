@@ -77,6 +77,45 @@ export type Database = {
         }
         Relationships: []
       }
+      authorize_cron_state: {
+        Row: {
+          created_at: string
+          errors: Json
+          failed: number
+          id: string
+          last_run_at: string
+          no_account: number
+          note: string | null
+          rounds: number
+          success: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          errors?: Json
+          failed?: number
+          id: string
+          last_run_at?: string
+          no_account?: number
+          note?: string | null
+          rounds?: number
+          success?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          errors?: Json
+          failed?: number
+          id?: string
+          last_run_at?: string
+          no_account?: number
+          note?: string | null
+          rounds?: number
+          success?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       gmv_max_sync_state: {
         Row: {
           id: string
