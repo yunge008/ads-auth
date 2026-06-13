@@ -2,12 +2,12 @@
 
 线上实际状态（已核查）：
 
-| 旧任务 | 真实状态 | 依据 |
-| --- | --- | --- |
-| feishu-data 默认 tab=gmv、日期=昨天 | ✅ | 早前已合入 |
-| pg_cron 两条 job 已写入 | ✅ | `cron.job` 查到 `gmv-max-sync-yesterday`(0 19 * * *) + `gmv-max-sync-today-hourly`(0 0-18 * * *)，另外还有第三条 `gmv-max-hourly-refresh`(5 * * * *) 直接打 sync |
-| gmv_max_vid_daily 加 4 条索引 | ✅ | 8 条索引齐全：`country_stat_date / adv_stat_date / vid / stat_date(brin)` 全在 |
-| 前端「上次自动刷新时间」 | ⬜ 未做 | grep 不到对应文案，不动它，保持待办 |
+| 旧任务                              | 真实状态 | 依据                                                                                                                                                                   |
+| ----------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| feishu-data 默认 tab=gmv、日期=昨天 | ✅       | 早前已合入                                                                                                                                                             |
+| pg_cron 两条 job 已写入             | ✅       | `cron.job` 查到 `gmv-max-sync-yesterday`(0 19 \* \* _) + `gmv-max-sync-today-hourly`(0 0-18 _ \* _)，另外还有第三条 `gmv-max-hourly-refresh`(5 _ \* \* \*) 直接打 sync |
+| gmv_max_vid_daily 加 4 条索引       | ✅       | 8 条索引齐全：`country_stat_date / adv_stat_date / vid / stat_date(brin)` 全在                                                                                         |
+| 前端「上次自动刷新时间」            | ⬜ 未做  | grep 不到对应文案，不动它，保持待办                                                                                                                                    |
 
 → 实施阶段先在 PLAN.md 把前 3 条移到「已完成」，第 4 条保留 ⬜。
 
@@ -58,6 +58,7 @@
 ```
 
 特殊处理：
+
 - 「无授权账号」素材在 step 5 计数时已排除在 targets 之外，所以**不会浪费轮数**（采纳 Claude 第 2 条）。
 - 内存物料 id 使用 feishu-read 返回的现成 `id`。
 - 10 分钟硬预算超时 → 记 `errors.push({error:'budget exceeded at round N'})`，继续走 step 7–10，保证一定有通知。
@@ -67,6 +68,7 @@
 读 `FEISHU_BOT_WEBHOOK` secret（用户已给值）；未配置 → `console.warn` 跳过、路由仍正常返回。
 
 正常消息 payload：
+
 ```json
 {
   "msg_type": "post",
@@ -80,6 +82,7 @@
   }}}
 }
 ```
+
 - 第 2 行（失败原因）仅当 failed>0 才追加；
 - 第 3 行（链接）仅当 failed>0 才追加；
 - 「今日无待授权素材」场景：标题相同，content 只有一行 `今日无待授权素材`。
@@ -120,7 +123,7 @@ CREATE TRIGGER authorize_cron_state_touch
 
 ```sql
 select cron.schedule(
-  'authorize-daily-0800',
+  'authorize-daily-2000',
   '0 0 * * *',  -- UTC 00:00 = 北京 08:00
   $$
   SELECT net.http_post(
