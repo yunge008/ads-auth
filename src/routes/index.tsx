@@ -54,9 +54,6 @@ import { cn } from "@/lib/utils";
 import { invokeFn } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 
-const LOG_STORAGE_KEY = "tt_authorize_log";
-const LOG_MAX = 100;
-
 type AuthorizeLogEntry = {
   id: number;
   logged_at: string;
@@ -68,29 +65,49 @@ type AuthorizeLogEntry = {
   note: string | null;
 };
 
-function readLocalLogs(): AuthorizeLogEntry[] {
-  try {
-    return JSON.parse(localStorage.getItem(LOG_STORAGE_KEY) ?? "[]");
-  } catch {
-    return [];
+async function callAuthorizeLog<T>(body: Record<string, unknown>): Promise<T> {
+  const passcode = localStorage.getItem("tt_admin_passcode") ?? "";
+  const name = localStorage.getItem("tt_admin_name") ?? "";
+  const res = await fetch("/api/authorize-log", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-admin-passcode": passcode,
+      "x-admin-name": encodeURIComponent(name),
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}));
+    throw new Error(j?.error ?? `HTTP ${res.status}`);
   }
-}
-
-function appendLocalLog(entry: Omit<AuthorizeLogEntry, "id">) {
-  const prev = readLocalLogs();
-  const next = [{ ...entry, id: Date.now() }, ...prev].slice(0, LOG_MAX);
-  localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(next));
+  return res.json();
 }
 
 function AuthorizeLogPanel({ refreshKey }: { refreshKey: number }) {
   const [logs, setLogs] = React.useState<AuthorizeLogEntry[]>([]);
+  const [loadingLogs, setLoadingLogs] = React.useState(false);
+  const openedRef = React.useRef(false);
+
+  const fetchLogs = React.useCallback(async () => {
+    setLoadingLogs(true);
+    try {
+      const data = await callAuthorizeLog<{ logs: AuthorizeLogEntry[] }>({ action: "list", limit: 50 });
+      setLogs(data.logs ?? []);
+    } catch {
+      // ignore
+    } finally {
+      setLoadingLogs(false);
+    }
+  }, []);
 
   React.useEffect(() => {
-    setLogs(readLocalLogs());
-  }, [refreshKey]);
+    if (openedRef.current) fetchLogs();
+  }, [refreshKey, fetchLogs]);
 
   const handleOpenChange = (open: boolean) => {
-    if (open) setLogs(readLocalLogs());
+    openedRef.current = open;
+    if (open) fetchLogs();
   };
 
   function formatBeijing(iso: string, part: "date" | "time") {
@@ -110,7 +127,9 @@ function AuthorizeLogPanel({ refreshKey }: { refreshKey: number }) {
         </CollapsibleTrigger>
         <CollapsibleContent>
           <CardContent className="pt-0">
-            {logs.length === 0 ? (
+            {loadingLogs ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">加载中…</p>
+            ) : logs.length === 0 ? (
               <p className="text-sm text-muted-foreground py-4 text-center">暂无记录</p>
             ) : (
               <div className="overflow-x-auto">
@@ -425,21 +444,14 @@ function AuthorizePage() {
       const logMsg = data?.logged ? `，记录 ${data.logged} 条到「授权记录」` : "";
       toast.success(`已回写 ${data?.updated ?? targets.length} 条到飞书${logMsg}`);
 
-      // Append to local push log
+      // Append to authorize_log via Server Route
       const logSuccess = targets.filter((t) => t.status === "已授权").length;
       const logFailed = targets.filter((t) => t.status !== "已授权" && t.status !== "API错误").length;
       const logNoAccount = materials.filter((m) => m.status === "无授权账号").length;
       const failedItems = targets.filter((t) => t.status !== "已授权" && t.status !== "API错误");
-      appendLocalLog({
-        logged_at: new Date().toISOString(),
-        source: "manual",
-        success: logSuccess,
-        failed: logFailed,
-        no_account: logNoAccount,
-        errors: failedItems.slice(0, 20).map((t) => ({ vid: t.vid ?? "", error: t.error_message ?? t.status })),
-        note: null,
-      });
-      setLogRefreshKey((k) => k + 1);
+      callAuthorizeLog({ action: "append", source: "manual", success: logSuccess, failed: logFailed, no_account: logNoAccount, errors: failedItems.slice(0, 20).map((t) => ({ vid: t.vid ?? "", error: t.error_message ?? t.status })) })
+        .then(() => setLogRefreshKey((k) => k + 1))
+        .catch(() => {}); // non-critical
     } catch (e) {
       toast.error(`回写失败：${(e as Error).message}`);
     }
