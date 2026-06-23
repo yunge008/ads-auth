@@ -52,6 +52,139 @@ import { MultiSelect } from "@/components/MultiSelect";
 import { STATUS_RANK, StatusBadge } from "@/components/StatusBadge";
 import { cn } from "@/lib/utils";
 import { invokeFn } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
+
+type AuthorizeLogEntry = {
+  id: number;
+  logged_at: string;
+  source: "manual" | "cron";
+  success: number;
+  failed: number;
+  no_account: number;
+  errors: Array<{ vid?: string; error?: string }>;
+  note: string | null;
+};
+
+function AuthorizeLogPanel({ refreshKey }: { refreshKey: number }) {
+  const [logs, setLogs] = React.useState<AuthorizeLogEntry[]>([]);
+  const [loadingLogs, setLoadingLogs] = React.useState(false);
+  const [opened, setOpened] = React.useState(false);
+  const fetchedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    if (!opened) return;
+    fetchedRef.current = false;
+  }, [refreshKey]);
+
+  const fetchLogs = React.useCallback(async () => {
+    if (loadingLogs) return;
+    setLoadingLogs(true);
+    try {
+      const data = await invokeFn<{ logs: AuthorizeLogEntry[] }>("authorize-log", { action: "list", limit: 50 });
+      setLogs(data?.logs ?? []);
+      fetchedRef.current = true;
+    } catch {
+      // ignore
+    } finally {
+      setLoadingLogs(false);
+    }
+  }, [loadingLogs]);
+
+  const handleOpenChange = (open: boolean) => {
+    setOpened(open);
+    if (open && !fetchedRef.current) {
+      fetchLogs();
+    }
+  };
+
+  React.useEffect(() => {
+    if (opened && !fetchedRef.current) {
+      fetchLogs();
+    }
+  }, [refreshKey, opened, fetchLogs]);
+
+  function formatBeijing(iso: string, part: "date" | "time") {
+    const d = new Date(new Date(iso).getTime() + 8 * 3600_000);
+    const s = d.toISOString();
+    return part === "date" ? s.slice(0, 10) : s.slice(11, 19);
+  }
+
+  return (
+    <Collapsible onOpenChange={handleOpenChange}>
+      <Card>
+        <CollapsibleTrigger className="w-full">
+          <CardHeader className="py-3 flex-row items-center justify-between space-y-0 cursor-pointer hover:bg-muted/40 transition-colors">
+            <CardTitle className="text-sm font-medium">📋 推送记录</CardTitle>
+            <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform data-[state=open]:rotate-180" />
+          </CardHeader>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <CardContent className="pt-0">
+            {loadingLogs ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">加载中…</p>
+            ) : logs.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">暂无记录</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-24">日期</TableHead>
+                      <TableHead className="w-20">时间</TableHead>
+                      <TableHead className="w-16">来源</TableHead>
+                      <TableHead className="w-16 text-green-600">成功</TableHead>
+                      <TableHead className="w-16 text-red-500">失败</TableHead>
+                      <TableHead className="w-16 text-orange-500">无账号</TableHead>
+                      <TableHead>失败原因</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {logs.map((row) => (
+                      <TableRow key={row.id}>
+                        <TableCell className="font-mono text-xs">{formatBeijing(row.logged_at, "date")}</TableCell>
+                        <TableCell className="font-mono text-xs">{formatBeijing(row.logged_at, "time")}</TableCell>
+                        <TableCell>
+                          <Badge variant={row.source === "cron" ? "secondary" : "outline"} className="text-xs">
+                            {row.source === "cron" ? "自动" : "手动"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className={cn("text-xs font-medium", row.success > 0 ? "text-green-600" : "text-muted-foreground")}>
+                          {row.success}
+                        </TableCell>
+                        <TableCell className={cn("text-xs font-medium", row.failed > 0 ? "text-red-500" : "text-muted-foreground")}>
+                          {row.failed}
+                        </TableCell>
+                        <TableCell className={cn("text-xs font-medium", row.no_account > 0 ? "text-orange-500" : "text-muted-foreground")}>
+                          {row.no_account}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground max-w-xs">
+                          {Array.isArray(row.errors) && row.errors.length > 0 ? (
+                            <span>
+                              {row.errors.slice(0, 3).map((e, i) => (
+                                <span key={i} className="block truncate">
+                                  {e.vid ? <span className="text-foreground">{e.vid}</span> : null}
+                                  {e.vid && e.error ? "：" : null}
+                                  {e.error}
+                                </span>
+                              ))}
+                              {row.errors.length > 3 && (
+                                <span className="text-muted-foreground">+{row.errors.length - 3} 条</span>
+                              )}
+                            </span>
+                          ) : "—"}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </CollapsibleContent>
+      </Card>
+    </Collapsible>
+  );
+}
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -68,6 +201,7 @@ function AuthorizePage() {
   const { staff } = useStaff();
   const { materials, setMaterials } = useMaterials();
   const [loading, setLoading] = React.useState(false);
+  const [logRefreshKey, setLogRefreshKey] = React.useState(0);
 
   // filters
   const [fStaff, setFStaff] = React.useState<string[]>([]);
@@ -302,6 +436,22 @@ function AuthorizePage() {
       setMaterials((prev) => prev.filter((m) => !removeIds.has(m.id)));
       const logMsg = data?.logged ? `，记录 ${data.logged} 条到「授权记录」` : "";
       toast.success(`已回写 ${data?.updated ?? targets.length} 条到飞书${logMsg}`);
+
+      // Append to authorize_log
+      const success = targets.filter((t) => t.status === "已授权").length;
+      const failed = targets.filter((t) => t.status !== "已授权" && t.status !== "API错误").length;
+      const no_account = materials.filter((m) => m.status === "无授权账号").length;
+      const failedItems = targets.filter((t) => t.status !== "已授权" && t.status !== "API错误");
+      const errorsPayload = failedItems.slice(0, 20).map((t) => ({
+        vid: t.vid ?? "",
+        error: t.error_message ?? t.status,
+      }));
+      try {
+        await invokeFn("authorize-log", { action: "append", source: "manual", success, failed, no_account, errors: errorsPayload });
+        setLogRefreshKey((k) => k + 1);
+      } catch {
+        // non-critical, ignore
+      }
     } catch (e) {
       toast.error(`回写失败：${(e as Error).message}`);
     }
@@ -536,6 +686,8 @@ function AuthorizePage() {
           </CollapsibleContent>
         </Card>
       </Collapsible>
+
+      <AuthorizeLogPanel refreshKey={logRefreshKey} />
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
         <Card className="lg:col-span-2">

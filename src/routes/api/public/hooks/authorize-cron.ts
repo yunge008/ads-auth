@@ -193,15 +193,25 @@ export const Route = createFileRoute("/api/public/hooks/authorize-cron")({
               lines: ["今日无待授权素材"],
             });
             await postFeishuBot(payload);
+            const noActionNote = `read ${materials.length} rows; none actionable`;
+            const noAcct = materials.filter((m) => m.status === "无授权账号").length;
             await admin.from("authorize_cron_state").upsert({
               id: "daily",
               last_run_at: new Date().toISOString(),
               success: 0,
               failed: 0,
-              no_account: materials.filter((m) => m.status === "无授权账号").length,
+              no_account: noAcct,
               rounds: 0,
               errors: [],
-              note: `read ${materials.length} rows; none actionable`,
+              note: noActionNote,
+            });
+            await admin.from("authorize_log").insert({
+              source: "cron",
+              success: 0,
+              failed: 0,
+              no_account: noAcct,
+              errors: [],
+              note: noActionNote,
             });
             return Response.json({ ok: true, skipped: "no_actionable", read: materials.length });
           }
@@ -302,6 +312,7 @@ export const Route = createFileRoute("/api/public/hooks/authorize-cron")({
           await postFeishuBot(payload);
 
           // 10. Persist state
+          const cronNote = `read=${materials.length} rounds=${rounds} elapsed_ms=${Date.now() - startedAt}`;
           await admin.from("authorize_cron_state").upsert({
             id: "daily",
             last_run_at: new Date().toISOString(),
@@ -310,7 +321,15 @@ export const Route = createFileRoute("/api/public/hooks/authorize-cron")({
             no_account,
             rounds,
             errors: errors.slice(0, 20),
-            note: `read=${materials.length} rounds=${rounds} elapsed_ms=${Date.now() - startedAt}`,
+            note: cronNote,
+          });
+          await admin.from("authorize_log").insert({
+            source: "cron",
+            success,
+            failed,
+            no_account,
+            errors: errors.slice(0, 20),
+            note: cronNote,
           });
 
           return Response.json({
