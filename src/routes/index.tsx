@@ -54,6 +54,9 @@ import { cn } from "@/lib/utils";
 import { invokeFn } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 
+const LOG_STORAGE_KEY = "tt_authorize_log";
+const LOG_MAX = 100;
+
 type AuthorizeLogEntry = {
   id: number;
   logged_at: string;
@@ -65,43 +68,30 @@ type AuthorizeLogEntry = {
   note: string | null;
 };
 
+function readLocalLogs(): AuthorizeLogEntry[] {
+  try {
+    return JSON.parse(localStorage.getItem(LOG_STORAGE_KEY) ?? "[]");
+  } catch {
+    return [];
+  }
+}
+
+function appendLocalLog(entry: Omit<AuthorizeLogEntry, "id">) {
+  const prev = readLocalLogs();
+  const next = [{ ...entry, id: Date.now() }, ...prev].slice(0, LOG_MAX);
+  localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(next));
+}
+
 function AuthorizeLogPanel({ refreshKey }: { refreshKey: number }) {
   const [logs, setLogs] = React.useState<AuthorizeLogEntry[]>([]);
-  const [loadingLogs, setLoadingLogs] = React.useState(false);
-  const [opened, setOpened] = React.useState(false);
-  const fetchedRef = React.useRef(false);
 
   React.useEffect(() => {
-    if (!opened) return;
-    fetchedRef.current = false;
+    setLogs(readLocalLogs());
   }, [refreshKey]);
 
-  const fetchLogs = React.useCallback(async () => {
-    if (loadingLogs) return;
-    setLoadingLogs(true);
-    try {
-      const data = await invokeFn<{ logs: AuthorizeLogEntry[] }>("authorize-log", { action: "list", limit: 50 });
-      setLogs(data?.logs ?? []);
-      fetchedRef.current = true;
-    } catch {
-      // ignore
-    } finally {
-      setLoadingLogs(false);
-    }
-  }, [loadingLogs]);
-
   const handleOpenChange = (open: boolean) => {
-    setOpened(open);
-    if (open && !fetchedRef.current) {
-      fetchLogs();
-    }
+    if (open) setLogs(readLocalLogs());
   };
-
-  React.useEffect(() => {
-    if (opened && !fetchedRef.current) {
-      fetchLogs();
-    }
-  }, [refreshKey, opened, fetchLogs]);
 
   function formatBeijing(iso: string, part: "date" | "time") {
     const d = new Date(new Date(iso).getTime() + 8 * 3600_000);
@@ -120,9 +110,7 @@ function AuthorizeLogPanel({ refreshKey }: { refreshKey: number }) {
         </CollapsibleTrigger>
         <CollapsibleContent>
           <CardContent className="pt-0">
-            {loadingLogs ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">加载中…</p>
-            ) : logs.length === 0 ? (
+            {logs.length === 0 ? (
               <p className="text-sm text-muted-foreground py-4 text-center">暂无记录</p>
             ) : (
               <div className="overflow-x-auto">
@@ -437,21 +425,21 @@ function AuthorizePage() {
       const logMsg = data?.logged ? `，记录 ${data.logged} 条到「授权记录」` : "";
       toast.success(`已回写 ${data?.updated ?? targets.length} 条到飞书${logMsg}`);
 
-      // Append to authorize_log
-      const success = targets.filter((t) => t.status === "已授权").length;
-      const failed = targets.filter((t) => t.status !== "已授权" && t.status !== "API错误").length;
-      const no_account = materials.filter((m) => m.status === "无授权账号").length;
+      // Append to local push log
+      const logSuccess = targets.filter((t) => t.status === "已授权").length;
+      const logFailed = targets.filter((t) => t.status !== "已授权" && t.status !== "API错误").length;
+      const logNoAccount = materials.filter((m) => m.status === "无授权账号").length;
       const failedItems = targets.filter((t) => t.status !== "已授权" && t.status !== "API错误");
-      const errorsPayload = failedItems.slice(0, 20).map((t) => ({
-        vid: t.vid ?? "",
-        error: t.error_message ?? t.status,
-      }));
-      try {
-        await invokeFn("authorize-log", { action: "append", source: "manual", success, failed, no_account, errors: errorsPayload });
-        setLogRefreshKey((k) => k + 1);
-      } catch {
-        // non-critical, ignore
-      }
+      appendLocalLog({
+        logged_at: new Date().toISOString(),
+        source: "manual",
+        success: logSuccess,
+        failed: logFailed,
+        no_account: logNoAccount,
+        errors: failedItems.slice(0, 20).map((t) => ({ vid: t.vid ?? "", error: t.error_message ?? t.status })),
+        note: null,
+      });
+      setLogRefreshKey((k) => k + 1);
     } catch (e) {
       toast.error(`回写失败：${(e as Error).message}`);
     }
