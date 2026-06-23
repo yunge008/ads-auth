@@ -46,3 +46,5 @@
 | `docs/ARCHITECTURE.md` | 架构事实，随代码更新 | 覆盖式编辑 |
 | `docs/PLAN.md` | 计划 + 任务认领板 | 编辑自己的任务行 |
 | `docs/WORKLOG.md` | 完工日志 | **只追加，不修改**（天然无冲突） |
+
+## Imported Claude Cowork project instructions
