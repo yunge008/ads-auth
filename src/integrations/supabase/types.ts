@@ -116,6 +116,39 @@ export type Database = {
         }
         Relationships: []
       }
+      authorize_log: {
+        Row: {
+          errors: Json
+          failed: number
+          id: number
+          logged_at: string
+          no_account: number
+          note: string | null
+          source: string
+          success: number
+        }
+        Insert: {
+          errors?: Json
+          failed?: number
+          id?: number
+          logged_at?: string
+          no_account?: number
+          note?: string | null
+          source?: string
+          success?: number
+        }
+        Update: {
+          errors?: Json
+          failed?: number
+          id?: number
+          logged_at?: string
+          no_account?: number
+          note?: string | null
+          source?: string
+          success?: number
+        }
+        Relationships: []
+      }
       gmv_max_sync_state: {
         Row: {
           id: string
