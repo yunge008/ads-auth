@@ -66,22 +66,7 @@ type AuthorizeLogEntry = {
 };
 
 async function callAuthorizeLog<T>(body: Record<string, unknown>): Promise<T> {
-  const passcode = localStorage.getItem("tt_admin_passcode") ?? "";
-  const name = localStorage.getItem("tt_admin_name") ?? "";
-  const res = await fetch("/api/authorize-log", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-admin-passcode": passcode,
-      "x-admin-name": encodeURIComponent(name),
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const j = await res.json().catch(() => ({}));
-    throw new Error(j?.error ?? `HTTP ${res.status}`);
-  }
-  return res.json();
+  return invokeFn<T>("authorize-log", body);
 }
 
 function AuthorizeLogPanel({ refreshKey }: { refreshKey: number }) {

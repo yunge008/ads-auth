@@ -15,7 +15,6 @@ import { Route as FeishuDataRouteImport } from './routes/feishu-data'
 import { Route as CommentsRouteImport } from './routes/comments'
 import { Route as ApiTestRouteImport } from './routes/api-test'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ApiAuthorizeLogRouteImport } from './routes/api/authorize-log'
 import { Route as OauthTiktokCallbackRouteImport } from './routes/oauth.tiktok.callback'
 import { Route as ApiPublicHooksGmvMaxCronRouteImport } from './routes/api/public/hooks/gmv-max-cron'
 import { Route as ApiPublicHooksAuthorizeCronRouteImport } from './routes/api/public/hooks/authorize-cron'
@@ -50,11 +49,6 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiAuthorizeLogRoute = ApiAuthorizeLogRouteImport.update({
-  id: '/api/authorize-log',
-  path: '/api/authorize-log',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const OauthTiktokCallbackRoute = OauthTiktokCallbackRouteImport.update({
   id: '/oauth/tiktok/callback',
   path: '/oauth/tiktok/callback',
@@ -80,7 +74,6 @@ export interface FileRoutesByFullPath {
   '/feishu-data': typeof FeishuDataRoute
   '/material-performance': typeof MaterialPerformanceRoute
   '/settings': typeof SettingsRoute
-  '/api/authorize-log': typeof ApiAuthorizeLogRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
   '/api/public/hooks/authorize-cron': typeof ApiPublicHooksAuthorizeCronRoute
   '/api/public/hooks/gmv-max-cron': typeof ApiPublicHooksGmvMaxCronRoute
@@ -92,7 +85,6 @@ export interface FileRoutesByTo {
   '/feishu-data': typeof FeishuDataRoute
   '/material-performance': typeof MaterialPerformanceRoute
   '/settings': typeof SettingsRoute
-  '/api/authorize-log': typeof ApiAuthorizeLogRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
   '/api/public/hooks/authorize-cron': typeof ApiPublicHooksAuthorizeCronRoute
   '/api/public/hooks/gmv-max-cron': typeof ApiPublicHooksGmvMaxCronRoute
@@ -105,7 +97,6 @@ export interface FileRoutesById {
   '/feishu-data': typeof FeishuDataRoute
   '/material-performance': typeof MaterialPerformanceRoute
   '/settings': typeof SettingsRoute
-  '/api/authorize-log': typeof ApiAuthorizeLogRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
   '/api/public/hooks/authorize-cron': typeof ApiPublicHooksAuthorizeCronRoute
   '/api/public/hooks/gmv-max-cron': typeof ApiPublicHooksGmvMaxCronRoute
@@ -119,7 +110,6 @@ export interface FileRouteTypes {
     | '/feishu-data'
     | '/material-performance'
     | '/settings'
-    | '/api/authorize-log'
     | '/oauth/tiktok/callback'
     | '/api/public/hooks/authorize-cron'
     | '/api/public/hooks/gmv-max-cron'
@@ -131,7 +121,6 @@ export interface FileRouteTypes {
     | '/feishu-data'
     | '/material-performance'
     | '/settings'
-    | '/api/authorize-log'
     | '/oauth/tiktok/callback'
     | '/api/public/hooks/authorize-cron'
     | '/api/public/hooks/gmv-max-cron'
@@ -143,7 +132,6 @@ export interface FileRouteTypes {
     | '/feishu-data'
     | '/material-performance'
     | '/settings'
-    | '/api/authorize-log'
     | '/oauth/tiktok/callback'
     | '/api/public/hooks/authorize-cron'
     | '/api/public/hooks/gmv-max-cron'
@@ -156,7 +144,6 @@ export interface RootRouteChildren {
   FeishuDataRoute: typeof FeishuDataRoute
   MaterialPerformanceRoute: typeof MaterialPerformanceRoute
   SettingsRoute: typeof SettingsRoute
-  ApiAuthorizeLogRoute: typeof ApiAuthorizeLogRoute
   OauthTiktokCallbackRoute: typeof OauthTiktokCallbackRoute
   ApiPublicHooksAuthorizeCronRoute: typeof ApiPublicHooksAuthorizeCronRoute
   ApiPublicHooksGmvMaxCronRoute: typeof ApiPublicHooksGmvMaxCronRoute
@@ -206,13 +193,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/authorize-log': {
-      id: '/api/authorize-log'
-      path: '/api/authorize-log'
-      fullPath: '/api/authorize-log'
-      preLoaderRoute: typeof ApiAuthorizeLogRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/oauth/tiktok/callback': {
       id: '/oauth/tiktok/callback'
       path: '/oauth/tiktok/callback'
@@ -244,7 +224,6 @@ const rootRouteChildren: RootRouteChildren = {
   FeishuDataRoute: FeishuDataRoute,
   MaterialPerformanceRoute: MaterialPerformanceRoute,
   SettingsRoute: SettingsRoute,
-  ApiAuthorizeLogRoute: ApiAuthorizeLogRoute,
   OauthTiktokCallbackRoute: OauthTiktokCallbackRoute,
   ApiPublicHooksAuthorizeCronRoute: ApiPublicHooksAuthorizeCronRoute,
   ApiPublicHooksGmvMaxCronRoute: ApiPublicHooksGmvMaxCronRoute,
