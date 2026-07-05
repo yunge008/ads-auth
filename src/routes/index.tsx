@@ -552,8 +552,8 @@ function AuthorizePage() {
                   <div>
                     <div className="font-medium mb-1">两种拉取模式</div>
                     <ul className="list-disc pl-5 text-muted-foreground space-y-1">
-                      <li><b>获取未授权素材</b>：只拉 P 列为空的待办行，适用于每日授权。</li>
-                      <li><b>获取所有素材</b>：不跳过 P 列已有日期的行，适用于批量授权新账户。</li>
+                      <li><b>获取未授权素材</b>：只拉 V 列（投放日期）为空的待办行，适用于每日授权。</li>
+                      <li><b>获取所有素材</b>：不跳过 V 列已有日期的行，适用于批量授权新账户。</li>
                     </ul>
                   </div>
                   <div>
@@ -584,7 +584,7 @@ function AuthorizePage() {
                   <div>
                     <div className="font-medium mb-1">读取范围</div>
                     <p className="text-muted-foreground">
-                      按「设置」中启用人员的 sheet 名定位，读 A2:Q；sheet 找不到会提示。
+                      按「设置」中启用人员的 sheet 名（建联-姓名）定位，读 A2:W；sheet 找不到会提示。
                     </p>
                   </div>
                   <div>
@@ -599,15 +599,14 @@ function AuthorizePage() {
                         </TableHeader>
                         <TableBody>
                           {[
-                            ["B", "登记日期"],
-                            ["C", "国家"],
-                            ["D", "达人名称"],
-                            ["F", "佣金率"],
-                            ["G", "VID"],
-                            ["H", "授权码(# + 63 位字符 + =)"],
-                            ["I", "SKU"],
-                            ["P", "投放日期（回写）"],
-                            ["Q", "回写状态（回写）"],
+                            ["B", "开发日期"],
+                            ["C", "地区/店铺（国家）"],
+                            ["D", "用户名（达人名称）"],
+                            ["J", "SKU（样品寄送）"],
+                            ["Q", "VID"],
+                            ["R", "授权码 VID CODE(# + 63 位字符 + =)"],
+                            ["V", "投放日期（回写）"],
+                            ["W", "回写状态（回写）"],
                           ].map(([c, v]) => (
                             <TableRow key={c}>
                               <TableCell className="font-mono text-xs py-1.5">{c}</TableCell>
@@ -623,8 +622,8 @@ function AuthorizePage() {
                     <ul className="list-disc pl-5 text-muted-foreground space-y-1">
                       <li>B 列若有值必须是可识别日期</li>
                       <li>C 列国家：1–10 字符，仅中英文/数字/横杠/空格</li>
-                      <li>H 列授权码格式合法，且 G 列 VID 非空</li>
-                      <li>未授权模式下：P 列为空，且行号在该 sheet 第一个 P 列非空行之后</li>
+                      <li>R 列授权码格式合法，且 Q 列 VID 非空</li>
+                      <li>未授权模式下：V 列（投放日期）为空</li>
                     </ul>
                   </div>
                 </TabsContent>
@@ -639,8 +638,8 @@ function AuthorizePage() {
                   <div>
                     <div className="font-medium mb-1">① 各同事原表（按 sheet 名 + 行号定位）</div>
                     <ul className="list-disc pl-5 text-muted-foreground space-y-1">
-                      <li><b>已授权</b> → P 列写当天日期 <span className="font-mono">yyyy/mm/dd</span></li>
-                      <li><b>代码有误 / 代码删除 / 代码过期 / 代码涉及多素材 / 视频不可见</b> → P 列写日期 + Q 列写中文状态</li>
+                      <li><b>已授权</b> → V 列写当天日期 <span className="font-mono">yyyy/mm/dd</span></li>
+                      <li><b>代码有误 / 代码删除 / 代码过期 / 代码涉及多素材 / 视频不可见</b> → V 列写日期 + W 列写中文状态</li>
                       <li><b>API错误</b> → 不写原表，仅记录到汇总表；回写后仍保留在页面列表中可重试（其他状态回写后从列表移除）</li>
                     </ul>
                   </div>

@@ -1,14 +1,16 @@
 // Read pending materials from Feishu spreadsheet (strict validation).
 // Body: { staff: [{name, sheet_name}], include_done?: boolean }
-// Fixed column mapping (1-indexed):
-//   A=序号  B=登记日期  C=国家  D=达人名称  E=其他  F=佣金率(忽略)
-//   G=VID  H=授权码(# + 63 chars + =)  I=SKU(产品)
-//   ...  P=投放日期(回写)  Q=回写状态+错误
+// Fixed column mapping for 建联-xxx sheets (1-indexed):
+//   A=负责同事  B=开发日期  C=地区/店铺(国家)  D=用户名(达人)  E=昵称  F=粉丝数
+//   G=联系方式  H=联系渠道  I=佣金公开-广告  J=SKU(样品寄送)  K=寄送数量
+//   L=是否合作  M=不合作原因  N=是否开通自动授权  O=视频履约  P=视频发布时间
+//   Q=VID  R=授权码(VID CODE, # + 63 chars + =)  S=视频URL  T=备注  U=其他同事已建联
+//   V=投放日期(回写)  W=回写状态+错误(回写)
 // Filtering rules (all must pass):
 //   - B is a recognizable date (string parseable OR Excel serial number) when present
 //   - C is country: 1-10 chars, Chinese/English letters/digits/dash/space
-//   - H matches the auth code format, AND G (VID) is non-empty
-//   - When include_done=false: P is empty AND row sits after the first non-empty P row
+//   - R matches the auth code format, AND Q (VID) is non-empty
+//   - When include_done=false: V is empty
 
 import {
   corsHeaders,
@@ -122,33 +124,23 @@ Deno.serve(async (req) => {
         missingSheets.push(s.sheet_name);
         continue;
       }
-      const rows = await readRange(token, spreadsheetToken, `${sheetId}!A2:Q`);
-
-      let firstPRowIdx = -1;
-      for (let i = 0; i < rows.length; i++) {
-        if (cellText((rows[i] ?? [])[15])) {
-          firstPRowIdx = i;
-          break;
-        }
-      }
-      if (!include_done && firstPRowIdx < 0) continue;
+      const rows = await readRange(token, spreadsheetToken, `${sheetId}!A2:W`);
 
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i] ?? [];
-        if (!include_done && i <= firstPRowIdx) continue;
         const dateRaw = cellText(r[1]);
         const dateStr = dateRaw ? parseDate(r[1]) : "";
         if (dateRaw && dateStr === null) continue;
         const country = cellText(r[2]);
         if (!COUNTRY_RE.test(country)) continue;
         const creator = cellText(r[3]);
-        const vid = cellText(r[6]);
-        const authCode = cellText(r[7]);
+        const vid = cellText(r[16]);
+        const authCode = cellText(r[17]);
         if (!CODE_RE.test(authCode)) continue;
         if (!vid) continue;
-        const product = cellText(r[8]);
-        const pCell = cellText(r[15]);
-        if (!include_done && pCell) continue;
+        const product = cellText(r[9]);
+        const doneCell = cellText(r[21]);
+        if (!include_done && doneCell) continue;
 
         const matched = accByCountry.get(country) ?? [];
         const base = {

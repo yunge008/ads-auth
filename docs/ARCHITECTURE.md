@@ -1,7 +1,7 @@
 # 项目架构 — ads-auth (TikTok Feishu Hub)
 
 > 内部工具：从飞书表读素材/人员数据 + TikTok Business API 授权与报表，统一授权、分析、回写飞书表。
-> 最后更新：2026-06-10（改架构时请同步本文档）
+> 最后更新：2026-07-05（改架构时请同步本文档）
 
 ## 技术栈
 
@@ -28,7 +28,7 @@
 
 ## Edge Functions（supabase/functions/）
 
-- **飞书侧**：`feishu-read`（素材表）、`feishu-read-sku` / `feishu-read-editors` / `feishu-read-bd-vids`、`feishu-writeback`（回写授权状态）、`staff-sheets`
+- **飞书侧**：`feishu-read`（素材表，「建联-姓名」sheet，读 A2:W，Q=VID / R=授权码 / J=SKU）、`feishu-read-sku` / `feishu-read-editors` / `feishu-read-bd-vids`、`feishu-writeback`（回写授权状态到 V=投放日期 / W=状态）、`staff-sheets`
 - **TikTok 侧**：`tiktok-oauth-init` / `tiktok-oauth-exchange` / `tiktok-connection-save` / `tiktok-connections`（token 管理，存 `tiktok_connections`）、`bc-list-advertisers`、`authorize-batch`（核心：素材授权）
 - **GMV Max**：`gmv-max-sync`（拉报表写 `gmv_max_vid_daily`，单 token 串行、≤3 QPS、80s 预算、返回 remaining_* 支持续跑）、`gmv-max-query`、`gmv-max-daily-report`（服务端聚合）
 - **评论**：`tiktok-comments-sync` / `tiktok-comments-translate`（暂停用）

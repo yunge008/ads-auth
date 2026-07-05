@@ -1,6 +1,6 @@
-// Write authorize result back to Feishu sheet.
-// P = 投放日期 (今天日期，yyyy/mm/dd)
-// Q = 状态文本 (中文，无英文 API 报错)
+// Write authorize result back to Feishu sheet (建联-xxx layout).
+// V = 投放日期 (今天日期，yyyy/mm/dd)
+// W = 状态文本 (中文，无英文 API 报错)
 //
 // Additionally, log "已授权" entries to the "授权记录" sheet.
 // Columns: A 序号 | B 国家 | C 达人名字 | D VID | E 视频CODE | F 产品
@@ -55,8 +55,8 @@ function nowTs(): string {
   return `${y}${mo}${da} ${hh}:${mm}:${ss}`;
 }
 
-// Only these statuses write to Q column.
-const Q_STATUSES = new Set([
+// Only these statuses write to W column.
+const W_STATUSES = new Set([
   "代码有误",
   "代码删除",
   "代码过期",
@@ -83,24 +83,24 @@ Deno.serve(async (req) => {
     const sheetByName = new Map(sheets.map((s) => [s.title, s.sheet_id]));
     const dateStr = todayDate();
 
-    // ----- 1) P/Q writeback on source sheets -----
+    // ----- 1) V/W writeback on source sheets -----
     const valueRanges = items.flatMap((it) => {
       const sid = sheetByName.get(it.sheet_name);
       if (!sid) return [];
       if (it.status === "已授权") {
         return [{
-          range: `${sid}!P${it.row_number}:P${it.row_number}`,
+          range: `${sid}!V${it.row_number}:V${it.row_number}`,
           values: [[dateStr]],
         }];
       }
-      if (Q_STATUSES.has(it.status)) {
+      if (W_STATUSES.has(it.status)) {
         return [
           {
-            range: `${sid}!P${it.row_number}:P${it.row_number}`,
+            range: `${sid}!V${it.row_number}:V${it.row_number}`,
             values: [[dateStr]],
           },
           {
-            range: `${sid}!Q${it.row_number}:Q${it.row_number}`,
+            range: `${sid}!W${it.row_number}:W${it.row_number}`,
             values: [[it.status]],
           },
         ];

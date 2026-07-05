@@ -1,6 +1,6 @@
 // Scan BD feishu sheets -> upsert staff_vid_map (source_type='BD').
 // Uses staff_sheets where role='BD' AND active=true.
-// BD sheet columns (1-indexed): C=国家 G=VID (same as feishu-read).
+// BD sheet columns (1-indexed, 建联-xxx layout): C=地区/国家 J=SKU Q=VID (same as feishu-read).
 import {
   corsHeaders,
   getSpreadsheetToken,
@@ -68,12 +68,12 @@ Deno.serve(async (req) => {
         missing.push(t.sheet_name);
         continue;
       }
-      const data = await readRange(token, spreadsheetToken, `${sid}!A2:I`);
+      const data = await readRange(token, spreadsheetToken, `${sid}!A2:R`);
       for (const r of data) {
         const row = r ?? [];
         const country = cellText(row[2]);
         if (!COUNTRY_RE.test(country)) continue;
-        const vid = cellText(row[6]);
+        const vid = cellText(row[16]);
         if (!vid || !VID_RE.test(vid)) continue;
 
         rows.push({
@@ -82,7 +82,7 @@ Deno.serve(async (req) => {
           vid,
           source_type: "BD",
           source_sheet: t.sheet_name,
-          registered_sku: cellText(row[8]) || null,
+          registered_sku: cellText(row[9]) || null,
         });
       }
     }
