@@ -12,10 +12,8 @@
 // returns the remaining advertiser_ids so the caller can resume without a 504.
 import { corsHeaders } from "../_shared/feishu.ts";
 import { admin, checkAdminPasscode, type ConnRow } from "../_shared/auth.ts";
-
-const TT = "https://business-api.tiktok.com/open_api/v1.3";
-
-const sleep = (ms: number): Promise<void> => new Promise<void>((r) => setTimeout(() => r(), ms));
+import { ttGet, type TimeBudgetChecker } from "../_shared/tiktok.ts";
+export { ttGet } from "../_shared/tiktok.ts";
 
 class TimeBudgetExceeded extends Error {
   constructor(stage: string) {
@@ -56,55 +54,6 @@ function chunk<T>(arr: T[], size: number): T[][] {
 }
 
 type RawRow = Record<string, unknown>;
-type TimeBudgetChecker = () => void;
-
-// Rate-limited (≤ ~3 QPS) + retry on "Too many requests" with exponential backoff.
-// Other errors fail fast (don't waste QPD on bad filters / invalid metrics).
-export async function ttGet(
-  token: string,
-  path: string,
-  params: Record<string, string>,
-  retries = 5,
-  _sleep: (ms: number) => Promise<void> = sleep,
-  _ensureTime?: TimeBudgetChecker,
-): Promise<Record<string, unknown>> {
-  for (let attempt = 0; attempt < retries; attempt++) {
-    _ensureTime?.();
-    const url = new URL(`${TT}${path}`);
-    for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-    const controller = new AbortController();
-    // Lower per-request HTTP timeout so a stuck call can't eat the whole budget.
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
-    let j: Record<string, unknown>;
-    try {
-      const res = await fetch(url, { headers: { "Access-Token": token }, signal: controller.signal });
-      j = await res.json().catch(() => ({}));
-    } catch (err) {
-      if (attempt < retries - 1) {
-        await _sleep(1000 * Math.pow(2, attempt));
-        continue;
-      }
-      throw new Error(`${path}: network/timeout ${(err as Error).message}`);
-    } finally {
-      clearTimeout(timeoutId);
-    }
-    if (j.code === 0) {
-      await _sleep(150);
-      return (j.data ?? {}) as Record<string, unknown>;
-    }
-    const msg = String(j.message ?? "");
-    const isRate = msg.includes("Too many requests") || msg.includes("Request too frequent") || msg.toLowerCase().includes("frequent") || j.code === 40100 || j.code === 50002;
-    if (isRate && attempt < retries - 1) {
-      // Check budget BEFORE long backoff so we bail rather than get platform-killed.
-      _ensureTime?.();
-      await _sleep(3000 * Math.pow(2, attempt));
-      continue;
-    }
-    throw new Error(`${path}: ${msg || "unknown"}`);
-  }
-  throw new Error(`${path}: max retries exceeded`);
-}
-
 // Step 1: list all GMV Max campaigns for an advertiser (PRODUCT_GMV_MAX).
 // Returns id + name + operation_status (ENABLE/DISABLE).
 export type CampaignInfo = { id: string; name: string; operation_status: string };
