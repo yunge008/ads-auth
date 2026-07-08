@@ -183,11 +183,11 @@ await appendValues(token, spreadsheetToken, `${logSheetId}!A2:I2`, [
 
 | 函数 | 读取/写入内容 | 关键点 |
 | --- | --- | --- |
-| `feishu-read` | 素材授权表（建联-姓名 sheet） | 按人员 sheet 读取 `A2:W`（B=开发日期 / C=国家 / D=用户名 / J=SKU / Q=VID / R=授权码），校验日期、国家、VID、授权码，返回行号用于回写 |
+| `feishu-read` | 素材授权表（建联-姓名 sheet） | 按人员 sheet 读取 `A2:W`（C=国家 / D=用户名 / K=SKU / N=视频登记日期 / P=VID / Q=授权码），校验日期、国家、VID、授权码，返回行号用于回写 |
 | `feishu-writeback` | 授权结果回写 | 写 `V/W` 列（V=投放日期 / W=状态）；同时更新或追加 `授权记录` sheet |
 | `feishu-read-sku` | `SKU匹配表` | 读 `A2:F`，按 `country, product_id, merchant_sku` 去重后 upsert |
 | `feishu-read-editors` | 剪辑人员表 | 读 `FEISHU_EDITOR_SPREADSHEET_TOKEN`，按同事名和 VID 校验入库 |
-| `feishu-read-bd-vids` | BD sheet VID | 读启用的 BD 人员 sheet（建联表布局，Q=VID / J=SKU），按国家和 VID 校验入库 |
+| `feishu-read-bd-vids` | BD sheet VID | 读启用的 BD 人员 sheet（建联表布局，P=VID / K=SKU），按国家和 VID 校验入库 |
 | `staff-sheets` | 人员 sheet 配置 | 不访问飞书，维护数据库里的人员与 sheet 名映射 |
 
 ## 新项目落地清单

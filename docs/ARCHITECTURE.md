@@ -28,7 +28,7 @@
 
 ## Edge Functions（supabase/functions/）
 
-- **飞书侧**：`feishu-read`（素材表，「建联-姓名」sheet，读 A2:W，Q=VID / R=授权码 / J=SKU）、`feishu-read-sku` / `feishu-read-editors` / `feishu-read-bd-vids`、`feishu-writeback`（回写授权状态到 V=投放日期 / W=状态）、`staff-sheets`
+- **飞书侧**：`feishu-read`（素材表，「建联-姓名」sheet，读 A2:W，P=VID / Q=授权码 / K=SKU / N=登记日期）、`feishu-read-sku` / `feishu-read-editors` / `feishu-read-bd-vids`、`feishu-writeback`（回写授权状态到 V=投放日期 / W=状态）、`staff-sheets`
 - **TikTok 侧**：`tiktok-oauth-init` / `tiktok-oauth-exchange` / `tiktok-connection-save` / `tiktok-connections`（token 管理，存 `tiktok_connections`）、`bc-list-advertisers`、`authorize-batch`（核心：素材授权）
 - **GMV Max**：`gmv-max-sync`（拉报表写 `gmv_max_vid_daily`，单 token 串行、≤3 QPS、80s 预算、返回 remaining_* 支持续跑）、`gmv-max-query`、`gmv-max-daily-report`（服务端聚合）、`gmv-max-live-status`（按广告户+Campaign+商品+VID 直接查询 TikTok BC，不读写 GMV 明细表）
 - **评论**：`tiktok-comments-sync` / `tiktok-comments-translate`（暂停用）

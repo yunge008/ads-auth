@@ -584,14 +584,14 @@ function AuthorizePage() {
                         </TableHeader>
                         <TableBody>
                           {[
-                            ["B", "开发日期"],
                             ["C", "地区/店铺（国家）"],
                             ["D", "用户名（达人名称）"],
-                            ["J", "SKU（样品寄送）"],
-                            ["Q", "VID"],
-                            ["R", "授权码 VID CODE(# + 63 位字符 + =)"],
-                            ["V", "投放日期（回写）"],
-                            ["W", "回写状态（回写）"],
+                            ["K", "SKU（样品寄送）"],
+                            ["N", "视频登记日期"],
+                            ["P", "VID"],
+                            ["Q", "授权码 VID CODE(# + 63 位字符 + =)"],
+                            ["V", "投放日期 / code授权日期（回写）"],
+                            ["W", "状态 / code授权错误原因（回写）"],
                           ].map(([c, v]) => (
                             <TableRow key={c}>
                               <TableCell className="font-mono text-xs py-1.5">{c}</TableCell>
@@ -605,9 +605,9 @@ function AuthorizePage() {
                   <div>
                     <div className="font-medium mb-1">行筛选条件（全部满足才纳入）</div>
                     <ul className="list-disc pl-5 text-muted-foreground space-y-1">
-                      <li>B 列若有值必须是可识别日期</li>
+                      <li>N 列（视频登记日期）若有值必须是可识别日期</li>
                       <li>C 列国家：1–10 字符，仅中英文/数字/横杠/空格</li>
-                      <li>R 列授权码格式合法，且 Q 列 VID 非空</li>
+                      <li>Q 列授权码格式合法，且 P 列 VID 非空</li>
                       <li>未授权模式下：V 列（投放日期）为空</li>
                     </ul>
                   </div>
