@@ -53,12 +53,13 @@ Deno.serve(async (req) => {
     if (op === "create") {
       const a = body.account;
       if (!a?.name || !a.passcode) throw new Error("名称与密码必填");
-      const hash = await sha256Hex(a.passcode.trim());
+      const pass = a.passcode.trim();
       const { data, error } = await db
         .from("app_accounts")
         .insert({
           name: a.name,
-          passcode_hash: hash,
+          passcode: pass,
+          passcode_hash: await sha256Hex(pass),
           is_admin: !!a.is_admin,
           tab_permissions: a.tab_permissions ?? [],
           active: a.active ?? true,
@@ -81,7 +82,9 @@ Deno.serve(async (req) => {
         active: a.active ?? true,
       };
       if (a.passcode && a.passcode.trim()) {
-        patch.passcode_hash = await sha256Hex(a.passcode.trim());
+        const pass = a.passcode.trim();
+        patch.passcode = pass;
+        patch.passcode_hash = await sha256Hex(pass);
       }
       const { data, error } = await db
         .from("app_accounts")

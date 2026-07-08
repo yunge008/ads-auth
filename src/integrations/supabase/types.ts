@@ -51,6 +51,7 @@ export type Database = {
           id: string
           is_admin: boolean
           name: string
+          passcode: string | null
           passcode_hash: string
           tab_permissions: string[]
           updated_at: string
@@ -61,6 +62,7 @@ export type Database = {
           id?: string
           is_admin?: boolean
           name: string
+          passcode?: string | null
           passcode_hash: string
           tab_permissions?: string[]
           updated_at?: string
@@ -71,6 +73,7 @@ export type Database = {
           id?: string
           is_admin?: boolean
           name?: string
+          passcode?: string | null
           passcode_hash?: string
           tab_permissions?: string[]
           updated_at?: string

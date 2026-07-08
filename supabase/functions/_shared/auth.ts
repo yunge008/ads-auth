@@ -106,12 +106,14 @@ export async function verifyPasscode(
   }
 
 
-  const hash = await sha256Hex(got);
   const db = admin();
+  // Plaintext passcode is the source of truth; fall back to legacy sha256 hash
+  // for any row that hasn't been migrated yet.
+  const hash = await sha256Hex(got);
   let q = db
     .from("app_accounts")
-    .select("id,name,is_admin,tab_permissions,active")
-    .eq("passcode_hash", hash);
+    .select("id,name,is_admin,tab_permissions,active,passcode,passcode_hash")
+    .or(`passcode.eq.${got},passcode_hash.eq.${hash}`);
   if (gotName) q = q.eq("name", gotName);
   const { data, error } = await q.maybeSingle();
   if (error) throw new Error(error.message);
