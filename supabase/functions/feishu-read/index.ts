@@ -7,11 +7,15 @@
 //   P=VID  Q=授权码(VID CODE, # + 63 chars + =)  R=备注  S=30天GMV本币  T=视频URL
 //   U=其他同事已建联  V=投放日期/code授权日期(回写)  W=状态+错误原因(回写)
 //   X=联系渠道  Y=是否合作  Z=不合作原因  AA=视频履约（X 之后不读取）
-// Filtering rules (all must pass):
-//   - N is a recognizable date (string parseable OR Excel serial number) when present
-//   - C is country: 1-10 chars, Chinese/English letters/digits/dash/space
-//   - Q matches the auth code format, AND P (VID) is non-empty
-//   - When include_done=false: V is empty
+// Filtering rules:
+//   - Q matches the auth code format, AND P (VID) is non-empty (always required)
+//   - When include_done=false (daily mode): N must be a recognizable date when present,
+//     C must be a valid country, and V must be empty
+//   - When include_done=true (batch mode): only code+VID required; invalid country
+//     rows are kept with status 无授权账号 (manual country assignment in UI).
+//     Additionally merges the legacy code archive from 「授权记录」!K3:Q
+//     (K=BD  L=登记日期  M=国家  N=达人名字  O=VID  P=授权码  Q=产品; frozen table),
+//     deduped by vid+auth_code with 建联 sheets taking priority.
 
 import {
   corsHeaders,
@@ -28,6 +32,7 @@ type StaffIn = { name: string; sheet_name: string };
 
 const CODE_RE = /^#[A-Za-z0-9+/]{63}=$/;
 const COUNTRY_RE = /^[\u4e00-\u9fa5A-Za-z0-9\-\s]{1,10}$/;
+const LOG_SHEET_TITLE = "\u6388\u6743\u8bb0\u5f55";
 
 function cellText(v: unknown): string {
   if (v == null) return "";
@@ -118,6 +123,7 @@ Deno.serve(async (req) => {
 
     const materials: unknown[] = [];
     const missingSheets: string[] = [];
+    const seen = new Set<string>(); // vid__code, 建联 sheets take priority over archive
 
     for (const s of staff) {
       const sheetId = sheetByName.get(s.sheet_name);
@@ -130,10 +136,13 @@ Deno.serve(async (req) => {
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i] ?? [];
         const dateRaw = cellText(r[13]);
-        const dateStr = dateRaw ? parseDate(r[13]) : "";
-        if (dateRaw && dateStr === null) continue;
+        let dateStr = dateRaw ? parseDate(r[13]) : "";
+        if (dateRaw && dateStr === null) {
+          if (!include_done) continue;
+          dateStr = ""; // batch mode: unparseable date doesn't drop the row
+        }
         const country = cellText(r[2]);
-        if (!COUNTRY_RE.test(country)) continue;
+        if (!include_done && !COUNTRY_RE.test(country)) continue;
         const creator = cellText(r[3]);
         const vid = cellText(r[15]);
         const authCode = cellText(r[16]);
@@ -142,6 +151,7 @@ Deno.serve(async (req) => {
         const product = cellText(r[10]);
         const doneCell = cellText(r[21]);
         if (!include_done && doneCell) continue;
+        seen.add(`${vid}__${authCode}`);
 
         const matched = accByCountry.get(country) ?? [];
         const base = {
@@ -178,6 +188,58 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Batch mode: merge legacy code archive from 「授权记录」!K3:Q (frozen table).
+    // These rows have no writeback target — feishu-writeback skips V/W for them.
+    if (include_done) {
+      const logSid = sheetByName.get(LOG_SHEET_TITLE);
+      if (logSid) {
+        const rows = await readRange(token, spreadsheetToken, `${logSid}!K3:Q`);
+        for (let i = 0; i < rows.length; i++) {
+          const r = rows[i] ?? [];
+          const vid = cellText(r[4]);
+          const authCode = cellText(r[5]);
+          if (!CODE_RE.test(authCode)) continue;
+          if (!vid) continue;
+          const key = `${vid}__${authCode}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const country = cellText(r[2]);
+          const matched = accByCountry.get(country) ?? [];
+          const base = {
+            row_number: i + 3,
+            staff_name: cellText(r[0]) || "原数据",
+            sheet_name: LOG_SHEET_TITLE,
+            register_date: parseDate(r[1]) ?? "",
+            country,
+            creator_name: cellText(r[3]),
+            vid,
+            auth_code: authCode,
+            product: cellText(r[6]),
+            error_message: undefined,
+          };
+          if (matched.length === 0) {
+            materials.push({
+              ...base,
+              id: crypto.randomUUID(),
+              advertiser_id: undefined,
+              advertiser_name: undefined,
+              status: "无授权账号",
+            });
+          } else {
+            const acc = matched[0];
+            materials.push({
+              ...base,
+              id: crypto.randomUUID(),
+              advertiser_id: acc.advertiser_id,
+              advertiser_name: acc.advertiser_id,
+              status: "待授权",
+            });
+          }
+        }
+      } else {
+        missingSheets.push(LOG_SHEET_TITLE);
+      }
+    }
 
     return new Response(
       JSON.stringify({ materials, missing_sheets: missingSheets }),

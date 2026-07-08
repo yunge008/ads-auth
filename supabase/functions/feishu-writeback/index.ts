@@ -85,6 +85,9 @@ Deno.serve(async (req) => {
 
     // ----- 1) V/W writeback on source sheets -----
     const valueRanges = items.flatMap((it) => {
+      // Archive rows (sourced from 「授权记录」!K3:Q, frozen table) have no
+      // writeback target — they are only logged to the A:I execution log below.
+      if (it.sheet_name === LOG_SHEET_TITLE) return [];
       const sid = sheetByName.get(it.sheet_name);
       if (!sid) return [];
       if (it.status === "已授权") {

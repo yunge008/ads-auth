@@ -538,7 +538,7 @@ function AuthorizePage() {
                     <div className="font-medium mb-1">两种拉取模式</div>
                     <ul className="list-disc pl-5 text-muted-foreground space-y-1">
                       <li><b>获取未授权素材</b>：只拉 V 列（投放日期）为空的待办行，适用于每日授权。</li>
-                      <li><b>获取所有素材</b>：不跳过 V 列已有日期的行，适用于批量授权新账户。</li>
+                      <li><b>获取所有素材</b>：建联表中所有授权码合法的行（不看 V 列，国家无效也保留为「无授权账号」），并合并「授权记录」K:Q 列的原始 code 归档（第 3 行起），按 VID+授权码去重。适用于批量授权新账户。</li>
                     </ul>
                   </div>
                   <div>
@@ -605,10 +605,9 @@ function AuthorizePage() {
                   <div>
                     <div className="font-medium mb-1">行筛选条件（全部满足才纳入）</div>
                     <ul className="list-disc pl-5 text-muted-foreground space-y-1">
-                      <li>N 列（视频登记日期）若有值必须是可识别日期</li>
-                      <li>C 列国家：1–10 字符，仅中英文/数字/横杠/空格</li>
-                      <li>Q 列授权码格式合法，且 P 列 VID 非空</li>
-                      <li>未授权模式下：V 列（投放日期）为空</li>
+                      <li>Q 列授权码格式合法，且 P 列 VID 非空（两种模式都要求）</li>
+                      <li>未授权模式下额外要求：N 列（视频登记日期）若有值必须是可识别日期；C 列国家 1–10 字符（中英文/数字/横杠/空格）；V 列（投放日期）为空</li>
+                      <li>所有素材模式下：仅要求授权码+VID，国家/日期无效不剔除；并合并「授权记录」K:Q 归档数据</li>
                     </ul>
                   </div>
                 </TabsContent>
@@ -625,6 +624,7 @@ function AuthorizePage() {
                     <ul className="list-disc pl-5 text-muted-foreground space-y-1">
                       <li><b>已授权</b> → V 列写当天日期 <span className="font-mono">yyyy/mm/dd</span></li>
                       <li><b>代码有误 / 代码删除 / 代码过期 / 代码涉及多素材 / 视频不可见</b> → V 列写日期 + W 列写中文状态</li>
+                      <li>来自「授权记录」K:Q 归档的素材：不回写原表（归档区固定不再更新），仅记录到下方汇总表</li>
                       <li><b>API错误</b> → 不写原表，仅记录到汇总表；回写后仍保留在页面列表中可重试（其他状态回写后从列表移除）</li>
                     </ul>
                   </div>

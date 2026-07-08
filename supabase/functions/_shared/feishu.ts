@@ -109,8 +109,10 @@ export async function writeValues(
   return json.data;
 }
 
-// Append rows after the last filled row in the given range. Feishu auto-extends
-// rows when sheet capacity is reached.
+// Append rows after the last filled row in the given range.
+// Uses OVERWRITE (not INSERT_ROWS): writes into blank cells below without
+// inserting whole sheet rows — INSERT_ROWS would shift other column regions
+// on the same sheet (e.g. 「授权记录」 keeps its legacy archive in K:Q).
 export async function appendValues(
   token: string,
   spreadsheetToken: string,
@@ -118,7 +120,7 @@ export async function appendValues(
   values: unknown[][],
 ) {
   const res = await fetch(
-    `${FEISHU_BASE}/sheets/v2/spreadsheets/${spreadsheetToken}/values_append?insertDataOption=INSERT_ROWS`,
+    `${FEISHU_BASE}/sheets/v2/spreadsheets/${spreadsheetToken}/values_append?insertDataOption=OVERWRITE`,
     {
       method: "POST",
       headers: {
