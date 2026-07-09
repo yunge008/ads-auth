@@ -14,7 +14,7 @@ async function verifyCronKey(req: Request): Promise<boolean> {
   const provided = req.headers.get("x-cron-key");
   if (!provided) return false;
   const db = admin();
-  const { data } = await db.rpc("verify_gmv_cron_key", { provided_key: provided });
+  const { data } = await db.rpc("verify_gmv_cron_key", { _key: provided });
   return !!data;
 }
 

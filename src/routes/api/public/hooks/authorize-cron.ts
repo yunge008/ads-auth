@@ -304,8 +304,11 @@ export const Route = createFileRoute("/api/public/hooks/authorize-cron")({
             const parts = [...breakdown.entries()].map(([k, v]) => `${k} ×${v}`).join("、");
             lines.push(`失败原因：${parts}`);
           }
+          for (const err of errors.slice(0, 5)) {
+            lines.push(`🚨 ${err.stage}: ${err.error.slice(0, 150)}`);
+          }
           const payload = buildSummaryPost({
-            title: `📋 自动授权完成（${beijingNowLabel()}）`,
+            title: `📋 自动授权${errors.length > 0 ? "异常" : "完成"}（${beijingNowLabel()}）`,
             lines,
             withLink: failed > 0,
           });

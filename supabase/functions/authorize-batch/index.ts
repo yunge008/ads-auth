@@ -49,7 +49,14 @@ async function authOne(
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    await checkAdminPasscode(req, "home");
+    // Cron bypass: authorize-cron passes x-cron-key with the vault secret value.
+    const cronKey = req.headers.get("x-cron-key") ?? "";
+    let cronAuthed = false;
+    if (cronKey) {
+      const { data: ok } = await admin().rpc("verify_gmv_cron_key", { _key: cronKey });
+      if (ok === true) cronAuthed = true;
+    }
+    if (!cronAuthed) await checkAdminPasscode(req, "home");
     const { items } = (await req.json()) as { items: Item[] };
     if (!items?.length) throw new Error("items 不能为空");
 
