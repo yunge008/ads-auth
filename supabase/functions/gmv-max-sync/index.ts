@@ -52,6 +52,20 @@ function chunk<T>(arr: T[], size: number): T[][] {
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
   return out;
 }
+// 视频发布时间 metric 值防御性解析（可能是 unix 秒/毫秒或日期字符串）→ ISO timestamptz
+function parsePostedAt(raw: string | null): string | null {
+  if (raw == null) return null;
+  const s = raw.trim();
+  if (!s || s === "-" || s.toUpperCase() === "N/A") return null;
+  if (/^\d{9,13}$/.test(s)) {
+    const n = Number(s);
+    const d = new Date(s.length >= 13 ? n : n * 1000);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  }
+  const iso = s.includes("T") ? s : s.replace(" ", "T");
+  const d = new Date(/[Z+]/.test(iso.slice(10)) ? iso : iso + "Z");
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
 
 type RawRow = Record<string, unknown>;
 // Step 1: list all GMV Max campaigns for an advertiser (PRODUCT_GMV_MAX).
@@ -600,7 +614,12 @@ Deno.serve(async (req) => {
       const metaRows: Record<string, unknown>[] = [];
       const metaEnd = end_date;
       const metaStart = addDays(metaEnd, -364);
-      const META_METRICS = ["title", "tt_account_name", "tt_account_authorization_type", "shop_content_type"];
+      // 末尾三个为「视频发布时间」候选 metric 名（API 文档未公开确切字段名）；
+      // 无效的会被 fetchReport 的 Invalid metric(s) 自动剔除重试机制安全忽略。
+      const META_METRICS = [
+        "title", "tt_account_name", "tt_account_authorization_type", "shop_content_type",
+        "item_posted_time", "video_posted_time", "post_time",
+      ];
       for (const [adv, perAdv] of missingByAdv) {
         const tok = tokenByAdv.get(adv);
         const shopId = shopByAdv.get(adv);
@@ -631,6 +650,7 @@ Deno.serve(async (req) => {
                 tt_account_name: s("tt_account_name"),
                 tt_account_authorization_type: s("tt_account_authorization_type"),
                 shop_content_type: s("shop_content_type"),
+                posted_at: parsePostedAt(s("item_posted_time") ?? s("video_posted_time") ?? s("post_time")),
               });
             }
           } catch (err) {

@@ -37,6 +37,7 @@ export async function readRange(
   token: string,
   spreadsheetToken: string,
   range: string, // e.g. "<sheet_id>!A2:G"
+  chunkRows?: number, // rows per request; keep rows*cols under Feishu's ~5000-cell cap
 ) {
   // Feishu values v2 caps a single response at ~5000 cells.
   // For open-ended ranges (e.g. "A2:G") we paginate by row chunks until empty.
@@ -45,7 +46,7 @@ export async function readRange(
   const [, sid, colStart, rowStartStr, colEnd, rowEndStr] = m;
   const startRow = parseInt(rowStartStr, 10);
   const endRow = rowEndStr ? parseInt(rowEndStr, 10) : 0; // 0 = open-ended
-  const CHUNK = 500; // 500 rows * ~8 cols = 4000 cells, under 5000 cap
+  const CHUNK = chunkRows && chunkRows > 0 ? chunkRows : 500; // default: 500 rows * ~8 cols = 4000 cells
   const out: unknown[][] = [];
   let cur = startRow;
   let emptyStreak = 0;

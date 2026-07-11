@@ -13,13 +13,14 @@
 
 | 任务 | 状态 | 认领 | 涉及文件 | 备注 |
 | --- | --- | --- | --- | --- |
+| GMV 归因进度（按审核计划重构） | 🔶 进行中 | codex 2026-07-11 | docs/GMV_ATTRIBUTION_REVIEW_PLAN.md、supabase/migrations/、supabase/functions/attribution-*、supabase/functions/_shared/{attribution,attribution-report}.ts、src/routes/gmv-attribution*.tsx、src/components/attribution/*、src/lib/{attributionApi,adExcel,tabs}.ts、src/routes/settings.tsx | 已接管既有原型，按审核计划实施阶段 1-4：站点维度身份键、目标组与汇率、计算批次及明细、飞书四张新表、全量导出、同事页阈值展示及刷新调度。飞书已建「绩效配置表 / 归因审查 / 绩效统计记录 / 归因记录」；待补齐统计记录的 4 个目标组派生列与审查的判定时间列。 |
 | 前端显示「上次自动刷新时间」 | ⬜ | — | src/routes/feishu-data.tsx | 读 gmv_max_sync_state（cron_yesterday / cron_today） |
 
 ## 进行中文件锁（防交叉修改）
 
 | 文件 | 谁在改 | 开始时间 |
 | --- | --- | --- |
-| （空） | | |
+| supabase/functions/attribution-*、supabase/functions/_shared/{cells,attribution,attribution-report}.ts、src/routes/gmv-attribution*.tsx、src/components/attribution/* | codex | 2026-07-11 |
 
 ## 已完成
 
