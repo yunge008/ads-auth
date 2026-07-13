@@ -24,6 +24,8 @@
 
 ## 已完成
 
+- ✅ 2026-07-13 [codex] GMV Max 日报移除 VID 查找，仅保留日期/国家聚合；「数据行数」改为「素材数（去重 VID）」。
+
 - ✅ 2026-07-09 [claude] 修复自动授权静默失败（成功0/失败0/无授权账号0）：`authorize-batch` 补 `x-cron-key` 放行（此前 cron 调用被 401 拒绝）；`authorize-log` RPC 参数名对齐 `_key`；corsHeaders 加 `x-cron-key`；cron 飞书通知附带错误摘要。**待人工**：重新部署 `authorize-batch`、`authorize-log` 两个 Edge Function（authorize-cron 路由随 Lovable 前端自动部署）
 
 - ✅ 2026-07-06 [codex] 修复 `gmv-max-live-status`：移除当前报表维度不支持的 `tt_account_name`、`tt_account_authorization_type`、`shop_content_type`

@@ -427,8 +427,6 @@ function GmvDailyReport({ advertisers, reportRef }: { advertisers: AdvertiserRow
   const [start, setStart] = React.useState(yesterday);
   const [end, setEnd] = React.useState(yesterday);
   const [country, setCountry] = React.useState("");
-  const [vid, setVid] = React.useState("");
-  const [vidInput, setVidInput] = React.useState("");
   const [page, setPage] = React.useState(1);
   const [rows, setRows] = React.useState<DailyReportRow[]>([]);
   const [count, setCount] = React.useState(0);
@@ -446,7 +444,7 @@ function GmvDailyReport({ advertisers, reportRef }: { advertisers: AdvertiserRow
     setLoading(true);
     try {
       const r = await invokeFn<{ rows: DailyReportRow[]; count: number }>("gmv-max-daily-report", {
-        start_date: s, end_date: e, country: country || undefined, vid: vid || undefined, page, page_size: 100,
+        start_date: s, end_date: e, country: country || undefined, page, page_size: 100,
       });
       setRows(r.rows ?? []);
       setCount(r.count ?? 0);
@@ -484,14 +482,6 @@ function GmvDailyReport({ advertisers, reportRef }: { advertisers: AdvertiserRow
               {countryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
-          <div className="flex flex-col gap-1">
-            <span className="text-xs text-muted-foreground">VID查找</span>
-            <div className="flex gap-1">
-              <Input value={vidInput} onChange={(e) => setVidInput(e.target.value)} placeholder="输入VID" className="h-8 w-44 font-mono text-xs" />
-              <Button size="sm" className="h-8" onClick={() => { setPage(1); setVid(vidInput.trim()); }}>查找</Button>
-              {vid && <Button size="sm" variant="outline" className="h-8" onClick={() => { setVidInput(""); setVid(""); setPage(1); }}>清除</Button>}
-            </div>
-          </div>
         </div>
         <div className="border rounded-md overflow-x-auto">
           <Table>
@@ -504,7 +494,7 @@ function GmvDailyReport({ advertisers, reportRef }: { advertisers: AdvertiserRow
                 <TableHead className="text-right">消耗</TableHead>
                 <TableHead className="text-right">ROI</TableHead>
                 <TableHead className="text-right">订单量</TableHead>
-                <TableHead className="text-right">数据行数</TableHead>
+                <TableHead className="text-right">素材数（去重 VID）</TableHead>
                 {DELIVERY_STATUSES.map((s) => (
                   <TableHead key={s} className="text-right text-xs" title={s}>{STATUS_LABELS[s]}</TableHead>
                 ))}

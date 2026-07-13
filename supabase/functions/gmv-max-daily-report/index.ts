@@ -34,7 +34,6 @@ Deno.serve(async (req) => {
       start_date?: string;
       end_date?: string;
       country?: string;
-      vid?: string;
       page?: number;
       page_size?: number;
     };
@@ -60,7 +59,6 @@ Deno.serve(async (req) => {
         .gte("stat_date", startDate)
         .lte("stat_date", endDate);
       if (body.country && body.country.trim()) q = q.eq("country", body.country.trim());
-      if (body.vid && body.vid.trim()) q = q.eq("vid", body.vid.trim());
       return q;
     };
 
