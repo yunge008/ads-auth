@@ -11,6 +11,8 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as MaterialPerformanceRouteImport } from './routes/material-performance'
+import { Route as GmvAttributionAdminRouteImport } from './routes/gmv-attribution-admin'
+import { Route as GmvAttributionRouteImport } from './routes/gmv-attribution'
 import { Route as FeishuDataRouteImport } from './routes/feishu-data'
 import { Route as CommentsRouteImport } from './routes/comments'
 import { Route as ApiTestRouteImport } from './routes/api-test'
@@ -27,6 +29,16 @@ const SettingsRoute = SettingsRouteImport.update({
 const MaterialPerformanceRoute = MaterialPerformanceRouteImport.update({
   id: '/material-performance',
   path: '/material-performance',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GmvAttributionAdminRoute = GmvAttributionAdminRouteImport.update({
+  id: '/gmv-attribution-admin',
+  path: '/gmv-attribution-admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GmvAttributionRoute = GmvAttributionRouteImport.update({
+  id: '/gmv-attribution',
+  path: '/gmv-attribution',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FeishuDataRoute = FeishuDataRouteImport.update({
@@ -72,6 +84,8 @@ export interface FileRoutesByFullPath {
   '/api-test': typeof ApiTestRoute
   '/comments': typeof CommentsRoute
   '/feishu-data': typeof FeishuDataRoute
+  '/gmv-attribution': typeof GmvAttributionRoute
+  '/gmv-attribution-admin': typeof GmvAttributionAdminRoute
   '/material-performance': typeof MaterialPerformanceRoute
   '/settings': typeof SettingsRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
@@ -83,6 +97,8 @@ export interface FileRoutesByTo {
   '/api-test': typeof ApiTestRoute
   '/comments': typeof CommentsRoute
   '/feishu-data': typeof FeishuDataRoute
+  '/gmv-attribution': typeof GmvAttributionRoute
+  '/gmv-attribution-admin': typeof GmvAttributionAdminRoute
   '/material-performance': typeof MaterialPerformanceRoute
   '/settings': typeof SettingsRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
@@ -95,6 +111,8 @@ export interface FileRoutesById {
   '/api-test': typeof ApiTestRoute
   '/comments': typeof CommentsRoute
   '/feishu-data': typeof FeishuDataRoute
+  '/gmv-attribution': typeof GmvAttributionRoute
+  '/gmv-attribution-admin': typeof GmvAttributionAdminRoute
   '/material-performance': typeof MaterialPerformanceRoute
   '/settings': typeof SettingsRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
@@ -108,6 +126,8 @@ export interface FileRouteTypes {
     | '/api-test'
     | '/comments'
     | '/feishu-data'
+    | '/gmv-attribution'
+    | '/gmv-attribution-admin'
     | '/material-performance'
     | '/settings'
     | '/oauth/tiktok/callback'
@@ -119,6 +139,8 @@ export interface FileRouteTypes {
     | '/api-test'
     | '/comments'
     | '/feishu-data'
+    | '/gmv-attribution'
+    | '/gmv-attribution-admin'
     | '/material-performance'
     | '/settings'
     | '/oauth/tiktok/callback'
@@ -130,6 +152,8 @@ export interface FileRouteTypes {
     | '/api-test'
     | '/comments'
     | '/feishu-data'
+    | '/gmv-attribution'
+    | '/gmv-attribution-admin'
     | '/material-performance'
     | '/settings'
     | '/oauth/tiktok/callback'
@@ -142,6 +166,8 @@ export interface RootRouteChildren {
   ApiTestRoute: typeof ApiTestRoute
   CommentsRoute: typeof CommentsRoute
   FeishuDataRoute: typeof FeishuDataRoute
+  GmvAttributionRoute: typeof GmvAttributionRoute
+  GmvAttributionAdminRoute: typeof GmvAttributionAdminRoute
   MaterialPerformanceRoute: typeof MaterialPerformanceRoute
   SettingsRoute: typeof SettingsRoute
   OauthTiktokCallbackRoute: typeof OauthTiktokCallbackRoute
@@ -163,6 +189,20 @@ declare module '@tanstack/react-router' {
       path: '/material-performance'
       fullPath: '/material-performance'
       preLoaderRoute: typeof MaterialPerformanceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/gmv-attribution-admin': {
+      id: '/gmv-attribution-admin'
+      path: '/gmv-attribution-admin'
+      fullPath: '/gmv-attribution-admin'
+      preLoaderRoute: typeof GmvAttributionAdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/gmv-attribution': {
+      id: '/gmv-attribution'
+      path: '/gmv-attribution'
+      fullPath: '/gmv-attribution'
+      preLoaderRoute: typeof GmvAttributionRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/feishu-data': {
@@ -222,6 +262,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiTestRoute: ApiTestRoute,
   CommentsRoute: CommentsRoute,
   FeishuDataRoute: FeishuDataRoute,
+  GmvAttributionRoute: GmvAttributionRoute,
+  GmvAttributionAdminRoute: GmvAttributionAdminRoute,
   MaterialPerformanceRoute: MaterialPerformanceRoute,
   SettingsRoute: SettingsRoute,
   OauthTiktokCallbackRoute: OauthTiktokCallbackRoute,

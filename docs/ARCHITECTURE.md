@@ -18,6 +18,8 @@
 | `/material-performance` | 素材成效（GMV Max VID 级数据） |
 | `/feishu-data` | 已获取数据查阅（GMV Max 日报等） |
 | `/comments` | 评论内容（暂隐藏，API 不支持） |
+| `/gmv-attribution` | GMV 归因·用户视图：在职同事按站点归因 GMV + KPI 进度（同事×站点 < 2000 USD 不计入） |
+| `/gmv-attribution-admin` | GMV 归因·管理视图：全量进度板（含离职，6 桶口径）+ Excel 上传归因 + 审查与飞书回写 |
 | `/settings` | 账号管理、人员表、数据同步（AccountsManager/StaffTable/DataSyncCard） |
 | `/api-test` | API 测试 |
 | `/oauth/tiktok/callback` | TikTok OAuth 回调 |
@@ -32,13 +34,16 @@
 - **TikTok 侧**：`tiktok-oauth-init` / `tiktok-oauth-exchange` / `tiktok-connection-save` / `tiktok-connections`（token 管理，存 `tiktok_connections`）、`bc-list-advertisers`、`authorize-batch`（核心：素材授权）
 - **GMV Max**：`gmv-max-sync`（拉报表写 `gmv_max_vid_daily`，单 token 串行、≤3 QPS、80s 预算、返回 remaining_* 支持续跑）、`gmv-max-query`、`gmv-max-daily-report`（服务端聚合）、`gmv-max-live-status`（按广告户+Campaign+商品+VID 直接查询 TikTok BC，不读写 GMV 明细表）
 - **评论**：`tiktok-comments-sync` / `tiktok-comments-translate`（暂停用）
+- **GMV 归因**：`attribution-sync-creators`（读建联表 D用户名/E昵称/N登记日期 + 授权记录归档 + 剪辑表 → `creator_registry`，保护期解析 → `creator_ownership`）、`attribution-run`（月度归因报表，RPC `gmv_attr_monthly_agg` 聚合 + 归因引擎，view=admin/user）、`attribution-upload`（Excel 上传 create/append/finalize/list/get/delete，文件名「站点 MAX yyyymm.xlsx」）、`attribution-feishu`（write-progress/write-reviews/read-judgments/sync-targets/sync-handovers/write-ownership/list-reviews，对应飞书主表格内 5 个 sheet：归因进度/归因审查/GMV目标/站点交接/达人归因表）
 - **其他**：`app-accounts`（账号 CRUD）、`data-preview`
-- **共享**：`_shared/auth.ts`（口令校验 + service role client）、`_shared/feishu.ts`（tenant token、分页读 sheet、CORS）、`_shared/tiktok.ts`（TikTok GET 限速、超时与退避重试）
+- **共享**：`_shared/auth.ts`（口令校验 + service role client）、`_shared/feishu.ts`（tenant token、分页读 sheet、CORS；readRange 支持自定义分块行数）、`_shared/tiktok.ts`（TikTok GET 限速、超时与退避重试）、`_shared/cells.ts`（cellText/parseDate）、`_shared/attribution.ts`（归因引擎纯函数：瀑布归因/保护期/站点交接分段/VID推断别名/VID>>32 发布时间）、`_shared/attribution-report.ts`（归因上下文加载 + 汇总 + 月度报表）
 - **Cron bypass**：`gmv-max-sync` / `feishu-read` / `authorize-batch` / `feishu-writeback` 均支持 `x-cron-key` header（值=vault secret `gmv_max_cron_secret`，通过 `verify_gmv_cron_key` RPC 校验），用于跳过 admin 口令校验，仅给上述两个 cron 路由使用
 
 ## 数据库主要表
 
-`app_accounts`（账号/权限）、`staff_sheets`、`staff_vid_map`、`sku_product_map`、`advertiser_countries`、`tiktok_connections`（token）、`gmv_max_vid_daily`（明细大表，country×advertiser×campaign×item×day）、`gmv_max_vid_meta`、`gmv_max_sync_state`、`authorize_cron_state`（每日自动授权运行记录）、`tiktok_comments`(+sync_state)
+`app_accounts`（账号/权限）、`staff_sheets`、`staff_vid_map`、`sku_product_map`、`advertiser_countries`、`tiktok_connections`（token）、`gmv_max_vid_daily`（明细大表，country×advertiser×campaign×item×day）、`gmv_max_vid_meta`（+posted_at 发布时间）、`gmv_max_sync_state`、`authorize_cron_state`（每日自动授权运行记录）、`tiktok_comments`(+sync_state)
+
+**GMV 归因**：`creator_registry`（达人登记原始行，按 source_sheet 全量重建）、`creator_ownership`（昵称/用户名→BD 保护期解析结果）、`site_handovers`（站点交接，昵称归因按发布时间分段）、`creator_alias`（别名：VID_INFERRED 自动推断 / MANUAL 人工判定，MANUAL 永不被自动覆盖）、`attribution_review`（审查项，review_key 幂等，回写飞书+读回人工判定）、`gmv_targets`（月度目标）、`ad_uploads`+`ad_upload_rows`（Excel 上传批次与行，含 attr_* 归因结果列）；RPC `gmv_attr_monthly_agg`（月度按 vid×账号×内容类型×国家×货币 聚合）
 
 ## 关键数据流
 
@@ -46,6 +51,7 @@
 2. **自动授权流**：pg_cron(北京 08:00) → `/api/public/hooks/authorize-cron` → `feishu-read` → `authorize-batch`（最多 4 轮收敛，无授权账号不参与）→ `feishu-writeback` → 飞书自定义机器人（`FEISHU_BOT_WEBHOOK`）富文本通知 → upsert `authorize_cron_state`
 3. **报表流**：pg_cron → `/api/public/hooks/gmv-max-cron` → `gmv-max-sync`（循环续跑）→ `gmv_max_vid_daily` → `gmv-max-daily-report` 聚合 → 前端
 4. **Token 流**：OAuth 授权 → callback → `tiktok-oauth-exchange` → `tiktok_connections`
+5. **归因流**：`attribution-sync-creators`（飞书 3 处登记 → registry + 保护期解析）→ `attribution-run`/`attribution-upload`（归因引擎瀑布：商品卡单列 → VID 强匹配[BD/剪辑] → BD 昵称路径[人工别名>建联归属>VID推断别名]+站点交接按发布时间分段 → 无建联）→ 前端进度板 / `attribution-feishu` 回写飞书（进度快照、审查项、达人归因表）→ 人工在「归因审查」J 列裁决 → read-judgments 读回。发布时间三级来源：上传表内列 > gmv_max_vid_meta.posted_at > VID>>32 时间戳兜底
 
 ## 已知约束 / 风险点
 
@@ -53,3 +59,4 @@
 - 飞书 values v2 单响应 ~5000 cells，`readRange` 已做 500 行分块
 - `gmv_max_vid_daily` 行数线性增长，性能优化路线见 `.lovable/plan.md`（索引→rollup→分区）
 - 删除-重插写入模式：sync 先按 (country, advertiser_id, stat_date) 删旧再 upsert，改动需保持幂等
+- 2026-07-11 review implementation: `20260711000000_gmv_attribution_review.sql` adds country-scoped creator identity, configurable USD rates, goal-group fields, and immutable attribution batches/detail snapshots.
