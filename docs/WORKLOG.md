@@ -17,3 +17,4 @@
 - 2026-07-11 [codex] Started GMV attribution review implementation: country-scoped identity keys, new Feishu sheet mappings, USD-rate model, goal-group and immutable batch schema; frontend production build passes.
 - 2026-07-13 [codex] Fixed GMV attribution runtime exchange-rate loader and exact sidebar active-tab matching; production build passed.
 - 2026-07-13 [codex] Removed VID filtering from the GMV Max daily report and relabeled its distinct-VID count as material count.
+- 2026-07-13 [codex] 新增只读 GMV Max 原始 CSV 导出：API 测试页支持广告户+日期范围下载，抽取共享分页报表读取器；多国家同月 Excel 全部上传归因后自动展示合并结果。已通过本地生产构建；待 Lovable 部署 Edge Functions 后用真实 Supabase 数据验证。

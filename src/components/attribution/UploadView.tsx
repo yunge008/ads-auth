@@ -104,6 +104,7 @@ export function UploadView() {
     setUploading(true);
     let lastSummary: AttributionReport | null = null;
     let lastLabel = "";
+    const completedMonths = new Set<string>();
     try {
       for (const f of ready) {
         patchFile(f.id, { status: "uploading", progress: 2 });
@@ -122,6 +123,7 @@ export function UploadView() {
           const fin = await uploadApi.finalize(upload_id);
           lastSummary = fin.summary;
           lastLabel = `${f.country} ${f.month}（${f.file.name}）`;
+          completedMonths.add(f.month);
           patchFile(f.id, { status: "done", progress: 100 });
           setViewing({ kind: "upload", id: upload_id, label: lastLabel });
           toast.success(`${f.file.name}：${fin.row_count} 行归因完成`);
@@ -131,8 +133,21 @@ export function UploadView() {
         }
       }
       if (lastSummary) {
-        setSummary(lastSummary);
         setDetail(null);
+        const [month] = Array.from(completedMonths);
+        if (completedMonths.size === 1 && month) {
+          try {
+            const merged = await uploadApi.get({ month, merged: true });
+            setViewing({ kind: "merged", month });
+            setSummary(merged.summary);
+            toast.success(`已展示 ${month} 全站点合并归因结果`);
+          } catch (e) {
+            setSummary(lastSummary);
+            toast.warning(`单文件归因已完成，但合并展示加载失败：${(e as Error).message}`);
+          }
+        } else {
+          setSummary(lastSummary);
+        }
       }
       await loadHistory();
     } finally {

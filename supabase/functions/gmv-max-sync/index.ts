@@ -13,6 +13,7 @@
 import { corsHeaders } from "../_shared/feishu.ts";
 import { admin, checkAdminPasscode, type ConnRow } from "../_shared/auth.ts";
 import { ttGet, type TimeBudgetChecker } from "../_shared/tiktok.ts";
+import { fetchCampaigns, fetchReport, type CampaignInfo } from "../_shared/gmv-max-report.ts";
 export { ttGet } from "../_shared/tiktok.ts";
 
 class TimeBudgetExceeded extends Error {
@@ -65,131 +66,6 @@ function parsePostedAt(raw: string | null): string | null {
   const iso = s.includes("T") ? s : s.replace(" ", "T");
   const d = new Date(/[Z+]/.test(iso.slice(10)) ? iso : iso + "Z");
   return isNaN(d.getTime()) ? null : d.toISOString();
-}
-
-type RawRow = Record<string, unknown>;
-// Step 1: list all GMV Max campaigns for an advertiser (PRODUCT_GMV_MAX).
-// Returns id + name + operation_status (ENABLE/DISABLE).
-export type CampaignInfo = { id: string; name: string; operation_status: string };
-export async function fetchCampaigns(
-  token: string,
-  advertiser_id: string,
-  _ttGet: typeof ttGet = ttGet,
-  _ensureTime?: TimeBudgetChecker,
-): Promise<CampaignInfo[]> {
-  const out: CampaignInfo[] = [];
-  const seen = new Set<string>();
-  let page = 1;
-  const page_size = 100;
-  const filtering = JSON.stringify({ gmv_max_promotion_types: ["PRODUCT_GMV_MAX"] });
-  for (let i = 0; i < 50; i++) {
-    _ensureTime?.();
-    const data = await _ttGet(token, "/gmv_max/campaign/get/", {
-      advertiser_id,
-      filtering,
-      page: String(page),
-      page_size: String(page_size),
-    }, undefined, undefined, _ensureTime);
-    const list = (data.list ?? []) as Array<Record<string, unknown>>;
-    for (const c of list) {
-      const cid = c.campaign_id ?? c.id;
-      if (cid == null) continue;
-      const id = String(cid);
-      if (seen.has(id)) continue;
-      seen.add(id);
-      out.push({
-        id,
-        name: String(c.campaign_name ?? c.name ?? ""),
-        operation_status: String(c.operation_status ?? ""),
-      });
-    }
-    const pi = (data.page_info ?? {}) as Record<string, unknown>;
-    const totalPage = Number(pi.total_page ?? 0);
-    const total = Number(pi.total_number ?? 0);
-    if (list.length === 0) break;
-    if (totalPage > 0 && page >= totalPage) break;
-    if (!totalPage && total > 0 && page * page_size >= total) break;
-    page++;
-  }
-  return out;
-}
-
-// Generic paged report fetch. filtering MUST be an object (not array).
-// gmv_max_promotion_types is NOT supported when the request is already scoped
-// to specific campaigns/item_groups, nor at creative (item_id) level.
-export async function fetchReport(
-  token: string,
-  advertiser_id: string,
-  store_id: string,
-  start: string,
-  end: string,
-  dimensions: string[],
-  extraFilter: Record<string, unknown> = {},
-  metrics?: string[],
-  _ttGet: typeof ttGet = ttGet,
-  _ensureTime?: TimeBudgetChecker,
-): Promise<RawRow[]> {
-  const out: RawRow[] = [];
-  const seen = new Set<string>();
-  let page = 1;
-  const page_size = 1000;
-  const selectedMetrics = metrics ?? (dimensions.includes("item_id")
-    ? [
-        "creative_delivery_status", "cost", "orders", "gross_revenue",
-        "product_impressions", "product_clicks", "currency",
-        "tt_account_name", "tt_account_authorization_type", "shop_content_type",
-        "ad_video_view_rate_2s", "ad_video_view_rate_6s",
-        "ad_video_view_rate_p25", "ad_video_view_rate_p50",
-        "ad_video_view_rate_p75", "ad_video_view_rate_p100",
-      ]
-    : ["cost", "orders", "gross_revenue"]);
-  let activeMetrics = [...selectedMetrics];
-  const filtering = JSON.stringify({ ...extraFilter });
-  for (let i = 0; i < 100; i++) {
-    _ensureTime?.();
-    const params: Record<string, string> = {
-      advertiser_id,
-      store_ids: JSON.stringify([store_id]),
-      dimensions: JSON.stringify(dimensions),
-      metrics: JSON.stringify(activeMetrics),
-      start_date: start,
-      end_date: end,
-      page: String(page),
-      page_size: String(page_size),
-      filtering,
-    };
-    let data: Record<string, unknown>;
-    try {
-      data = await _ttGet(token, "/gmv_max/report/get/", params, undefined, undefined, _ensureTime);
-    } catch (err) {
-      const msg = (err as Error).message ?? "";
-      const m = msg.match(/Invalid metric\(s\):\s*'\[([^\]]+)\]'/);
-      if (m) {
-        const bad = m[1].split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
-        const next = activeMetrics.filter((x) => !bad.includes(x));
-        if (next.length && next.length < activeMetrics.length) {
-          activeMetrics = next;
-          continue; // retry same page with reduced metrics
-        }
-      }
-      throw err;
-    }
-    const list = (data.list ?? []) as RawRow[];
-    for (const row of list) {
-      const key = JSON.stringify((row.dimensions ?? row) as Record<string, unknown>);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(row);
-    }
-    const pi = (data.page_info ?? {}) as Record<string, unknown>;
-    const totalPage = Number(pi.total_page ?? 0);
-    const total = Number(pi.total_number ?? 0);
-    if (list.length === 0) break;
-    if (totalPage > 0 && page >= totalPage) break;
-    if (!totalPage && total > 0 && page * page_size >= total) break;
-    page++;
-  }
-  return out;
 }
 
 Deno.serve(async (req) => {
