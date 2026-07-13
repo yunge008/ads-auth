@@ -409,7 +409,7 @@ export function attributeRows(rows: AttrInputRow[], ctx: AttrContext): AttrRunRe
   const newAliasMap = new Map<string, AliasRecord>();
   for (const [scoped, byBd] of votes) {
     if (ctx.manualAlias.has(scoped)) continue;
-    const { country, normalizedName: norm } = splitIdentityKey(scoped);
+    const { country: aliasCountry, normalizedName: norm } = splitIdentityKey(scoped);
     const bds = Array.from(byBd.keys());
     const display = displayByNorm.get(scoped) ?? norm;
     if (bds.length > 1) {

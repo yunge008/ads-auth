@@ -1,0 +1,1 @@
+REVOKE EXECUTE ON FUNCTION public.gmv_attr_monthly_agg(date, date, integer, integer) FROM anon, authenticated;
