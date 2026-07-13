@@ -45,10 +45,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
         <nav className="flex-1 p-3 space-y-1">
           {mainTabs.map((item) => {
-            const active =
-              item.to === "/"
-                ? location.pathname === "/"
-                : location.pathname.startsWith(item.to);
+            const active = tabByPath(location.pathname)?.key === item.key;
             const Icon = item.icon;
             return (
               <Link

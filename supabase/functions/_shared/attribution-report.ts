@@ -232,7 +232,22 @@ export type AttributionReport = {
   totals: { gmv: number; cost: number; orders: number; rows: number };
 };
 
-export type TargetMap = Map<string, number>; // `${staff}|${role}` → target_usd
+export type TargetMap = Map<string, number>; // `${staff}|${role}` ? target_usd
+export type ExchangeRateMap = Map<string, number>; // currency ? USD rate
+
+/** Load enabled front-end maintained USD conversion rates for the calculation. */
+export async function loadExchangeRates(db: SupabaseClient): Promise<ExchangeRateMap> {
+  const rows = await pageAll<{ currency: string; usd_rate: number; enabled: boolean }>((f, t) =>
+    db.from("gmv_exchange_rates").select("currency, usd_rate, enabled").eq("enabled", true).range(f, t),
+  );
+  const rates: ExchangeRateMap = new Map([["USD", 1]]);
+  for (const row of rows) {
+    const rate = Number(row.usd_rate);
+    if (row.currency && Number.isFinite(rate) && rate > 0) rates.set(row.currency.toUpperCase(), rate);
+  }
+  return rates;
+}
+
 
 export async function loadTargets(db: SupabaseClient, month: string): Promise<TargetMap> {
   const rows = await pageAll<{ staff_name: string; role: string; target_usd: number }>((f, t) =>
