@@ -450,7 +450,7 @@ function GmvDailyReport({ advertisers, reportRef }: { advertisers: AdvertiserRow
       setCount(r.count ?? 0);
     } catch (e) { toast.error(`加载失败：${(e as Error).message}`); }
     finally { setLoading(false); }
-  }, [start, end, country, vid, page, ago7, today]);
+  }, [start, end, country, page, ago7, today]);
 
   React.useEffect(() => { reload(); }, [reload]);
   React.useEffect(() => { reportRef.current.reload = reload; }, [reload, reportRef]);
