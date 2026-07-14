@@ -156,18 +156,23 @@ export async function persistRunArtifacts(db: SupabaseClient, result: AttrRunRes
   let aliases = 0;
   if (result.newAliases.length) {
     // 双保险：MANUAL 行永不被自动覆盖（引擎已跳过，再查一次防并发写入）
-    const norms = result.newAliases.map((a) => a.aliasNorm);
+    const aliasByKey = new Map<string, NewAlias>();
+    for (const a of result.newAliases) {
+      aliasByKey.set(`${identityKey(a.country, a.aliasNorm)}\u001fVID_INFERRED`, a);
+    }
+    const aliasesToPersist = Array.from(aliasByKey.values());
+    const norms = Array.from(new Set(aliasesToPersist.map((a) => a.aliasNorm)));
     const manualNorms = new Set<string>();
     for (let i = 0; i < norms.length; i += 500) {
       const { data, error } = await db
         .from("creator_alias")
-  .select("alias_norm, country")
+        .select("alias_norm, country")
         .eq("source", "MANUAL")
         .in("alias_norm", norms.slice(i, i + 500));
       if (error) throw new Error(error.message);
       for (const r of (data ?? []) as { alias_norm: string; country: string }[]) manualNorms.add(identityKey(r.country, r.alias_norm));
     }
-    const rows = result.newAliases
+    const rows = aliasesToPersist
       .filter((a) => !manualNorms.has(identityKey(a.country, a.aliasNorm)))
       .map((a: NewAlias) => ({
         alias_norm: a.aliasNorm,
@@ -187,14 +192,25 @@ export async function persistRunArtifacts(db: SupabaseClient, result: AttrRunRes
 
   if (result.reviews.length) {
     const now = new Date().toISOString();
-    const rows = result.reviews.map((r: ReviewItem) => ({
-      review_key: r.reviewKey,
-      review_type: r.type,
-      subject: r.subject,
-      detail: r.detail,
-      default_resolution: r.defaultResolution,
-      last_seen_at: now,
-    }));
+    const reviewByKey = new Map<string, {
+      review_key: string;
+      review_type: ReviewItem["type"];
+      subject: string;
+      detail: unknown;
+      default_resolution: string;
+      last_seen_at: string;
+    }>();
+    for (const r of result.reviews) {
+      reviewByKey.set(r.reviewKey, {
+        review_key: r.reviewKey,
+        review_type: r.type,
+        subject: r.subject,
+        detail: r.detail,
+        default_resolution: r.defaultResolution,
+        last_seen_at: now,
+      });
+    }
+    const rows = Array.from(reviewByKey.values());
     for (let i = 0; i < rows.length; i += 500) {
       // onConflict 只更新 payload 内字段：manual_bd / status / first_seen_at 保持不动
       const { error } = await db.from("attribution_review").upsert(rows.slice(i, i + 500), { onConflict: "review_key" });

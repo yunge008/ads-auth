@@ -450,11 +450,11 @@ export function attributeRows(rows: AttrInputRow[], ctx: AttrContext): AttrRunRe
       });
       continue;
     }
-    // 站点：投票 VID 登记的国家（取任一）
+    // 站点：优先使用投票时的行站点，兜底取 VID 登记站点。
     const anyVid = vids[0];
-    const country = ctx.vidRegs.get(anyVid)?.find((r) => r.staff === bd)?.country ?? "";
+    const country = aliasCountry || ctx.vidRegs.get(anyVid)?.find((r) => r.staff === bd)?.country ?? "";
     newAliases.push({ aliasNorm: norm, aliasDisplay: display, bd, country, evidenceVids: vids });
-    newAliasMap.set(norm, { bd, country });
+    newAliasMap.set(scoped, { bd, country });
   }
 
   // ---- Pass 2：昵称路径（仅 BD）----

@@ -225,7 +225,7 @@ Deno.serve(async (req) => {
       const n = nickOwnerByKey.get(identityKey(h.country, h.matchKey));
       if (n && n.ownerBd !== h.ownerBd) {
         reviews.push({
-          reviewKey: `KEYTYPE:${h.matchKey}`,
+          reviewKey: `KEYTYPE:${identityKey(h.country, h.matchKey)}`,
           type: "KEYTYPE_CONFLICT",
           subject: n.displayName || h.displayName,
           detail: { matchKey: h.matchKey, nicknameOwner: n.ownerBd, handleOwner: h.ownerBd },
