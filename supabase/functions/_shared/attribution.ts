@@ -452,7 +452,7 @@ export function attributeRows(rows: AttrInputRow[], ctx: AttrContext): AttrRunRe
     }
     // 站点：优先使用投票时的行站点，兜底取 VID 登记站点。
     const anyVid = vids[0];
-    const country = aliasCountry || ctx.vidRegs.get(anyVid)?.find((r) => r.staff === bd)?.country ?? "";
+    const country = aliasCountry || (ctx.vidRegs.get(anyVid)?.find((r) => r.staff === bd)?.country ?? "");
     newAliases.push({ aliasNorm: norm, aliasDisplay: display, bd, country, evidenceVids: vids });
     newAliasMap.set(scoped, { bd, country });
   }
