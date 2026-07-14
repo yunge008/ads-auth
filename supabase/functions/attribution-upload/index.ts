@@ -18,6 +18,7 @@ import {
 import {
   aggregateResults,
   loadAttrContext,
+  loadExchangeRates,
   loadStaffMeta,
   loadTargets,
   monthRange,
@@ -283,11 +284,12 @@ Deno.serve(async (req) => {
       }
 
       const pairs = inputs.map((input) => ({ input, result: resultByKey.get(input.key)! }));
-      const [targets, staffMeta] = await Promise.all([loadTargets(db, upload.month), loadStaffMeta(db)]);
+      const [targets, exchangeRates, staffMeta] = await Promise.all([loadTargets(db, upload.month), loadExchangeRates(db), loadStaffMeta(db)]);
       const summary = aggregateResults(pairs, {
         period: { start: upload.period_start ?? "", end: upload.period_end ?? "" },
         month: upload.month,
         targets,
+        exchangeRates,
         staffMeta,
       });
 
@@ -337,9 +339,9 @@ Deno.serve(async (req) => {
           const rows = await fetchAllRows(db, u.id);
           allPairs.push(...storedPairs(u.id, u.country, rows));
         }
-        const [targets, staffMeta] = await Promise.all([loadTargets(db, month), loadStaffMeta(db)]);
+        const [targets, exchangeRates, staffMeta] = await Promise.all([loadTargets(db, month), loadExchangeRates(db), loadStaffMeta(db)]);
         const { start, end } = monthRange(month);
-        const summary = aggregateResults(allPairs, { period: { start, end }, month, targets, staffMeta });
+        const summary = aggregateResults(allPairs, { period: { start, end }, month, targets, exchangeRates, staffMeta });
         return json({
           summary,
           uploads,
@@ -350,11 +352,12 @@ Deno.serve(async (req) => {
       const upload = await getUpload(db, uploadId);
       const rows = await fetchAllRows(db, uploadId);
       const pairs = storedPairs(uploadId, upload.country, rows);
-      const [targets, staffMeta] = await Promise.all([loadTargets(db, upload.month), loadStaffMeta(db)]);
+      const [targets, exchangeRates, staffMeta] = await Promise.all([loadTargets(db, upload.month), loadExchangeRates(db), loadStaffMeta(db)]);
       const summary = aggregateResults(pairs, {
         period: { start: upload.period_start ?? "", end: upload.period_end ?? "" },
         month: upload.month,
         targets,
+        exchangeRates,
         staffMeta,
       });
       return json({
