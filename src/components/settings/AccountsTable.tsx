@@ -28,6 +28,8 @@ import {
 } from "@/lib/store";
 import { invokeFn } from "@/lib/api";
 
+const TIKTOK_REDIRECT_URI = "https://ads-auth.lovable.app/oauth/tiktok/callback";
+
 export function AccountsTable() {
   const { advertisers } = useBCAdvertisers();
   const { connections: conns, countries, shops, setCountries, setShops } = useConnections();
@@ -62,10 +64,9 @@ export function AccountsTable() {
     }
     setConnecting(true);
     try {
-      const redirectUri = `${window.location.origin}/oauth/tiktok/callback`;
       const data = await invokeFn<{ authorize_url: string }>("tiktok-oauth-init", {
         label,
-        redirect_uri: redirectUri,
+        redirect_uri: TIKTOK_REDIRECT_URI,
       });
       window.open(data.authorize_url, "_blank", "noopener");
       setConnecting(false);
@@ -367,7 +368,7 @@ export function AccountsTable() {
               给本次授权起个标签（用于区分多个 BC），点确定会跳转到 TikTok 授权页。
               <br />
               <span className="text-xs">
-                请先在 TikTok 开发者后台把 <code className="font-mono">{`${typeof window !== "undefined" ? window.location.origin : ""}/oauth/tiktok/callback`}</code> 加入 Advertiser Redirect URLs。
+                TikTok 回调地址固定为 <code className="font-mono">{TIKTOK_REDIRECT_URI}</code>，请确保它已加入 Advertiser Redirect URLs。
               </span>
             </DialogDescription>
           </DialogHeader>
