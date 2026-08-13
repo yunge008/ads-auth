@@ -1,9 +1,10 @@
 // List/update/delete tiktok_connections and per-advertiser country mappings.
 // Ops:
-//   { op: "list" } -> { connections: [...], countries: {advertiser_id: country} }
+//   { op: "list" } -> { connections: [...], countries: {advertiser_id: country}, shops: {...}, active: {advertiser_id: boolean} }
 //   { op: "delete", id }                  -> { ok }
 //   { op: "update", id, label }           -> { ok }
 //   { op: "set_country", advertiser_id, country }  // empty country to clear
+//   { op: "set_active", advertiser_id, active }    // 国家唯一性只在 active=true 的广告户间强制
 import { corsHeaders } from "../_shared/feishu.ts";
 import { admin, checkAdminPasscode } from "../_shared/auth.ts";
 
@@ -19,6 +20,7 @@ Deno.serve(async (req) => {
       country?: string;
       shop_id?: string;
       shop_name?: string;
+      active?: boolean;
     };
 
     if (body.op === "delete") {
@@ -55,18 +57,19 @@ Deno.serve(async (req) => {
           .eq("advertiser_id", aid);
         if (error) throw new Error(error.message);
       } else {
-        // Enforce country uniqueness: one country -> one advertiser
+        // Enforce country uniqueness only among active advertisers; inactive ones may share a country.
         const { data: occupant, error: qErr } = await admin()
           .from("advertiser_countries")
-          .select("advertiser_id")
+          .select("advertiser_id, active")
           .eq("country", country)
           .neq("advertiser_id", aid)
+          .eq("active", true)
           .maybeSingle();
         if (qErr) throw new Error(qErr.message);
         if (occupant) {
           return new Response(
             JSON.stringify({
-              error: `国家「${country}」已被广告户 ${occupant.advertiser_id} 占用，请先清空对方再设置`,
+              error: `国家「${country}」已被启用中的广告户 ${occupant.advertiser_id} 占用，请先停用对方再设置`,
             }),
             { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
           );
@@ -76,6 +79,48 @@ Deno.serve(async (req) => {
           .upsert({ advertiser_id: aid, country }, { onConflict: "advertiser_id" });
         if (error) throw new Error(error.message);
       }
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (body.op === "set_active") {
+      const aid = (body.advertiser_id ?? "").trim();
+      if (!aid) throw new Error("advertiser_id 必填");
+      if (typeof body.active !== "boolean") throw new Error("active 必填且须为布尔值");
+
+      const { data: existing, error: exErr } = await admin()
+        .from("advertiser_countries")
+        .select("country")
+        .eq("advertiser_id", aid)
+        .maybeSingle();
+      if (exErr) throw new Error(exErr.message);
+      if (!existing) throw new Error("请先设置该广告户的国家，再启用/停用");
+
+      if (body.active) {
+        const { data: occupant, error: qErr } = await admin()
+          .from("advertiser_countries")
+          .select("advertiser_id")
+          .eq("country", existing.country)
+          .neq("advertiser_id", aid)
+          .eq("active", true)
+          .maybeSingle();
+        if (qErr) throw new Error(qErr.message);
+        if (occupant) {
+          return new Response(
+            JSON.stringify({
+              error: `国家「${existing.country}」已被启用中的广告户 ${occupant.advertiser_id} 占用，请先停用对方再启用`,
+            }),
+            { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+      }
+
+      const { error } = await admin()
+        .from("advertiser_countries")
+        .update({ active: body.active })
+        .eq("advertiser_id", aid);
+      if (error) throw new Error(error.message);
       return new Response(JSON.stringify({ ok: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -112,18 +157,20 @@ Deno.serve(async (req) => {
         .from("tiktok_connections")
         .select("id, label, bc_id, advertiser_ids, expires_at, created_at, updated_at")
         .order("created_at", { ascending: false }),
-      admin().from("advertiser_countries").select("advertiser_id, country, shop_id, shop_name"),
+      admin().from("advertiser_countries").select("advertiser_id, country, shop_id, shop_name, active"),
     ]);
     if (e1) throw new Error(e1.message);
     if (e2) throw new Error(e2.message);
     const countryMap: Record<string, string> = {};
     const shopMap: Record<string, { shop_id: string | null; shop_name: string | null }> = {};
-    for (const r of (countries ?? []) as { advertiser_id: string; country: string; shop_id: string | null; shop_name: string | null }[]) {
+    const activeMap: Record<string, boolean> = {};
+    for (const r of (countries ?? []) as { advertiser_id: string; country: string; shop_id: string | null; shop_name: string | null; active: boolean }[]) {
       countryMap[r.advertiser_id] = r.country;
       shopMap[r.advertiser_id] = { shop_id: r.shop_id, shop_name: r.shop_name };
+      activeMap[r.advertiser_id] = r.active;
     }
     return new Response(
-      JSON.stringify({ connections: conns ?? [], countries: countryMap, shops: shopMap }),
+      JSON.stringify({ connections: conns ?? [], countries: countryMap, shops: shopMap, active: activeMap }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {
