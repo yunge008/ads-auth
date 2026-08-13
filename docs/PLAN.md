@@ -25,7 +25,7 @@
 
 ## 已完成
 
-- ✅ 2026-08-13 [lovable] 修复 TikTok 授权回调地址随预览域名变化的问题：授权入口固定使用已登记的正式回调 `https://ads-auth.lovable.app/oauth/tiktok/callback`。
+- ✅ 2026-08-13 [lovable] 修复 TikTok 授权回调地址随预览域名变化的问题：前端和 `tiktok-oauth-init` 云函数均固定使用已登记的正式回调 `https://ads-auth.lovable.app/oauth/tiktok/callback`，旧前端传入的预览地址也不会被采用。
 
 - ✅ 2026-07-13 [codex] GMV Max 日报移除 VID 查找，仅保留日期/国家聚合；「数据行数」改为「素材数（去重 VID）」。
 
