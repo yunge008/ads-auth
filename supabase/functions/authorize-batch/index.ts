@@ -60,8 +60,12 @@ Deno.serve(async (req) => {
     const { items } = (await req.json()) as { items: Item[] };
     if (!items?.length) throw new Error("items 不能为空");
 
-    const { data: conns, error } = await admin().from("tiktok_connections").select("*");
+    const [{ data: conns, error }, { data: acRows, error: acErr }] = await Promise.all([
+      admin().from("tiktok_connections").select("*"),
+      admin().from("advertiser_countries").select("advertiser_id, active"),
+    ]);
     if (error) throw new Error(error.message);
+    if (acErr) throw new Error(acErr.message);
     const rows = (conns ?? []) as ConnRow[];
 
     // advertiser_id -> token (first match wins)
@@ -70,6 +74,12 @@ Deno.serve(async (req) => {
       for (const id of c.advertiser_ids) {
         if (!tokenByAdv.has(id)) tokenByAdv.set(id, c.access_token);
       }
+    }
+
+    // 防御性检查：已停用的广告户不再执行授权（防止浏览器缓存的旧素材列表在停用后仍被误推送）
+    const activeByAdv = new Map<string, boolean>();
+    for (const r of (acRows ?? []) as { advertiser_id: string; active: boolean }[]) {
+      activeByAdv.set(r.advertiser_id, r.active);
     }
 
     // Group by advertiser_id: different advertisers run in parallel,
@@ -88,6 +98,16 @@ Deno.serve(async (req) => {
     async function processAdv(advId: string) {
       const list = byAdv.get(advId)!;
       const tok = tokenByAdv.get(advId);
+      if (activeByAdv.get(advId) === false) {
+        for (const it of list) {
+          results.push({
+            id: it.id,
+            status: "API错误",
+            error_message: `广告户 ${advId} 已停用，请先在设置中启用后再授权`,
+          });
+        }
+        return;
+      }
       for (const it of list) {
         if (!tok) {
           results.push({

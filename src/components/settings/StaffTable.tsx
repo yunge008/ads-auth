@@ -85,6 +85,7 @@ export function StaffTable() {
                 <TableHead>姓名</TableHead>
                 <TableHead>sheet名</TableHead>
                 <TableHead className="w-24">角色</TableHead>
+                <TableHead className="w-40">飞书表格</TableHead>
                 <TableHead className="w-16">启用</TableHead>
                 <TableHead className="w-20 text-right">操作</TableHead>
               </TableRow>
@@ -92,7 +93,7 @@ export function StaffTable() {
             <TableBody>
               {rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="h-20 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={6} className="h-20 text-center text-sm text-muted-foreground">
                     暂无人员，点击「新增」添加
                   </TableCell>
                 </TableRow>
@@ -138,6 +139,11 @@ export function StaffTable() {
                           <option value="BD">BD</option>
                           <option value="EDITOR">剪辑</option>
                         </select>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {(row.role ?? "BD") === "BD"
+                          ? "主表格（执行授权+归因）"
+                          : "剪辑表格（仅归因）"}
                       </TableCell>
                       <TableCell>
                         <Switch
@@ -197,7 +203,7 @@ export function StaffTable() {
         <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
           <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
           <span>
-            提示：sheet名必须与飞书表格中的 Tab 名称完全一致，否则无法读取对应人员的数据。
+            提示：sheet名必须与对应飞书表格（见「飞书表格」列）中的 Tab 名称完全一致，否则无法读取对应人员的数据。「执行授权」只读取 BD 角色的主表格，剪辑角色仅用于归因。
           </span>
         </div>
 

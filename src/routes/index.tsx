@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -194,6 +195,16 @@ function AuthorizePage() {
   const { materials, setMaterials } = useMaterials();
   const [loading, setLoading] = React.useState(false);
   const [logRefreshKey, setLogRefreshKey] = React.useState(0);
+  // 「待授权账户」面板开关：与素材列表筛选是 AND 关系，默认每次拉取素材后全部开启
+  const [enabledAdvertiserIds, setEnabledAdvertiserIds] = React.useState<Set<string>>(new Set());
+  const toggleAdvertiserEnabled = (id: string) => {
+    setEnabledAdvertiserIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   // filters
   const [fStaff, setFStaff] = React.useState<string[]>([]);
@@ -305,9 +316,10 @@ function AuthorizePage() {
 
 
   const handleFetch = async (includeDone = false) => {
-    const activeStaff = staff.filter((s) => s.active);
+    // 执行授权只读 BD 角色的建联表；剪辑角色的素材不需要授权码授权，不参与拉取。
+    const activeStaff = staff.filter((s) => s.active && (s.role ?? "BD") === "BD");
     if (activeStaff.length === 0) {
-      toast.error("请先在「设置」中配置启用的人员");
+      toast.error("请先在「设置」中配置启用的 BD 人员");
       return;
     }
     setLoading(true);
@@ -329,6 +341,10 @@ function AuthorizePage() {
           a.row_number - b.row_number,
       );
       setMaterials(sorted);
+      // 待授权账户开关：每次重新拉取后默认全部开启
+      setEnabledAdvertiserIds(
+        new Set(list.filter((m) => m.advertiser_id).map((m) => m.advertiser_id as string)),
+      );
       if (data?.missing_sheets?.length) {
         toast.warning(`以下 sheet 未找到：${data.missing_sheets.join(", ")}`);
       }
@@ -346,10 +362,11 @@ function AuthorizePage() {
       (m) =>
         (m.status === "待授权" || m.status === "API错误") &&
         m.advertiser_id &&
-        m.auth_code,
+        m.auth_code &&
+        enabledAdvertiserIds.has(m.advertiser_id),
     );
     if (targets.length === 0) {
-      toast.error("没有可执行授权的素材（待授权 / API错误）");
+      toast.error("没有可执行授权的素材（待授权 / API错误，且账户已在「待授权账户」中开启）");
       return;
     }
     setMaterials((prev) =>
@@ -691,12 +708,13 @@ function AuthorizePage() {
                     <TableHead className="w-20">国家</TableHead>
                     <TableHead>广告户名称</TableHead>
                     <TableHead>广告户ID</TableHead>
+                    <TableHead className="w-16">启用</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {pendingAccounts.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={3} className="h-20 text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={4} className="h-20 text-center text-sm text-muted-foreground">
                         点击「获取未授权素材」后此处显示匹配到的广告户
                       </TableCell>
                     </TableRow>
@@ -706,6 +724,12 @@ function AuthorizePage() {
                         <TableCell>{p.country}</TableCell>
                         <TableCell>{p.advertiser_name}</TableCell>
                         <TableCell className="font-mono text-xs">{p.advertiser_id}</TableCell>
+                        <TableCell>
+                          <Switch
+                            checked={enabledAdvertiserIds.has(p.advertiser_id)}
+                            onCheckedChange={() => toggleAdvertiserEnabled(p.advertiser_id)}
+                          />
+                        </TableCell>
                       </TableRow>
                     ))
                   )}
@@ -834,6 +858,7 @@ function AuthorizePage() {
                 counts={statusCounts}
               />
             </div>
+            <div className="flex flex-col items-end gap-1">
             <div className="flex items-end gap-2">
               <Button size="sm" onClick={handleAuthorize}>
                 <Send className="h-4 w-4 mr-1.5" />
@@ -851,6 +876,10 @@ function AuthorizePage() {
                 <Copy className="h-4 w-4 mr-1.5" />
                 复制授权码
               </Button>
+            </div>
+            <span className="text-xs text-muted-foreground">
+              执行授权仅作用于：当前筛选可见 <b>且</b> 「待授权账户」中已开启的素材
+            </span>
             </div>
           </div>
         </CardHeader>

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link2, Unlink, Check, X, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import {
   Card,
   CardContent,
@@ -32,7 +33,7 @@ const TIKTOK_REDIRECT_URI = "https://ads-auth.lovable.app/oauth/tiktok/callback"
 
 export function AccountsTable() {
   const { advertisers } = useBCAdvertisers();
-  const { connections: conns, countries, shops, setCountries, setShops } = useConnections();
+  const { connections: conns, countries, shops, active: activeMap, setCountries, setShops, setActive } = useConnections();
   const [connectOpen, setConnectOpen] = useState(false);
   const [connectLabel, setConnectLabel] = useState("");
   const [connecting, setConnecting] = useState(false);
@@ -136,6 +137,16 @@ export function AccountsTable() {
     }
   };
 
+  const handleToggleActive = async (advertiser_id: string, next: boolean) => {
+    try {
+      await invokeFn("tiktok-connections", { op: "set_active", advertiser_id, active: next });
+      toast.success(next ? "已启用" : "已停用");
+      setActive((prev) => ({ ...prev, [advertiser_id]: next }));
+    } catch (e) {
+      toast.error(`操作失败：${(e as Error).message}`);
+    }
+  };
+
   const advNameById = new Map(advertisers.map((a) => [a.advertiser_id, a.advertiser_name]));
   const flatRows = conns.flatMap((c) =>
     (c.advertiser_ids.length ? c.advertiser_ids : [""]).map((aid, idx) => ({
@@ -146,6 +157,7 @@ export function AccountsTable() {
       country: aid ? (countries[aid] ?? "") : "",
       shop_id: aid ? (shops[aid]?.shop_id ?? "") : "",
       shop_name: aid ? (shops[aid]?.shop_name ?? "") : "",
+      is_active: aid ? (activeMap[aid] ?? true) : true,
       created_at: c.created_at,
       is_first: idx === 0,
     })),
@@ -183,13 +195,14 @@ export function AccountsTable() {
                   <TableHead className="w-48">店铺名</TableHead>
                   <TableHead className="w-44">店铺ID</TableHead>
                   <TableHead className="w-40">授权时间</TableHead>
+                  <TableHead className="w-16">启用</TableHead>
                   <TableHead className="w-16 text-right">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {flatRows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="h-16 text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={9} className="h-16 text-center text-sm text-muted-foreground">
                       尚无连接，点「连接 TikTok」开始首次授权
                     </TableCell>
                   </TableRow>
@@ -338,6 +351,16 @@ export function AccountsTable() {
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {r.is_first ? new Date(r.created_at).toLocaleString() : null}
+                      </TableCell>
+                      <TableCell>
+                        {r.advertiser_id && (
+                          <Switch
+                            checked={r.is_active}
+                            disabled={!r.country}
+                            title={!r.country ? "请先设置国家" : undefined}
+                            onCheckedChange={(v) => handleToggleActive(r.advertiser_id, v)}
+                          />
+                        )}
                       </TableCell>
                       <TableCell className="text-right">
                         {r.is_first && (

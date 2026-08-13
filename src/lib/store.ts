@@ -130,19 +130,22 @@ type ConnectionsState = {
   connections: Connection[];
   countries: Record<string, string>;
   shops: Record<string, ShopInfo>;
+  active: Record<string, boolean>;
 };
-const connStore = createStore<ConnectionsState>({ connections: [], countries: {}, shops: {} });
+const connStore = createStore<ConnectionsState>({ connections: [], countries: {}, shops: {}, active: {} });
 let connLoaded = false;
 export async function refreshConnections() {
   const data = await invokeFn<{
     connections: Connection[];
     countries: Record<string, string>;
     shops?: Record<string, ShopInfo>;
+    active?: Record<string, boolean>;
   }>("tiktok-connections", { op: "list" });
   connStore.set({
     connections: data?.connections ?? [],
     countries: data?.countries ?? {},
     shops: data?.shops ?? {},
+    active: data?.active ?? {},
   });
   connLoaded = true;
 }
@@ -150,7 +153,7 @@ export function useConnections() {
   const state = useSyncExternalStore(
     connStore.subscribe,
     connStore.get,
-    () => ({ connections: [], countries: {}, shops: {} }) as ConnectionsState,
+    () => ({ connections: [], countries: {}, shops: {}, active: {} }) as ConnectionsState,
   );
   useEffect(() => {
     if (!connLoaded) {
@@ -171,7 +174,13 @@ export function useConnections() {
     },
     [],
   );
-  return { ...state, setCountries, setShops };
+  const setActive = useCallback(
+    (updater: (prev: Record<string, boolean>) => Record<string, boolean>) => {
+      connStore.set((prev) => ({ ...prev, active: updater(prev.active) }));
+    },
+    [],
+  );
+  return { ...state, setCountries, setShops, setActive };
 }
 
 // ============== Global materials store ==============

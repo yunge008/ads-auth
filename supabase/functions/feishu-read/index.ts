@@ -97,7 +97,7 @@ Deno.serve(async (req) => {
 
     // Load advertiser→country map + advertiser names from DB
     const [{ data: acRows, error: acErr }, { data: connRows, error: connErr }] = await Promise.all([
-      admin().from("advertiser_countries").select("advertiser_id, country"),
+      admin().from("advertiser_countries").select("advertiser_id, country, active"),
       admin().from("tiktok_connections").select("advertiser_ids"),
     ]);
     if (acErr) throw new Error(acErr.message);
@@ -106,10 +106,11 @@ Deno.serve(async (req) => {
     for (const r of (connRows ?? []) as { advertiser_ids: string[] }[]) {
       for (const id of r.advertiser_ids) knownAdv.add(id);
     }
-    // country -> [{advertiser_id}]
+    // country -> [{advertiser_id}]，只取启用中的广告户（停用的不参与匹配）
     const accByCountry = new Map<string, { advertiser_id: string }[]>();
-    for (const r of (acRows ?? []) as { advertiser_id: string; country: string }[]) {
+    for (const r of (acRows ?? []) as { advertiser_id: string; country: string; active: boolean }[]) {
       if (!knownAdv.has(r.advertiser_id)) continue;
+      if (!r.active) continue;
       const key = r.country.trim();
       const arr = accByCountry.get(key) ?? [];
       arr.push({ advertiser_id: r.advertiser_id });
