@@ -57,22 +57,33 @@ Deno.serve(async (req) => {
           .eq("advertiser_id", aid);
         if (error) throw new Error(error.message);
       } else {
-        // Enforce country uniqueness only among active advertisers; inactive ones may share a country.
-        const { data: occupant, error: qErr } = await admin()
+        // 唯一性只在「本广告户自身是启用状态」时才需要检查——已停用的广告户改国家不会造成
+        // 同一国家同时存在两个启用广告户，允许随意共享。新建行（还没有 advertiser_countries 记录）
+        // upsert 会按表默认值以 active=true 生效，等同视为即将启用，同样需要校验。
+        const { data: aidRow } = await admin()
           .from("advertiser_countries")
-          .select("advertiser_id, active")
-          .eq("country", country)
-          .neq("advertiser_id", aid)
-          .eq("active", true)
+          .select("active")
+          .eq("advertiser_id", aid)
           .maybeSingle();
-        if (qErr) throw new Error(qErr.message);
-        if (occupant) {
-          return new Response(
-            JSON.stringify({
-              error: `国家「${country}」已被启用中的广告户 ${occupant.advertiser_id} 占用，请先停用对方再设置`,
-            }),
-            { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-          );
+        const aidIsActive = aidRow ? aidRow.active : true;
+
+        if (aidIsActive) {
+          const { data: occupant, error: qErr } = await admin()
+            .from("advertiser_countries")
+            .select("advertiser_id, active")
+            .eq("country", country)
+            .neq("advertiser_id", aid)
+            .eq("active", true)
+            .maybeSingle();
+          if (qErr) throw new Error(qErr.message);
+          if (occupant) {
+            return new Response(
+              JSON.stringify({
+                error: `国家「${country}」已被启用中的广告户 ${occupant.advertiser_id} 占用，请先停用对方再设置`,
+              }),
+              { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+            );
+          }
         }
         const { error } = await admin()
           .from("advertiser_countries")
