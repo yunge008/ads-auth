@@ -193,7 +193,8 @@ function AuthorizePage() {
   const { advertisers } = useBCAdvertisers();
   const { staff } = useStaff();
   const { materials, setMaterials } = useMaterials();
-  const [loading, setLoading] = React.useState(false);
+  const [loadingMode, setLoadingMode] = React.useState<"all" | "pending" | null>(null);
+  const loading = loadingMode !== null;
   const [logRefreshKey, setLogRefreshKey] = React.useState(0);
   const [authorizing, setAuthorizing] = React.useState(false);
   // 本次执行授权覆盖的素材 id 集合；执行完毕后不清空，保留到下一次点「执行授权」再覆盖，
@@ -326,7 +327,7 @@ function AuthorizePage() {
       toast.error("请先在「设置」中配置启用的 BD 人员");
       return;
     }
-    setLoading(true);
+    setLoadingMode(includeDone ? "all" : "pending");
     try {
       const data = await invokeFn<{ materials: Material[]; missing_sheets?: string[] }>("feishu-read", {
         staff: activeStaff.map((s) => ({ name: s.name, sheet_name: s.sheet_name })),
@@ -357,7 +358,7 @@ function AuthorizePage() {
     } catch (e) {
       toast.error(`拉取失败：${(e as Error).message}`);
     } finally {
-      setLoading(false);
+      setLoadingMode(null);
     }
   };
 
@@ -580,11 +581,11 @@ function AuthorizePage() {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={() => handleFetch(true)} disabled={loading}>
-            <RotateCw className={cn("h-4 w-4 mr-1.5", loading && "animate-spin")} />
+            <RotateCw className={cn("h-4 w-4 mr-1.5", loadingMode === "all" && "animate-spin")} />
             获取所有素材
           </Button>
           <Button onClick={() => handleFetch(false)} disabled={loading}>
-            <RefreshCw className={cn("h-4 w-4 mr-1.5", loading && "animate-spin")} />
+            <RefreshCw className={cn("h-4 w-4 mr-1.5", loadingMode === "pending" && "animate-spin")} />
             获取未授权素材
           </Button>
         </div>
