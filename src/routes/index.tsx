@@ -196,7 +196,9 @@ function AuthorizePage() {
   const [loading, setLoading] = React.useState(false);
   const [logRefreshKey, setLogRefreshKey] = React.useState(0);
   const [authorizing, setAuthorizing] = React.useState(false);
-  const [authProgress, setAuthProgress] = React.useState<{ done: number; total: number } | null>(null);
+  // 本次执行授权覆盖的素材 id 集合；执行完毕后不清空，保留到下一次点「执行授权」再覆盖，
+  // 这样状态条能一直显示上一次的结果。
+  const [authTargetIds, setAuthTargetIds] = React.useState<Set<string> | null>(null);
   // 「待授权账户」面板开关：与素材列表筛选是 AND 关系，默认每次拉取素材后全部开启
   const [enabledAdvertiserIds, setEnabledAdvertiserIds] = React.useState<Set<string>>(new Set());
   const toggleAdvertiserEnabled = (id: string) => {
@@ -307,7 +309,7 @@ function AuthorizePage() {
   );
 
   // Pagination (50 rows / page)
-  const PAGE_SIZE = 50;
+  const PAGE_SIZE = 20;
   const [page, setPage] = React.useState(1);
   const pageCount = Math.max(1, Math.ceil(visibleMaterials.length / PAGE_SIZE));
   React.useEffect(() => { setPage(1); }, [fStaff, fCountry, fStatus, fVid, fAuth, materials]);
@@ -374,11 +376,11 @@ function AuthorizePage() {
       toast.error("没有可执行授权的素材（待授权 / API错误，且账户已在「待授权账户」中开启）");
       return;
     }
+    const targetIds = new Set(targets.map((t) => t.id));
+    setAuthTargetIds(targetIds);
     setMaterials((prev) =>
       prev.map((m) =>
-        targets.find((t) => t.id === m.id)
-          ? { ...m, status: "授权中", error_message: undefined }
-          : m,
+        targetIds.has(m.id) ? { ...m, status: "授权中", error_message: undefined } : m,
       ),
     );
 
@@ -389,7 +391,6 @@ function AuthorizePage() {
     }
 
     setAuthorizing(true);
-    setAuthProgress({ done: 0, total: targets.length });
 
     const runChunk = async (chunk: Material[]) => {
       try {
@@ -420,8 +421,6 @@ function AuthorizePage() {
         setMaterials((prev) =>
           prev.map((m) => (chunkIds.has(m.id) ? { ...m, status: "API错误", error_message: msg } : m)),
         );
-      } finally {
-        setAuthProgress((prev) => (prev ? { ...prev, done: prev.done + chunk.length } : prev));
       }
     };
 
@@ -435,9 +434,40 @@ function AuthorizePage() {
     await Promise.all(Array.from({ length: Math.min(AUTH_MAX_CONCURRENT, chunks.length) }, worker));
 
     setAuthorizing(false);
-    setAuthProgress(null);
     toast.success(`已处理 ${targets.length} 条`);
   };
+
+  const OTHER_RESULT_STATUSES: MaterialStatus[] = [
+    "代码过期",
+    "代码删除",
+    "代码有误",
+    "代码涉及多素材",
+    "视频不可见",
+    "API错误",
+  ];
+
+  // 本次执行授权的实时状态条：授权中/已授权常驻显示，其余状态有结果才显示。
+  const authStats = React.useMemo(() => {
+    if (!authTargetIds) return null;
+    const counts: Partial<Record<MaterialStatus, number>> = {};
+    for (const m of materials) {
+      if (!authTargetIds.has(m.id)) continue;
+      counts[m.status] = (counts[m.status] ?? 0) + 1;
+    }
+    const pending = counts["授权中"] ?? 0;
+    const done = authTargetIds.size - pending;
+    const leadLabel = authorizing ? "授权中" : "授权完毕";
+    const parts = [
+      `授权中${pending}`,
+      `已授权${counts["已授权"] ?? 0}`,
+      ...OTHER_RESULT_STATUSES.filter((s) => (counts[s] ?? 0) > 0).map((s) => `${s}${counts[s]}`),
+    ];
+    return {
+      total: authTargetIds.size,
+      done,
+      text: `${leadLabel} ${done}/${authTargetIds.size}条，结果：${parts.join("，")}`,
+    };
+  }, [authTargetIds, materials, authorizing]);
 
   const handleWriteback = async () => {
     const WRITE: MaterialStatus[] = [
@@ -890,12 +920,13 @@ function AuthorizePage() {
               />
             </div>
             <div className="flex flex-col items-end gap-1">
+            {authStats && (
+              <div className="text-xs font-medium tabular-nums">{authStats.text}</div>
+            )}
             <div className="flex items-end gap-2">
               <Button size="sm" onClick={handleAuthorize} disabled={authorizing}>
                 <Send className={cn("h-4 w-4 mr-1.5", authorizing && "animate-pulse")} />
-                {authorizing && authProgress
-                  ? `执行授权中 (${authProgress.done}/${authProgress.total})`
-                  : "执行授权"}
+                执行授权
               </Button>
               <Button size="sm" variant="outline" onClick={handleWriteback}>
                 <Upload className="h-4 w-4 mr-1.5" />

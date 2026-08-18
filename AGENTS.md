@@ -37,6 +37,7 @@
 - `.env` 不入库；新增密钥需在 Supabase secrets 配置并在 PLAN.md 注明
 - TikTok API 调用必须复用 `gmv-max-sync` 里的 `ttGet`（限速+退避），不要绕过
 - 不要删除/重写他人「进行中」任务涉及的文件；有疑问在 PLAN.md 任务下留言
+- **每次改动都要更新版本号**：`src/lib/version.ts` 的 `APP_VERSION`，格式 `MMDD.NNN`（MMDD=当天日期，NNN=全局递增序号，不按日期重置，同一天多次改动就继续往上加，不要归零）。Claude / Codex / Lovable 三方改动后都要遵守，不要漏更新。
 
 ## 文档职责
 
