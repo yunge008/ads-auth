@@ -157,7 +157,8 @@ export function AccountsTable() {
       country: aid ? (countries[aid] ?? "") : "",
       shop_id: aid ? (shops[aid]?.shop_id ?? "") : "",
       shop_name: aid ? (shops[aid]?.shop_name ?? "") : "",
-      is_active: aid ? (activeMap[aid] ?? true) : true,
+      // 还没设置国家（advertiser_countries 无记录）默认展示为停用。
+      is_active: aid ? (activeMap[aid] ?? false) : false,
       created_at: c.created_at,
       is_first: idx === 0,
     })),

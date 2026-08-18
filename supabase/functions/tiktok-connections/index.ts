@@ -3,7 +3,7 @@
 //   { op: "list" } -> { connections: [...], countries: {advertiser_id: country}, shops: {...}, active: {advertiser_id: boolean} }
 //   { op: "delete", id }                  -> { ok }
 //   { op: "update", id, label }           -> { ok }
-//   { op: "set_country", advertiser_id, country }  // empty country to clear
+//   { op: "set_country", advertiser_id, country }  // empty country to clear；首次设置默认 active=false
 //   { op: "set_active", advertiser_id, active }    // 国家唯一性只在 active=true 的广告户间强制
 import { corsHeaders } from "../_shared/feishu.ts";
 import { admin, checkAdminPasscode } from "../_shared/auth.ts";
@@ -58,14 +58,15 @@ Deno.serve(async (req) => {
         if (error) throw new Error(error.message);
       } else {
         // 唯一性只在「本广告户自身是启用状态」时才需要检查——已停用的广告户改国家不会造成
-        // 同一国家同时存在两个启用广告户，允许随意共享。新建行（还没有 advertiser_countries 记录）
-        // upsert 会按表默认值以 active=true 生效，等同视为即将启用，同样需要校验。
+        // 同一国家同时存在两个启用广告户，允许随意共享。第一次给广告户设置国家（还没有
+        // advertiser_countries 记录）默认落地为停用状态，需要用户手动打开启用开关，
+        // 所以不需要在这里校验冲突；已有记录的广告户改国家名称，保持原有 active 状态不变。
         const { data: aidRow } = await admin()
           .from("advertiser_countries")
           .select("active")
           .eq("advertiser_id", aid)
           .maybeSingle();
-        const aidIsActive = aidRow ? aidRow.active : true;
+        const aidIsActive = aidRow ? aidRow.active : false;
 
         if (aidIsActive) {
           const { data: occupant, error: qErr } = await admin()
@@ -85,10 +86,19 @@ Deno.serve(async (req) => {
             );
           }
         }
-        const { error } = await admin()
-          .from("advertiser_countries")
-          .upsert({ advertiser_id: aid, country }, { onConflict: "advertiser_id" });
-        if (error) throw new Error(error.message);
+
+        if (aidRow) {
+          const { error } = await admin()
+            .from("advertiser_countries")
+            .update({ country })
+            .eq("advertiser_id", aid);
+          if (error) throw new Error(error.message);
+        } else {
+          const { error } = await admin()
+            .from("advertiser_countries")
+            .insert({ advertiser_id: aid, country, active: false });
+          if (error) throw new Error(error.message);
+        }
       }
       return new Response(JSON.stringify({ ok: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
