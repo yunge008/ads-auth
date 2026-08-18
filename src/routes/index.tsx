@@ -195,6 +195,8 @@ function AuthorizePage() {
   const { materials, setMaterials } = useMaterials();
   const [loading, setLoading] = React.useState(false);
   const [logRefreshKey, setLogRefreshKey] = React.useState(0);
+  const [authorizing, setAuthorizing] = React.useState(false);
+  const [authProgress, setAuthProgress] = React.useState<{ done: number; total: number } | null>(null);
   // 「待授权账户」面板开关：与素材列表筛选是 AND 关系，默认每次拉取素材后全部开启
   const [enabledAdvertiserIds, setEnabledAdvertiserIds] = React.useState<Set<string>>(new Set());
   const toggleAdvertiserEnabled = (id: string) => {
@@ -357,6 +359,9 @@ function AuthorizePage() {
     }
   };
 
+  const AUTH_CHUNK_SIZE = 200;
+  const AUTH_MAX_CONCURRENT = 3;
+
   const handleAuthorize = async () => {
     const targets = visibleMaterials.filter(
       (m) =>
@@ -376,36 +381,62 @@ function AuthorizePage() {
           : m,
       ),
     );
-    try {
-      const data = await invokeFn<{ results: { id: string; status: MaterialStatus; error_message?: string }[] }>(
-        "authorize-batch",
-        {
-          items: targets.map((t) => ({
-            id: t.id,
-            advertiser_id: t.advertiser_id,
-            auth_code: t.auth_code,
-            vid: t.vid,
-          })),
-        },
-      );
-      const byId = new Map<string, { status: MaterialStatus; error_message?: string }>(
-        (data?.results ?? []).map((r) => [r.id, { status: r.status, error_message: r.error_message }]),
-      );
-      setMaterials((prev) =>
-        prev.map((m) => {
-          const r = byId.get(m.id);
-          return r ? { ...m, status: r.status, error_message: r.error_message } : m;
-        }),
-      );
-      toast.success(`已处理 ${targets.length} 条`);
-    } catch (e) {
-      toast.error(`授权失败：${(e as Error).message}`);
-      setMaterials((prev) =>
-        prev.map((m) =>
-          targets.find((t) => t.id === m.id) ? { ...m, status: "待授权" } : m,
-        ),
-      );
+
+    // 大批量分块 + 有限并行提交，避免单次调用跑太久被平台超时掐断（504）。
+    const chunks: Material[][] = [];
+    for (let i = 0; i < targets.length; i += AUTH_CHUNK_SIZE) {
+      chunks.push(targets.slice(i, i + AUTH_CHUNK_SIZE));
     }
+
+    setAuthorizing(true);
+    setAuthProgress({ done: 0, total: targets.length });
+
+    const runChunk = async (chunk: Material[]) => {
+      try {
+        const data = await invokeFn<{ results: { id: string; status: MaterialStatus; error_message?: string }[] }>(
+          "authorize-batch",
+          {
+            items: chunk.map((t) => ({
+              id: t.id,
+              advertiser_id: t.advertiser_id,
+              auth_code: t.auth_code,
+              vid: t.vid,
+            })),
+          },
+        );
+        const byId = new Map<string, { status: MaterialStatus; error_message?: string }>(
+          (data?.results ?? []).map((r) => [r.id, { status: r.status, error_message: r.error_message }]),
+        );
+        setMaterials((prev) =>
+          prev.map((m) => {
+            const r = byId.get(m.id);
+            return r ? { ...m, status: r.status, error_message: r.error_message } : m;
+          }),
+        );
+      } catch (e) {
+        // 整批调用失败（如超时）：标记为「API错误」，可用现有的重试机制单独补跑这一批。
+        const msg = (e as Error).message;
+        const chunkIds = new Set(chunk.map((t) => t.id));
+        setMaterials((prev) =>
+          prev.map((m) => (chunkIds.has(m.id) ? { ...m, status: "API错误", error_message: msg } : m)),
+        );
+      } finally {
+        setAuthProgress((prev) => (prev ? { ...prev, done: prev.done + chunk.length } : prev));
+      }
+    };
+
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < chunks.length) {
+        const chunk = chunks[cursor++];
+        await runChunk(chunk);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(AUTH_MAX_CONCURRENT, chunks.length) }, worker));
+
+    setAuthorizing(false);
+    setAuthProgress(null);
+    toast.success(`已处理 ${targets.length} 条`);
   };
 
   const handleWriteback = async () => {
@@ -860,9 +891,11 @@ function AuthorizePage() {
             </div>
             <div className="flex flex-col items-end gap-1">
             <div className="flex items-end gap-2">
-              <Button size="sm" onClick={handleAuthorize}>
-                <Send className="h-4 w-4 mr-1.5" />
-                执行授权
+              <Button size="sm" onClick={handleAuthorize} disabled={authorizing}>
+                <Send className={cn("h-4 w-4 mr-1.5", authorizing && "animate-pulse")} />
+                {authorizing && authProgress
+                  ? `执行授权中 (${authProgress.done}/${authProgress.total})`
+                  : "执行授权"}
               </Button>
               <Button size="sm" variant="outline" onClick={handleWriteback}>
                 <Upload className="h-4 w-4 mr-1.5" />
