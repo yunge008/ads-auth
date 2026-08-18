@@ -26,3 +26,4 @@
 2026-08-13 | claude | 修复获取素材两按钮误导：之前共用一个 loading 布尔值，点其中一个两个按钮的转圈图标都会转，分不清在跑哪个命令；改为记录具体是哪个（获取所有素材/获取未授权素材）在跑，只有对应按钮转圈，两个按钮在跑的时候仍都保持不可点击；版本号改为 0818.004 | src/routes/index.tsx, src/lib/version.ts
 2026-08-13 | claude | 执行授权体验完善：待授权账户面板加「全部启用/全部禁用」批量按钮；推送记录加分页 10 行/页；执行授权完毕后自动对本轮 API错误（含整批调用失败）的素材补跑一轮授权才算最终结果；状态条文字改为右对齐+限宽换行，修复分类多时排版跑到最左边的问题；版本号改为 0818.005 | src/routes/index.tsx, src/lib/version.ts
 2026-08-13 | claude | 未设置国家的广告户默认停用：set_country 首次插入 advertiser_countries 记录改为显式 active=false（不再用表默认值，也不再把"未来会不会启用"当成 true 处理），配合前端 AccountsTable 默认展示未配置行为停用；同时提醒之前几次 tiktok-connections 的修复（停用广告户改国家不再报冲突）若线上仍复现，大概率是 Edge Function 还没重新部署到最新代码；版本号改为 0818.006 | supabase/functions/tiktok-connections/index.ts, src/components/settings/AccountsTable.tsx, src/lib/version.ts
+2026-08-18 | lovable | 重新部署 tiktok-connections、feishu-read、authorize-batch 三个 Edge Function（广告户启用/停用、active 过滤、停用广告户拦截改动上线）；版本号改为 0818.007 | docs/PLAN.md, docs/WORKLOG.md, src/lib/version.ts

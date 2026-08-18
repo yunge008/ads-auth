@@ -162,6 +162,7 @@ export type Database = {
       }
       advertiser_countries: {
         Row: {
+          active: boolean
           advertiser_id: string
           advertiser_name: string | null
           country: string
@@ -171,6 +172,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          active?: boolean
           advertiser_id: string
           advertiser_name?: string | null
           country: string
@@ -180,6 +182,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          active?: boolean
           advertiser_id?: string
           advertiser_name?: string | null
           country?: string
