@@ -25,7 +25,7 @@
 
 ## 已完成
 
-- ✅ 2026-08-13 [claude] 广告户启用/停用开关 + 国家唯一性收紧为仅在启用广告户间强制；执行授权目标改为「素材列表筛选」与「待授权账户面板开关」AND 生效；执行授权拉取只读 BD 角色；人员表加只读「飞书表格」派生列。**待人工**：跑迁移 `20260813120000_advertiser_countries_active.sql`，重新部署 `tiktok-connections`、`feishu-read`、`authorize-batch` 三个 Edge Function。 | supabase/migrations/20260813120000_advertiser_countries_active.sql, supabase/functions/{tiktok-connections,feishu-read,authorize-batch}/index.ts, src/lib/store.ts, src/components/settings/{AccountsTable,StaffTable}.tsx, src/routes/index.tsx
+- ✅ 2026-08-13 [claude] 广告户启用/停用开关 + 国家唯一性收紧为仅在启用广告户间强制；执行授权目标改为「素材列表筛选」与「待授权账户面板开关」AND 生效；执行授权拉取只读 BD 角色；人员表加只读「飞书表格」派生列。**待人工**：跑迁移 `20260813120000_advertiser_countries_active.sql`。`tiktok-connections`、`feishu-read`、`authorize-batch` 三个 Edge Function 已重新部署。 | supabase/migrations/20260813120000_advertiser_countries_active.sql, supabase/functions/{tiktok-connections,feishu-read,authorize-batch}/index.ts, src/lib/store.ts, src/components/settings/{AccountsTable,StaffTable}.tsx, src/routes/index.tsx
 
 - ✅ 2026-08-13 [lovable] 修复 TikTok 授权回调地址随预览域名变化的问题：前端和 `tiktok-oauth-init` 云函数均固定使用已登记的正式回调 `https://ads-auth.lovable.app/oauth/tiktok/callback`，旧前端传入的预览地址也不会被采用。
 
