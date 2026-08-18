@@ -70,9 +70,12 @@ async function callAuthorizeLog<T>(body: Record<string, unknown>): Promise<T> {
   return invokeFn<T>("authorize-log", body);
 }
 
+const LOG_PAGE_SIZE = 10;
+
 function AuthorizeLogPanel({ refreshKey }: { refreshKey: number }) {
   const [logs, setLogs] = React.useState<AuthorizeLogEntry[]>([]);
   const [loadingLogs, setLoadingLogs] = React.useState(false);
+  const [logPage, setLogPage] = React.useState(1);
   const openedRef = React.useRef(false);
 
   const fetchLogs = React.useCallback(async () => {
@@ -80,12 +83,16 @@ function AuthorizeLogPanel({ refreshKey }: { refreshKey: number }) {
     try {
       const data = await callAuthorizeLog<{ logs: AuthorizeLogEntry[] }>({ action: "list", limit: 50 });
       setLogs(data.logs ?? []);
+      setLogPage(1);
     } catch {
       // ignore
     } finally {
       setLoadingLogs(false);
     }
   }, []);
+
+  const logPageCount = Math.max(1, Math.ceil(logs.length / LOG_PAGE_SIZE));
+  const pagedLogs = logs.slice((logPage - 1) * LOG_PAGE_SIZE, logPage * LOG_PAGE_SIZE);
 
   React.useEffect(() => {
     if (openedRef.current) fetchLogs();
@@ -132,7 +139,7 @@ function AuthorizeLogPanel({ refreshKey }: { refreshKey: number }) {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {logs.map((row) => (
+                    {pagedLogs.map((row) => (
                       <TableRow key={row.id}>
                         <TableCell className="font-mono text-xs">{formatBeijing(row.logged_at, "date")}</TableCell>
                         <TableCell className="font-mono text-xs">{formatBeijing(row.logged_at, "time")}</TableCell>
@@ -170,6 +177,22 @@ function AuthorizeLogPanel({ refreshKey }: { refreshKey: number }) {
                     ))}
                   </TableBody>
                 </Table>
+                {logs.length > LOG_PAGE_SIZE && (
+                  <div className="flex items-center justify-between mt-3 text-xs text-muted-foreground">
+                    <div>
+                      第 {(logPage - 1) * LOG_PAGE_SIZE + 1}-{Math.min(logPage * LOG_PAGE_SIZE, logs.length)} / 共 {logs.length} 条
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" variant="outline" className="h-7" disabled={logPage <= 1} onClick={() => setLogPage((p) => Math.max(1, p - 1))}>
+                        <ChevronLeft className="h-3.5 w-3.5" />
+                      </Button>
+                      <span>{logPage} / {logPageCount}</span>
+                      <Button size="sm" variant="outline" className="h-7" disabled={logPage >= logPageCount} onClick={() => setLogPage((p) => Math.min(logPageCount, p + 1))}>
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </CardContent>
@@ -379,19 +402,11 @@ function AuthorizePage() {
     }
     const targetIds = new Set(targets.map((t) => t.id));
     setAuthTargetIds(targetIds);
-    setMaterials((prev) =>
-      prev.map((m) =>
-        targetIds.has(m.id) ? { ...m, status: "授权中", error_message: undefined } : m,
-      ),
-    );
-
-    // 大批量分块 + 有限并行提交，避免单次调用跑太久被平台超时掐断（504）。
-    const chunks: Material[][] = [];
-    for (let i = 0; i < targets.length; i += AUTH_CHUNK_SIZE) {
-      chunks.push(targets.slice(i, i + AUTH_CHUNK_SIZE));
-    }
-
     setAuthorizing(true);
+
+    // 每个素材最新的处理结果，独立于 materials 状态记录一份，用于判断本轮结束后
+    // 是否还有 API错误 需要自动补跑，不依赖读取可能还没提交完的 React 状态。
+    const resultById = new Map<string, { status: MaterialStatus; error_message?: string }>();
 
     const runChunk = async (chunk: Material[]) => {
       try {
@@ -409,6 +424,7 @@ function AuthorizePage() {
         const byId = new Map<string, { status: MaterialStatus; error_message?: string }>(
           (data?.results ?? []).map((r) => [r.id, { status: r.status, error_message: r.error_message }]),
         );
+        for (const [id, r] of byId) resultById.set(id, r);
         setMaterials((prev) =>
           prev.map((m) => {
             const r = byId.get(m.id);
@@ -416,8 +432,9 @@ function AuthorizePage() {
           }),
         );
       } catch (e) {
-        // 整批调用失败（如超时）：标记为「API错误」，可用现有的重试机制单独补跑这一批。
+        // 整批调用失败（如超时）：标记为「API错误」，本轮结束后会自动补跑一次。
         const msg = (e as Error).message;
+        for (const t of chunk) resultById.set(t.id, { status: "API错误", error_message: msg });
         const chunkIds = new Set(chunk.map((t) => t.id));
         setMaterials((prev) =>
           prev.map((m) => (chunkIds.has(m.id) ? { ...m, status: "API错误", error_message: msg } : m)),
@@ -425,17 +442,39 @@ function AuthorizePage() {
       }
     };
 
-    let cursor = 0;
-    const worker = async () => {
-      while (cursor < chunks.length) {
-        const chunk = chunks[cursor++];
-        await runChunk(chunk);
+    // 大批量分块 + 有限并行提交，避免单次调用跑太久被平台超时掐断（504）。
+    const runBatch = async (items: Material[]) => {
+      const ids = new Set(items.map((t) => t.id));
+      setMaterials((prev) =>
+        prev.map((m) => (ids.has(m.id) ? { ...m, status: "授权中", error_message: undefined } : m)),
+      );
+      const chunks: Material[][] = [];
+      for (let i = 0; i < items.length; i += AUTH_CHUNK_SIZE) {
+        chunks.push(items.slice(i, i + AUTH_CHUNK_SIZE));
       }
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < chunks.length) {
+          const chunk = chunks[cursor++];
+          await runChunk(chunk);
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(AUTH_MAX_CONCURRENT, chunks.length) }, worker));
     };
-    await Promise.all(Array.from({ length: Math.min(AUTH_MAX_CONCURRENT, chunks.length) }, worker));
+
+    await runBatch(targets);
+
+    // 结束后如果还有 API错误（含请求本身失败的），自动补跑一轮，跑完才算最终结果。
+    const retryTargets = targets.filter((t) => resultById.get(t.id)?.status === "API错误");
+    if (retryTargets.length > 0) {
+      await runBatch(retryTargets);
+    }
 
     setAuthorizing(false);
-    toast.success(`已处理 ${targets.length} 条`);
+    toast.success(
+      `已处理 ${targets.length} 条` +
+        (retryTargets.length > 0 ? `（其中 ${retryTargets.length} 条 API错误已自动重试一次）` : ""),
+    );
   };
 
   const OTHER_RESULT_STATUSES: MaterialStatus[] = [
@@ -754,13 +793,33 @@ function AuthorizePage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
         <Card className="lg:col-span-2">
-          <CardHeader>
+          <CardHeader className="flex-row items-center justify-between space-y-0">
             <CardTitle className="text-base">
               待授权账户{" "}
               <span className="text-xs font-normal text-muted-foreground ml-1">
                 （本次匹配 {pendingAccounts.length} 个国家）
               </span>
             </CardTitle>
+            <div className="flex items-center gap-1.5">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                disabled={pendingAccounts.length === 0}
+                onClick={() => setEnabledAdvertiserIds(new Set(pendingAccounts.map((p) => p.advertiser_id)))}
+              >
+                全部启用
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                disabled={pendingAccounts.length === 0}
+                onClick={() => setEnabledAdvertiserIds(new Set())}
+              >
+                全部禁用
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
             <div className="border rounded-md">
@@ -922,7 +981,7 @@ function AuthorizePage() {
             </div>
             <div className="flex flex-col items-end gap-1">
             {authStats && (
-              <div className="text-xs font-medium tabular-nums">{authStats.text}</div>
+              <div className="text-xs font-medium tabular-nums text-right max-w-md">{authStats.text}</div>
             )}
             <div className="flex items-end gap-2">
               <Button size="sm" onClick={handleAuthorize} disabled={authorizing}>
