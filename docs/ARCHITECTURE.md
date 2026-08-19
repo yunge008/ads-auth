@@ -32,11 +32,11 @@
 
 - **飞书侧**：`feishu-read`（素材表，「建联-姓名」sheet，读 A2:W，P=VID / Q=授权码 / K=SKU / N=登记日期）、`feishu-read-sku` / `feishu-read-editors` / `feishu-read-bd-vids`、`feishu-writeback`（回写授权状态到 V=投放日期 / W=状态）、`staff-sheets`
 - **TikTok 侧**：`tiktok-oauth-init` / `tiktok-oauth-exchange` / `tiktok-connection-save` / `tiktok-connections`（token 管理，存 `tiktok_connections`）、`bc-list-advertisers`、`authorize-batch`（核心：素材授权）
-- **GMV Max**：`gmv-max-sync`（拉报表写 `gmv_max_vid_daily`，单 token 串行、≤3 QPS、80s 预算、返回 remaining_* 支持续跑）、`gmv-max-raw-export`（只读 CSV：单广告户、最多 31 天、PRODUCT_GMV_MAX 原始返回字段）、`gmv-max-query`、`gmv-max-daily-report`（服务端聚合）、`gmv-max-live-status`（按广告户+Campaign+商品+VID 直接查询 TikTok BC，不读写 GMV 明细表）
+- **GMV Max**：`gmv-max-sync`（拉报表写 `gmv_max_vid_daily`，单 token 串行、≤3 QPS、80s 预算、返回 remaining_* 支持续跑）、`gmv-max-raw-export`（只读 CSV：单广告户、最多 31 天、PRODUCT_GMV_MAX 原始返回字段）、`gmv-max-query`、`gmv-max-daily-report`（服务端聚合）、`gmv-max-live-status`（按广告户+Campaign+商品+VID 直接查询 TikTok BC，不读写 GMV 明细表）、`gmv-max-adgroup-create`（写接口：透传 POST `/campaign/gmv_max/create/`，真实新建 GMV Max campaign/广告组，会产生真实花费；不做字段校验，调用方在 API 测试页手填完整 TikTok GmvMaxCreateBody JSON）
 - **评论**：`tiktok-comments-sync` / `tiktok-comments-translate`（暂停用）
 - **GMV 归因**：`attribution-sync-creators`（读建联表 D用户名/E昵称/N登记日期 + 授权记录归档 + 剪辑表 → `creator_registry`，保护期解析 → `creator_ownership`）、`attribution-run`（月度归因报表，RPC `gmv_attr_monthly_agg` 聚合 + 归因引擎，view=admin/user）、`attribution-upload`（Excel 上传 create/append/finalize/list/get/delete，文件名「站点 MAX yyyymm.xlsx」）、`attribution-feishu`（write-progress/write-reviews/read-judgments/sync-targets/sync-handovers/write-ownership/list-reviews，对应飞书主表格内 5 个 sheet：归因进度/归因审查/GMV目标/站点交接/达人归因表）
 - **其他**：`app-accounts`（账号 CRUD）、`data-preview`
-- **共享**：`_shared/auth.ts`（口令校验 + service role client）、`_shared/feishu.ts`（tenant token、分页读 sheet、CORS；readRange 支持自定义分块行数）、`_shared/tiktok.ts`（TikTok GET 限速、超时与退避重试）、`_shared/cells.ts`（cellText/parseDate）、`_shared/attribution.ts`（归因引擎纯函数：瀑布归因/保护期/站点交接分段/VID推断别名/VID>>32 发布时间）、`_shared/attribution-report.ts`（归因上下文加载 + 汇总 + 月度报表）
+- **共享**：`_shared/auth.ts`（口令校验 + service role client）、`_shared/feishu.ts`（tenant token、分页读 sheet、CORS；readRange 支持自定义分块行数）、`_shared/tiktok.ts`（TikTok GET/POST 限速、超时与退避重试：`ttGet` 只读、`ttPost` 写调用需调用方传 TikTok 要求的幂等 `request_id`）、`_shared/cells.ts`（cellText/parseDate）、`_shared/attribution.ts`（归因引擎纯函数：瀑布归因/保护期/站点交接分段/VID推断别名/VID>>32 发布时间）、`_shared/attribution-report.ts`（归因上下文加载 + 汇总 + 月度报表）
 - **Cron bypass**：`gmv-max-sync` / `feishu-read` / `authorize-batch` / `feishu-writeback` 均支持 `x-cron-key` header（值=vault secret `gmv_max_cron_secret`，通过 `verify_gmv_cron_key` RPC 校验），用于跳过 admin 口令校验，仅给上述两个 cron 路由使用
 
 ## 数据库主要表
