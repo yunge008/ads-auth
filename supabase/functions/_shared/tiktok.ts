@@ -53,3 +53,55 @@ export async function ttGet(
   }
   throw new Error(`${path}: max retries exceeded`);
 }
+
+// Shared TikTok POST client for write calls (e.g. GMV Max campaign create).
+// Same rate-limit/backoff behavior as ttGet; callers must pass an idempotent
+// request_id (per TikTok's requirement) so retries never double-create.
+export async function ttPost(
+  token: string,
+  path: string,
+  body: Record<string, unknown>,
+  retries = 5,
+  wait: (ms: number) => Promise<void> = sleep,
+  ensureTime?: TimeBudgetChecker,
+): Promise<Record<string, unknown>> {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    ensureTime?.();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    let json: Record<string, unknown>;
+    try {
+      const response = await fetch(`${TT}${path}`, {
+        method: "POST",
+        headers: { "Access-Token": token, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      json = await response.json().catch(() => ({}));
+    } catch (error) {
+      if (attempt < retries - 1) {
+        await wait(1000 * Math.pow(2, attempt));
+        continue;
+      }
+      throw new Error(`${path}: network/timeout ${(error as Error).message}`);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    if (json.code === 0) {
+      await wait(150);
+      return (json.data ?? {}) as Record<string, unknown>;
+    }
+    const message = String(json.message ?? "");
+    const rateLimited = message.includes("Too many requests") ||
+      message.includes("Request too frequent") ||
+      message.toLowerCase().includes("frequent") || json.code === 40100 || json.code === 50002;
+    if (rateLimited && attempt < retries - 1) {
+      ensureTime?.();
+      await wait(3000 * Math.pow(2, attempt));
+      continue;
+    }
+    throw new Error(`${path}: ${message || "unknown"} (code=${json.code ?? "?"})`);
+  }
+  throw new Error(`${path}: max retries exceeded`);
+}
