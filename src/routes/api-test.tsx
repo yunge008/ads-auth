@@ -113,6 +113,11 @@ function ApiTestPage() {
           <Button size="sm" variant="outline" onClick={() => navigator.clipboard.writeText(command)}><Copy className="h-4 w-4 mr-1" />复制指令</Button>
         </CardHeader>
         <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            例：<code>gmv-max-adgroup-create {"{...}"}</code> 会真实调用 TikTok <code>/campaign/gmv_max/create/</code>
+            新建 GMV Max 广告组（含预算/商品/出价，TikTok 侧无独立广告组接口，campaign create 即等价物），会产生真实花费；
+            函数只透传请求体，不校验字段，需按 TikTok GMV Max Campaign Create 文档手填完整 JSON（含 advertiser_id、request_id 等必填项）。
+          </p>
           <Textarea value={command} onChange={(e) => setCommand(e.target.value)} className="min-h-32 font-mono text-xs" />
           <Button onClick={run} disabled={loading}><Play className="h-4 w-4 mr-1" />{loading ? "请求中…" : "执行测试"}</Button>
         </CardContent>
