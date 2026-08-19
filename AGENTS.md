@@ -28,6 +28,21 @@
 4. 完工：更新 PLAN.md 状态 → 在 `docs/WORKLOG.md` 追加一行 → commit + push
 5. 任务中断时也要 push，并在 PLAN.md 标注「进行中/剩余事项」，让下一个工具能接手
 
+## 推送后的收尾清单（人工步骤分类）
+
+**每次改动 commit+push 完，如果这次改动还需要任何后续手动步骤才能生效，必须主动列出来，分成两类，不要遗漏、不要让用户自己猜：**
+
+**A 类：用户能自己在 Supabase 后台操作的**（能省 Lovable 积分，优先走这类）
+- 典型场景：跑新迁移 SQL、查 Edge Function 日志、看 Logs/SQL Editor
+- 要给：具体入口路径（如「Supabase Dashboard → SQL Editor」或 Lovable「Cloud」面板对应子页面）+ 要粘贴/操作的具体内容（比如整段 SQL）
+- 不要只说"去跑一下迁移"，要把 SQL 原文贴出来，让用户复制粘贴就能执行
+
+**B 类：必须让 Lovable 执行的**（本项目目前没有除 Lovable 外的部署权限，例如 Edge Function 重新部署）
+- 典型场景：Edge Function 重新部署（改了 `supabase/functions/**` 但不是 SQL）
+- 要给：一段**可以直接复制粘贴进 Lovable 聊天框**的完整指令文本，点名具体要重新部署哪几个函数（不要写"麻烦重新部署一下"这种模糊话术，要写清函数名列表）
+
+没有需要人工介入的改动（纯前端/文档），明确说清楚"不需要做任何事，Lovable 同步 main 自动生效"，不要让用户误以为还要检查什么。
+
 ## 硬性约定
 
 - `src/routeTree.gen.ts` 自动生成，**禁止手改**
