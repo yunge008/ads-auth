@@ -275,6 +275,8 @@ export const Route = createFileRoute("/api/public/hooks/authorize-cron")({
                   auth_code: m.auth_code,
                   product: m.product,
                   staff_name: m.staff_name,
+                  advertiser_name: m.advertiser_name,
+                  advertiser_id: m.advertiser_id,
                 })),
               }),
             });

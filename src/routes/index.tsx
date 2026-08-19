@@ -537,6 +537,8 @@ function AuthorizePage() {
           auth_code: m.auth_code,
           product: m.product,
           staff_name: m.staff_name,
+          advertiser_name: m.advertiser_name,
+          advertiser_id: m.advertiser_id,
         })),
       });
       // Keep API错误 items visible; remove the rest (P/Q written back).
@@ -767,6 +769,8 @@ function AuthorizePage() {
                             ["G", "投放时间（北京时间 YYYYMMDD HH:MM:SS）"],
                             ["H", "投手备注"],
                             ["I", "同事"],
+                            ["R", "广告户名称"],
+                            ["S", "广告户ID"],
                           ].map(([c, v]) => (
                             <TableRow key={c}>
                               <TableCell className="font-mono text-xs py-1.5 w-16">{c}</TableCell>
@@ -777,8 +781,9 @@ function AuthorizePage() {
                       </Table>
                     </div>
                     <ul className="list-disc pl-5 text-muted-foreground space-y-1 mt-2">
-                      <li>去重键 <span className="font-mono">VID+授权码</span>：已存在则更新原行 B:I，否则末尾追加（序号 = 最大值 + 1）</li>
+                      <li>不去重覆盖：每次授权（含同一 VID+授权码 换广告户重授权、重试）都单独追加一行，序号 = 表内最大值 + 1，完整保留历史</li>
                       <li>H 投手备注 = 状态文本；API错误附带报错信息</li>
+                      <li>J~Q 是历史归档区（K:Q 为冻结数据、J 为缓冲空列），不写入，避免覆盖；广告户信息因此放在 R/S 而不是紧挨 I 的 J/K</li>
                       <li>「授权记录」sheet 不存在时跳过不报错</li>
                     </ul>
                   </div>

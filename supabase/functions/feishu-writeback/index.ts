@@ -2,11 +2,18 @@
 // V = 投放日期 (今天日期，yyyy/mm/dd)
 // W = 状态文本 (中文，无英文 API 报错)
 //
-// Additionally, log "已授权" entries to the "授权记录" sheet.
+// Additionally, log every auth-status item to the "授权记录" sheet.
 // Columns: A 序号 | B 国家 | C 达人名字 | D VID | E 视频CODE | F 产品
 //          G 投放时间 (YYYYMMDD HH:MM:SS) | H 投手备注 | I 同事
-// Match existing rows by VID + 视频CODE (D + E). Update in place if found,
-// otherwise append. Feishu auto-extends rows.
+//          R 广告户名称 | S 广告户ID
+// 每次授权都是一条新记录，不按 VID+授权码 去重覆盖——同一个 VID+授权码
+// 换广告户重新授权、或重试，都各自留痕，能看到完整历史。序号 = 表内最大值 + 1。
+// 广告户信息刻意放在 R/S 而不是紧挨着 I 的 J/K：同一张「授权记录」sheet 的
+// K:Q 是历史冻结归档区（K=BD L=登记日期 M=国家 N=达人名字 O=VID P=授权码
+// Q=产品，见 feishu-read 的 include_done 分支），J 是二者之间的空列缓冲，
+// 绝对不能往 J~Q 写数据，否则会覆盖归档区旧数据。
+// Feishu auto-extends rows (values_append, OVERWRITE，不整行插入避免顶移
+// 同 sheet 的 K:Q 归档区）。
 
 import {
   appendValues,
@@ -31,6 +38,8 @@ type Item = {
   auth_code?: string;
   product?: string;
   staff_name?: string;
+  advertiser_name?: string;
+  advertiser_id?: string;
 };
 
 const LOG_SHEET_TITLE = "授权记录";
@@ -115,27 +124,21 @@ Deno.serve(async (req) => {
       await writeValues(token, spreadsheetToken, valueRanges);
     }
 
-    // ----- 2) Append/Update "授权记录" sheet for ALL auth-status items -----
+    // ----- 2) Append a NEW log row for every auth-status item (不去重覆盖) -----
     const logItems = items.filter((it) => it.vid && it.auth_code);
     let logged = 0;
     const logSid = sheetByName.get(LOG_SHEET_TITLE);
     if (logItems.length > 0 && logSid) {
-      // Read existing rows (A2:I) to build vid+code -> row map and find max 序号.
-      const existing = await readRange(token, spreadsheetToken, `${logSid}!A2:I`);
-      const keyToRow = new Map<string, number>(); // key -> row_number (1-indexed)
+      // 只需要 A 列（序号）来算当前行数 + 最大序号；不再按 VID+授权码 去重，
+      // 每次授权（含换广告户重授权、重试）都各留一行历史记录。
+      const existing = await readRange(token, spreadsheetToken, `${logSid}!A2:A`);
       let maxSeq = 0;
-      existing.forEach((row, idx) => {
+      for (const row of existing) {
         const seq = Number(row?.[0]);
         if (Number.isFinite(seq) && seq > maxSeq) maxSeq = seq;
-        const vid = String(row?.[3] ?? "").trim();
-        const code = String(row?.[4] ?? "").trim();
-        if (vid && code) keyToRow.set(`${vid}__${code}`, idx + 2);
-      });
+      }
 
       const ts = nowTs();
-      const updates: Array<{ range: string; values: unknown[][] }> = [];
-      const appends: unknown[][] = [];
-
       // Column H 投手备注: encode status (+ error message for API错误).
       const buildNote = (it: Item) => {
         if (it.status === "API错误") {
@@ -144,56 +147,32 @@ Deno.serve(async (req) => {
         return it.status;
       };
 
-      for (const it of logItems) {
-        const key = `${it.vid}__${it.auth_code}`;
-        const note = buildNote(it);
-        const existingRow = keyToRow.get(key);
-        if (existingRow != null && existingRow > 0) {
-          updates.push({
-            range: `${logSid}!B${existingRow}:I${existingRow}`,
-            values: [[
-              it.country ?? "",
-              it.creator_name ?? "",
-              it.vid ?? "",
-              it.auth_code ?? "",
-              it.product ?? "",
-              ts,
-              note,
-              it.staff_name ?? "",
-            ]],
-          });
-        } else {
-          maxSeq += 1;
-          appends.push([
-            maxSeq,
-            it.country ?? "",
-            it.creator_name ?? "",
-            it.vid ?? "",
-            it.auth_code ?? "",
-            it.product ?? "",
-            ts,
-            note,
-            it.staff_name ?? "",
-          ]);
-          keyToRow.set(key, -1);
-        }
-      }
+      const appends: unknown[][] = logItems.map((it) => {
+        maxSeq += 1;
+        return [
+          maxSeq,
+          it.country ?? "",
+          it.creator_name ?? "",
+          it.vid ?? "",
+          it.auth_code ?? "",
+          it.product ?? "",
+          ts,
+          buildNote(it),
+          it.staff_name ?? "",
+        ];
+      });
+      const advAppends: unknown[][] = logItems.map((it) => [
+        it.advertiser_name ?? "",
+        it.advertiser_id ?? "",
+      ]);
 
-      if (updates.length > 0) {
-        await writeValues(token, spreadsheetToken, updates);
-      }
-      if (appends.length > 0) {
-        // Append starting from the first empty row; range height must be >= rows being appended.
-        const startRow = existing.length + 2;
-        const endRow = startRow + appends.length - 1;
-        await appendValues(
-          token,
-          spreadsheetToken,
-          `${logSid}!A${startRow}:I${endRow}`,
-          appends,
-        );
-      }
-      logged = updates.length + appends.length;
+      // Append starting from the first empty row; range height must be >= rows being appended.
+      const startRow = existing.length + 2;
+      const endRow = startRow + appends.length - 1;
+      await appendValues(token, spreadsheetToken, `${logSid}!A${startRow}:I${endRow}`, appends);
+      // 广告户名称/ID 单独写到 R:S，跳过 J~Q（含同 sheet 的 K:Q 归档区），不碰那一段。
+      await appendValues(token, spreadsheetToken, `${logSid}!R${startRow}:S${endRow}`, advAppends);
+      logged = appends.length;
     } else if (logItems.length > 0 && !logSid) {
       console.warn(`授权记录 sheet 未找到，跳过执行记录回写`);
     }
