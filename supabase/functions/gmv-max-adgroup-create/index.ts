@@ -28,10 +28,27 @@ Deno.serve(async (req) => {
       .select("access_token, advertiser_ids")
       .contains("advertiser_ids", [advertiserId]);
     if (error) throw new Error(error.message);
-    const conn = ((connections ?? []) as Pick<ConnRow, "access_token" | "advertiser_ids">[])[0];
-    if (!conn) throw new Error(`广告户 ${advertiserId} 没有可用的 TikTok 授权`);
+    const conns = (connections ?? []) as Pick<ConnRow, "access_token" | "advertiser_ids">[];
+    if (conns.length === 0) throw new Error(`广告户 ${advertiserId} 没有可用的 TikTok 授权`);
 
-    const data = await ttPost(conn.access_token, "/campaign/gmv_max/create/", body);
+    // Try every authorization for this advertiser: some tokens may lack the
+    // GMV Max write scope (code=40001) while another one has it.
+    let data: Record<string, unknown> | null = null;
+    let lastErr: Error | null = null;
+    for (const conn of conns) {
+      try {
+        data = await ttPost(conn.access_token, "/campaign/gmv_max/create/", body);
+        break;
+      } catch (e) {
+        lastErr = e as Error;
+        if (!/40001|permission/i.test(lastErr.message)) throw lastErr;
+      }
+    }
+    if (!data) {
+      throw new Error(
+        `${lastErr?.message ?? "创建失败"}｜该广告户的授权缺少 GMV Max 建单（写）权限，请在 TikTok 商务中心重新授权并勾选广告管理写权限后重试`,
+      );
+    }
     return new Response(JSON.stringify({
       source: "tiktok_bc_live",
       endpoint: "/open_api/v1.3/campaign/gmv_max/create/",
