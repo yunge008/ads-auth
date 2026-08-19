@@ -2,7 +2,7 @@
 // 数据源：
 //   1. BD 建联表（FEISHU_SPREADSHEET_TOKEN，「建联-姓名」sheets，含离职）
 //      A=BD B=发样日期 C=国家 D=用户名 E=昵称 K=SKU N=登记日期 P=VID
-//   2. 「授权记录」归档 K3:Q（同表格）：K=BD L=登记日期 M=国家 N=达人名字 O=VID
+//   2. 「授权记录」归档 M3:S（同表格，J:K 现为广告户名称/ID）：M=BD N=登记日期 O=国家 P=达人名字 Q=VID
 //   3. 剪辑表（FEISHU_EDITOR_SPREADSHEET_TOKEN）：B=同事 C=日期 D=国家 E=账号 F=SKU G=VID
 // Body: {}（无入参，读全部 staff_sheets 含 active=false）
 import {
@@ -108,7 +108,7 @@ Deno.serve(async (req) => {
 
     const logSid = mainByName.get(LOG_SHEET_TITLE);
     if (logSid) {
-      const rows = await readRange(token, mainToken, `${logSid}!K3:Q`);
+      const rows = await readRange(token, mainToken, `${logSid}!M3:S`);
       processedSheets.add(LOG_SHEET_TITLE);
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i] ?? [];

@@ -13,8 +13,9 @@
 //     C must be a valid country, and V must be empty
 //   - When include_done=true (batch mode): only code+VID required; invalid country
 //     rows are kept with status 无授权账号 (manual country assignment in UI).
-//     Additionally merges the legacy code archive from 「授权记录」!K3:Q
-//     (K=BD  L=登记日期  M=国家  N=达人名字  O=VID  P=授权码  Q=产品; frozen table),
+//     Additionally merges the legacy code archive from 「授权记录」!M3:S
+//     (M=BD  N=登记日期  O=国家  P=达人名字  Q=VID  R=授权码  S=产品; frozen table,
+//     moved from K:Q so J:K can hold 广告户名称/广告户ID on the live log block A:K),
 //     deduped by vid+auth_code with 建联 sheets taking priority.
 
 import {
@@ -189,12 +190,12 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Batch mode: merge legacy code archive from 「授权记录」!K3:Q (frozen table).
+    // Batch mode: merge legacy code archive from 「授权记录」!M3:S (frozen table).
     // These rows have no writeback target — feishu-writeback skips V/W for them.
     if (include_done) {
       const logSid = sheetByName.get(LOG_SHEET_TITLE);
       if (logSid) {
-        const rows = await readRange(token, spreadsheetToken, `${logSid}!K3:Q`);
+        const rows = await readRange(token, spreadsheetToken, `${logSid}!M3:S`);
         for (let i = 0; i < rows.length; i++) {
           const r = rows[i] ?? [];
           const vid = cellText(r[4]);

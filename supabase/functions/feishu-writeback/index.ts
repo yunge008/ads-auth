@@ -5,15 +5,15 @@
 // Additionally, log every auth-status item to the "授权记录" sheet.
 // Columns: A 序号 | B 国家 | C 达人名字 | D VID | E 视频CODE | F 产品
 //          G 投放时间 (YYYYMMDD HH:MM:SS) | H 投手备注 | I 同事
-//          R 广告户名称 | S 广告户ID
-// 每次授权都是一条新记录，不按 VID+授权码 去重覆盖——同一个 VID+授权码
-// 换广告户重新授权、或重试，都各自留痕，能看到完整历史。序号 = 表内最大值 + 1。
-// 广告户信息刻意放在 R/S 而不是紧挨着 I 的 J/K：同一张「授权记录」sheet 的
-// K:Q 是历史冻结归档区（K=BD L=登记日期 M=国家 N=达人名字 O=VID P=授权码
-// Q=产品，见 feishu-read 的 include_done 分支），J 是二者之间的空列缓冲，
-// 绝对不能往 J~Q 写数据，否则会覆盖归档区旧数据。
+//          J 广告户名称 | K 广告户ID
+// A:K 是一个整体的实时执行记录块。每次授权都是一条新记录，不按 VID+授权码
+// 去重覆盖——同一个 VID+授权码 换广告户重新授权、或重试，都各自留痕，能看到
+// 完整历史。序号 = 表内最大值 + 1。
+// 历史冻结归档区已从 K:Q 挪到 M:S（M=BD N=登记日期 O=国家 P=达人名字 Q=VID
+// R=授权码 S=产品，见 feishu-read 的 include_done 分支 / attribution-sync-creators），
+// 腾出 J:K 给本次新增的广告户名称/ID，L 是二者之间的空列缓冲。
 // Feishu auto-extends rows (values_append, OVERWRITE，不整行插入避免顶移
-// 同 sheet 的 K:Q 归档区）。
+// 同 sheet 的 M:S 归档区）。
 
 import {
   appendValues,
@@ -94,8 +94,8 @@ Deno.serve(async (req) => {
 
     // ----- 1) V/W writeback on source sheets -----
     const valueRanges = items.flatMap((it) => {
-      // Archive rows (sourced from 「授权记录」!K3:Q, frozen table) have no
-      // writeback target — they are only logged to the A:I execution log below.
+      // Archive rows (sourced from 「授权记录」!M3:S, frozen table) have no
+      // writeback target — they are only logged to the A:K execution log below.
       if (it.sheet_name === LOG_SHEET_TITLE) return [];
       const sid = sheetByName.get(it.sheet_name);
       if (!sid) return [];
@@ -170,8 +170,9 @@ Deno.serve(async (req) => {
       const startRow = existing.length + 2;
       const endRow = startRow + appends.length - 1;
       await appendValues(token, spreadsheetToken, `${logSid}!A${startRow}:I${endRow}`, appends);
-      // 广告户名称/ID 单独写到 R:S，跳过 J~Q（含同 sheet 的 K:Q 归档区），不碰那一段。
-      await appendValues(token, spreadsheetToken, `${logSid}!R${startRow}:S${endRow}`, advAppends);
+      // 广告户名称/ID 写到 J:K，紧接 A:I 组成完整的 A:K 实时记录块；
+      // 历史归档区已挪到 M:S，这里不会碰到它。
+      await appendValues(token, spreadsheetToken, `${logSid}!J${startRow}:K${endRow}`, advAppends);
       logged = appends.length;
     } else if (logItems.length > 0 && !logSid) {
       console.warn(`授权记录 sheet 未找到，跳过执行记录回写`);
