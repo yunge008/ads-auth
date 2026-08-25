@@ -18,6 +18,7 @@ type ExchangeResp = {
   label: string;
   access_token: string;
   bc_id: string | null;
+  bc_name: string | null;
   expires_at: string | null;
   advertisers: Advertiser[];
 };
@@ -74,6 +75,7 @@ function CallbackPage() {
         label: resp.label,
         access_token: resp.access_token,
         bc_id: resp.bc_id,
+        bc_name: resp.bc_name,
         expires_at: resp.expires_at,
         advertiser_ids: Array.from(selected),
       });

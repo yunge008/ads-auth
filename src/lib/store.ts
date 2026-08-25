@@ -120,6 +120,7 @@ export type Connection = {
   id: string;
   label: string;
   bc_id: string | null;
+  bc_name: string | null;
   advertiser_ids: string[];
   expires_at: string | null;
   created_at: string;

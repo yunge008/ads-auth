@@ -176,7 +176,7 @@ Deno.serve(async (req) => {
     const [{ data: conns, error: e1 }, { data: countries, error: e2 }] = await Promise.all([
       admin()
         .from("tiktok_connections")
-        .select("id, label, bc_id, advertiser_ids, expires_at, created_at, updated_at")
+        .select("id, label, bc_id, bc_name, advertiser_ids, expires_at, created_at, updated_at")
         .order("created_at", { ascending: false }),
       admin().from("advertiser_countries").select("advertiser_id, country, shop_id, shop_name, active"),
     ]);

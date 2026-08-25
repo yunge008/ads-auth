@@ -1,0 +1,1 @@
+ALTER TABLE public.tiktok_connections ADD COLUMN IF NOT EXISTS bc_name text;

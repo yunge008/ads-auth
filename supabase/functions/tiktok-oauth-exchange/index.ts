@@ -2,7 +2,7 @@
 // to the client WITHOUT writing to DB. The client lets the user pick advertisers,
 // then calls `tiktok-connection-save` to persist the row.
 // Body: { auth_code, state }
-// Returns: { label, access_token, bc_id, expires_at,
+// Returns: { label, access_token, bc_id, bc_name, expires_at,
 //            advertisers: [{ advertiser_id, advertiser_name, status? }] }
 import { corsHeaders } from "../_shared/feishu.ts";
 import { checkAdminPasscode } from "../_shared/auth.ts";
@@ -40,6 +40,24 @@ async function enrich(token: string, ids: string[]) {
   return out;
 }
 
+// Best-effort BC name lookup; never blocks the OAuth flow if it fails.
+async function fetchBcName(token: string, bcId: string): Promise<string | null> {
+  try {
+    const u = new URL(`${TT}/v1.3/bc/get/`);
+    u.searchParams.set("bc_ids", JSON.stringify([bcId]));
+    const res = await fetch(u.toString(), { headers: { "Access-Token": token } });
+    const j = await res.json().catch(() => ({}));
+    console.log("bc/get response", JSON.stringify(j).slice(0, 500));
+    const list = Array.isArray(j?.data?.list) ? j.data.list : [];
+    const hit = (list as Array<Record<string, unknown>>).find((x) => String(x.bc_id ?? "") === bcId);
+    const name = hit?.name ?? hit?.bc_name;
+    return name ? String(name) : null;
+  } catch (e) {
+    console.warn("bc/get failed", (e as Error).message);
+    return null;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -70,7 +88,10 @@ Deno.serve(async (req) => {
     if (!access_token) throw new Error("响应缺少 access_token");
 
     // Enrich with names so the user can choose by readable name.
-    const info = await enrich(access_token, advertiser_ids);
+    const [info, bc_name] = await Promise.all([
+      enrich(access_token, advertiser_ids),
+      bc_id ? fetchBcName(access_token, bc_id) : Promise.resolve(null),
+    ]);
     const advertisers = advertiser_ids.map((id: string) => {
       const e = info.get(id);
       return {
@@ -81,7 +102,7 @@ Deno.serve(async (req) => {
     });
 
     return new Response(
-      JSON.stringify({ label, access_token, bc_id, expires_at, advertisers }),
+      JSON.stringify({ label, access_token, bc_id, bc_name, expires_at, advertisers }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {
