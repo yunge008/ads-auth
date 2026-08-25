@@ -1105,6 +1105,7 @@ export type Database = {
           access_token: string
           advertiser_ids: string[]
           bc_id: string | null
+          bc_name: string | null
           created_at: string
           expires_at: string | null
           id: string
@@ -1115,6 +1116,7 @@ export type Database = {
           access_token: string
           advertiser_ids?: string[]
           bc_id?: string | null
+          bc_name?: string | null
           created_at?: string
           expires_at?: string | null
           id?: string
@@ -1125,6 +1127,7 @@ export type Database = {
           access_token?: string
           advertiser_ids?: string[]
           bc_id?: string | null
+          bc_name?: string | null
           created_at?: string
           expires_at?: string | null
           id?: string

@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as MaterialPerformanceRouteImport } from './routes/material-performance'
+import { Route as GmvMaxCreateRouteImport } from './routes/gmv-max-create'
 import { Route as GmvAttributionAdminRouteImport } from './routes/gmv-attribution-admin'
 import { Route as GmvAttributionRouteImport } from './routes/gmv-attribution'
 import { Route as FeishuDataRouteImport } from './routes/feishu-data'
@@ -29,6 +30,11 @@ const SettingsRoute = SettingsRouteImport.update({
 const MaterialPerformanceRoute = MaterialPerformanceRouteImport.update({
   id: '/material-performance',
   path: '/material-performance',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GmvMaxCreateRoute = GmvMaxCreateRouteImport.update({
+  id: '/gmv-max-create',
+  path: '/gmv-max-create',
   getParentRoute: () => rootRouteImport,
 } as any)
 const GmvAttributionAdminRoute = GmvAttributionAdminRouteImport.update({
@@ -86,6 +92,7 @@ export interface FileRoutesByFullPath {
   '/feishu-data': typeof FeishuDataRoute
   '/gmv-attribution': typeof GmvAttributionRoute
   '/gmv-attribution-admin': typeof GmvAttributionAdminRoute
+  '/gmv-max-create': typeof GmvMaxCreateRoute
   '/material-performance': typeof MaterialPerformanceRoute
   '/settings': typeof SettingsRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
@@ -99,6 +106,7 @@ export interface FileRoutesByTo {
   '/feishu-data': typeof FeishuDataRoute
   '/gmv-attribution': typeof GmvAttributionRoute
   '/gmv-attribution-admin': typeof GmvAttributionAdminRoute
+  '/gmv-max-create': typeof GmvMaxCreateRoute
   '/material-performance': typeof MaterialPerformanceRoute
   '/settings': typeof SettingsRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
@@ -113,6 +121,7 @@ export interface FileRoutesById {
   '/feishu-data': typeof FeishuDataRoute
   '/gmv-attribution': typeof GmvAttributionRoute
   '/gmv-attribution-admin': typeof GmvAttributionAdminRoute
+  '/gmv-max-create': typeof GmvMaxCreateRoute
   '/material-performance': typeof MaterialPerformanceRoute
   '/settings': typeof SettingsRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
@@ -128,6 +137,7 @@ export interface FileRouteTypes {
     | '/feishu-data'
     | '/gmv-attribution'
     | '/gmv-attribution-admin'
+    | '/gmv-max-create'
     | '/material-performance'
     | '/settings'
     | '/oauth/tiktok/callback'
@@ -141,6 +151,7 @@ export interface FileRouteTypes {
     | '/feishu-data'
     | '/gmv-attribution'
     | '/gmv-attribution-admin'
+    | '/gmv-max-create'
     | '/material-performance'
     | '/settings'
     | '/oauth/tiktok/callback'
@@ -154,6 +165,7 @@ export interface FileRouteTypes {
     | '/feishu-data'
     | '/gmv-attribution'
     | '/gmv-attribution-admin'
+    | '/gmv-max-create'
     | '/material-performance'
     | '/settings'
     | '/oauth/tiktok/callback'
@@ -168,6 +180,7 @@ export interface RootRouteChildren {
   FeishuDataRoute: typeof FeishuDataRoute
   GmvAttributionRoute: typeof GmvAttributionRoute
   GmvAttributionAdminRoute: typeof GmvAttributionAdminRoute
+  GmvMaxCreateRoute: typeof GmvMaxCreateRoute
   MaterialPerformanceRoute: typeof MaterialPerformanceRoute
   SettingsRoute: typeof SettingsRoute
   OauthTiktokCallbackRoute: typeof OauthTiktokCallbackRoute
@@ -189,6 +202,13 @@ declare module '@tanstack/react-router' {
       path: '/material-performance'
       fullPath: '/material-performance'
       preLoaderRoute: typeof MaterialPerformanceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/gmv-max-create': {
+      id: '/gmv-max-create'
+      path: '/gmv-max-create'
+      fullPath: '/gmv-max-create'
+      preLoaderRoute: typeof GmvMaxCreateRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/gmv-attribution-admin': {
@@ -264,6 +284,7 @@ const rootRouteChildren: RootRouteChildren = {
   FeishuDataRoute: FeishuDataRoute,
   GmvAttributionRoute: GmvAttributionRoute,
   GmvAttributionAdminRoute: GmvAttributionAdminRoute,
+  GmvMaxCreateRoute: GmvMaxCreateRoute,
   MaterialPerformanceRoute: MaterialPerformanceRoute,
   SettingsRoute: SettingsRoute,
   OauthTiktokCallbackRoute: OauthTiktokCallbackRoute,
