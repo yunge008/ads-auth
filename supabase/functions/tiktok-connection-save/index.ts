@@ -1,5 +1,5 @@
 // Persist a TikTok connection AFTER the user picks which advertisers to keep.
-// Body: { label, access_token, bc_id, expires_at, advertiser_ids: string[] }
+// Body: { label, access_token, bc_id, bc_name, expires_at, advertiser_ids: string[] }
 // Returns: { id, label, advertiser_ids }
 import { corsHeaders } from "../_shared/feishu.ts";
 import { admin, checkAdminPasscode } from "../_shared/auth.ts";
@@ -12,6 +12,7 @@ Deno.serve(async (req) => {
       label?: string;
       access_token?: string;
       bc_id?: string | null;
+      bc_name?: string | null;
       expires_at?: string | null;
       advertiser_ids?: string[];
     };
@@ -29,6 +30,7 @@ Deno.serve(async (req) => {
         label,
         access_token,
         bc_id: body.bc_id ?? null,
+        bc_name: body.bc_name ?? null,
         advertiser_ids,
         expires_at: body.expires_at ?? null,
       })

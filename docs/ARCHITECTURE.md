@@ -16,6 +16,7 @@
 | --- | --- |
 | `/` index.tsx | 执行授权：拉飞书素材 → 批量授权 TikTok 广告户 → 回写状态 |
 | `/material-performance` | 素材成效（GMV Max VID 级数据） |
+| `/gmv-max-create` | GMV MAX新建：表单/Excel 批量真实新建 GMV Max 广告组（TikTok 无独立 adgroup 层，等价于建 campaign） |
 | `/feishu-data` | 已获取数据查阅（GMV Max 日报等） |
 | `/comments` | 评论内容（暂隐藏，API 不支持） |
 | `/gmv-attribution` | GMV 归因·用户视图：在职同事按站点归因 GMV + KPI 进度（同事×站点 < 2000 USD 不计入） |
@@ -32,16 +33,16 @@
 
 - **飞书侧**：`feishu-read`（素材表，「建联-姓名」sheet，读 A2:W，P=VID / Q=授权码 / K=SKU / N=登记日期）、`feishu-read-sku` / `feishu-read-editors` / `feishu-read-bd-vids`、`feishu-writeback`（回写授权状态到 V=投放日期 / W=状态）、`staff-sheets`
 - **TikTok 侧**：`tiktok-oauth-init` / `tiktok-oauth-exchange` / `tiktok-connection-save` / `tiktok-connections`（token 管理，存 `tiktok_connections`）、`bc-list-advertisers`、`authorize-batch`（核心：素材授权）
-- **GMV Max**：`gmv-max-sync`（拉报表写 `gmv_max_vid_daily`，单 token 串行、≤3 QPS、80s 预算、返回 remaining_* 支持续跑）、`gmv-max-raw-export`（只读 CSV：单广告户、最多 31 天、PRODUCT_GMV_MAX 原始返回字段）、`gmv-max-query`、`gmv-max-daily-report`（服务端聚合）、`gmv-max-live-status`（按广告户+Campaign+商品+VID 直接查询 TikTok BC，不读写 GMV 明细表）、`gmv-max-adgroup-create`（写接口：透传 POST `/campaign/gmv_max/create/`，真实新建 GMV Max campaign/广告组，会产生真实花费；不做字段校验，调用方在 API 测试页手填完整 TikTok GmvMaxCreateBody JSON）
+- **GMV Max**：`gmv-max-sync`（拉报表写 `gmv_max_vid_daily`，单 token 串行、≤3 QPS、80s 预算、返回 remaining_* 支持续跑）、`gmv-max-raw-export`（只读 CSV：单广告户、最多 31 天、PRODUCT_GMV_MAX 原始返回字段）、`gmv-max-query`、`gmv-max-daily-report`（服务端聚合）、`gmv-max-live-status`（按广告户+Campaign+商品+VID 直接查询 TikTok BC，不读写 GMV 明细表）、`gmv-max-adgroup-create`（写接口：透传 POST `/campaign/gmv_max/create/`，真实新建 GMV Max campaign/广告组，会产生真实花费；不做字段校验，供 API 测试页手填完整 TikTok GmvMaxCreateBody JSON）、`gmv-max-adgroup-batch-create`（写接口：结构化输入 `{rows:[...]}`，`/gmv-max-create` 页面表单与 Excel 批量上传共用；自动按 advertiser_id 从 `advertiser_countries.shop_id`/`tiktok_connections.bc_id` 取 store_id/store_authorized_bc_id，固定 shopping_ads_type=PRODUCT、product_specific_type=CUSTOMIZED_PRODUCTS、optimization_goal=VALUE、deep_bid_type=VO_MIN_ROAS、product_video_specific_type=AUTO_SELECTION，逐行调用，单行失败不影响其余行，返回逐行结果）
 - **评论**：`tiktok-comments-sync` / `tiktok-comments-translate`（暂停用）
 - **GMV 归因**：`attribution-sync-creators`（读建联表 D用户名/E昵称/N登记日期 + 授权记录归档 + 剪辑表 → `creator_registry`，保护期解析 → `creator_ownership`）、`attribution-run`（月度归因报表，RPC `gmv_attr_monthly_agg` 聚合 + 归因引擎，view=admin/user）、`attribution-upload`（Excel 上传 create/append/finalize/list/get/delete，文件名「站点 MAX yyyymm.xlsx」）、`attribution-feishu`（write-progress/write-reviews/read-judgments/sync-targets/sync-handovers/write-ownership/list-reviews，对应飞书主表格内 5 个 sheet：归因进度/归因审查/GMV目标/站点交接/达人归因表）
 - **其他**：`app-accounts`（账号 CRUD）、`data-preview`
-- **共享**：`_shared/auth.ts`（口令校验 + service role client）、`_shared/feishu.ts`（tenant token、分页读 sheet、CORS；readRange 支持自定义分块行数）、`_shared/tiktok.ts`（TikTok GET/POST 限速、超时与退避重试：`ttGet` 只读、`ttPost` 写调用需调用方传 TikTok 要求的幂等 `request_id`）、`_shared/cells.ts`（cellText/parseDate）、`_shared/attribution.ts`（归因引擎纯函数：瀑布归因/保护期/站点交接分段/VID推断别名/VID>>32 发布时间）、`_shared/attribution-report.ts`（归因上下文加载 + 汇总 + 月度报表）
+- **共享**：`_shared/auth.ts`（口令校验 + service role client）、`_shared/feishu.ts`（tenant token、分页读 sheet、CORS；readRange 支持自定义分块行数）、`_shared/tiktok.ts`（TikTok GET/POST 限速、超时与退避重试：`ttGet` 只读、`ttPost` 写调用需调用方传 TikTok 要求的幂等 `request_id`）、`_shared/gmv-max-adgroup.ts`（`findConnectionsForAdvertiser`/`createGmvMaxCampaign`/`genRequestId`，`gmv-max-adgroup-create` 与 `gmv-max-adgroup-batch-create` 共用：按广告户找可用授权，逐个 token 重试到某个有 GMV Max 写权限的为止）、`_shared/cells.ts`（cellText/parseDate）、`_shared/attribution.ts`（归因引擎纯函数：瀑布归因/保护期/站点交接分段/VID推断别名/VID>>32 发布时间）、`_shared/attribution-report.ts`（归因上下文加载 + 汇总 + 月度报表）
 - **Cron bypass**：`gmv-max-sync` / `feishu-read` / `authorize-batch` / `feishu-writeback` 均支持 `x-cron-key` header（值=vault secret `gmv_max_cron_secret`，通过 `verify_gmv_cron_key` RPC 校验），用于跳过 admin 口令校验，仅给上述两个 cron 路由使用
 
 ## 数据库主要表
 
-`app_accounts`（账号/权限）、`staff_sheets`、`staff_vid_map`、`sku_product_map`、`advertiser_countries`、`tiktok_connections`（token）、`gmv_max_vid_daily`（明细大表，country×advertiser×campaign×item×day）、`gmv_max_vid_meta`（+posted_at 发布时间）、`gmv_max_sync_state`、`authorize_cron_state`（每日自动授权运行记录）、`tiktok_comments`(+sync_state)
+`app_accounts`（账号/权限）、`staff_sheets`、`staff_vid_map`、`sku_product_map`、`advertiser_countries`（含 shop_id，即 GMV Max 建单用的 store_id）、`tiktok_connections`（token + bc_id/bc_name，bc_id 即 GMV Max 建单用的 store_authorized_bc_id）、`gmv_max_vid_daily`（明细大表，country×advertiser×campaign×item×day）、`gmv_max_vid_meta`（+posted_at 发布时间）、`gmv_max_sync_state`、`authorize_cron_state`（每日自动授权运行记录）、`tiktok_comments`(+sync_state)
 
 **GMV 归因**：`creator_registry`（达人登记原始行，按 source_sheet 全量重建）、`creator_ownership`（昵称/用户名→BD 保护期解析结果）、`site_handovers`（站点交接，昵称归因按发布时间分段）、`creator_alias`（别名：VID_INFERRED 自动推断 / MANUAL 人工判定，MANUAL 永不被自动覆盖）、`attribution_review`（审查项，review_key 幂等，回写飞书+读回人工判定）、`gmv_targets`（月度目标）、`ad_uploads`+`ad_upload_rows`（Excel 上传批次与行，含 attr_* 归因结果列）；RPC `gmv_attr_monthly_agg`（月度按 vid×账号×内容类型×国家×货币 聚合）
 

@@ -116,7 +116,10 @@ function ApiTestPage() {
           <p className="text-xs text-muted-foreground">
             例：<code>gmv-max-adgroup-create {"{...}"}</code> 会真实调用 TikTok <code>/campaign/gmv_max/create/</code>
             新建 GMV Max 广告组（含预算/商品/出价，TikTok 侧无独立广告组接口，campaign create 即等价物），会产生真实花费；
-            函数只透传请求体，不校验字段，需按 TikTok GMV Max Campaign Create 文档手填完整 JSON（含 advertiser_id、request_id 等必填项）。
+            函数只透传请求体，不校验字段，需按 TikTok GMV Max Campaign Create 文档手填完整 JSON（含 advertiser_id、request_id 等必填项）；
+            <code>request_id</code> 必须是能解析成 int64 的纯数字字符串（不能用 UUID）；
+            <code>roas_bid</code>、<code>budget</code> 必须是数字类型（不能加引号）；
+            <code>advertiser_id</code> 对应的 TikTok App 需已获得 GMV Max Campaign Management 写权限，否则报 code=40001。
           </p>
           <Textarea value={command} onChange={(e) => setCommand(e.target.value)} className="min-h-32 font-mono text-xs" />
           <Button onClick={run} disabled={loading}><Play className="h-4 w-4 mr-1" />{loading ? "请求中…" : "执行测试"}</Button>

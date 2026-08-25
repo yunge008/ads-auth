@@ -10,9 +10,9 @@
 // schedule_type, schedule_start_time, request_id, budget, item_list /
 // item_group_ids, identity_list, ... per TikTok's GMV Max Campaign Create doc).
 // This creates a live, spend-generating campaign on the real ad account.
-import { admin, checkAdminPasscode, type ConnRow } from "../_shared/auth.ts";
+import { admin, checkAdminPasscode } from "../_shared/auth.ts";
 import { corsHeaders } from "../_shared/feishu.ts";
-import { ttPost } from "../_shared/tiktok.ts";
+import { createGmvMaxCampaign, findConnectionsForAdvertiser } from "../_shared/gmv-max-adgroup.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -23,32 +23,8 @@ Deno.serve(async (req) => {
     if (!advertiserId) throw new Error("advertiser_id 必填（须与 TikTok GmvMaxCreateBody 中的 advertiser_id 一致）");
 
     const db = admin();
-    const { data: connections, error } = await db
-      .from("tiktok_connections")
-      .select("access_token, advertiser_ids")
-      .contains("advertiser_ids", [advertiserId]);
-    if (error) throw new Error(error.message);
-    const conns = (connections ?? []) as Pick<ConnRow, "access_token" | "advertiser_ids">[];
-    if (conns.length === 0) throw new Error(`广告户 ${advertiserId} 没有可用的 TikTok 授权`);
-
-    // Try every authorization for this advertiser: some tokens may lack the
-    // GMV Max write scope (code=40001) while another one has it.
-    let data: Record<string, unknown> | null = null;
-    let lastErr: Error | null = null;
-    for (const conn of conns) {
-      try {
-        data = await ttPost(conn.access_token, "/campaign/gmv_max/create/", body);
-        break;
-      } catch (e) {
-        lastErr = e as Error;
-        if (!/40001|permission/i.test(lastErr.message)) throw lastErr;
-      }
-    }
-    if (!data) {
-      throw new Error(
-        `${lastErr?.message ?? "创建失败"}｜该广告户的授权缺少 GMV Max 建单（写）权限，请在 TikTok 商务中心重新授权并勾选广告管理写权限后重试`,
-      );
-    }
+    const conns = await findConnectionsForAdvertiser(db, advertiserId);
+    const data = await createGmvMaxCampaign(conns, body);
     return new Response(JSON.stringify({
       source: "tiktok_bc_live",
       endpoint: "/open_api/v1.3/campaign/gmv_max/create/",

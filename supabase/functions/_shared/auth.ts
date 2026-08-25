@@ -158,6 +158,7 @@ export type ConnRow = {
   label: string;
   access_token: string;
   bc_id: string | null;
+  bc_name: string | null;
   advertiser_ids: string[];
   expires_at: string | null;
   updated_at: string;

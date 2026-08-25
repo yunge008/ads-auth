@@ -152,6 +152,8 @@ export function AccountsTable() {
     (c.advertiser_ids.length ? c.advertiser_ids : [""]).map((aid, idx) => ({
       conn_id: c.id,
       label: c.label,
+      bc_id: c.bc_id ?? "",
+      bc_name: c.bc_name ?? "",
       advertiser_id: aid,
       advertiser_name: aid ? (advNameById.get(aid) ?? aid) : "—",
       country: aid ? (countries[aid] ?? "") : "",
@@ -190,6 +192,8 @@ export function AccountsTable() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-32">标签</TableHead>
+                  <TableHead className="w-36">BC 名称</TableHead>
+                  <TableHead className="w-44">BC ID</TableHead>
                   <TableHead>账户名</TableHead>
                   <TableHead className="w-44">账户ID</TableHead>
                   <TableHead className="w-32">国家</TableHead>
@@ -203,7 +207,7 @@ export function AccountsTable() {
               <TableBody>
                 {flatRows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="h-16 text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={11} className="h-16 text-center text-sm text-muted-foreground">
                       尚无连接，点「连接 TikTok」开始首次授权
                     </TableCell>
                   </TableRow>
@@ -246,6 +250,8 @@ export function AccountsTable() {
                           )
                         ) : null}
                       </TableCell>
+                      <TableCell className="text-xs">{r.is_first ? (r.bc_name || <span className="text-muted-foreground">—</span>) : null}</TableCell>
+                      <TableCell className="font-mono text-xs">{r.is_first ? (r.bc_id || <span className="text-muted-foreground font-sans">—</span>) : null}</TableCell>
                       <TableCell>{r.advertiser_name}</TableCell>
                       <TableCell className="font-mono text-xs">{r.advertiser_id || "—"}</TableCell>
                       <TableCell>
