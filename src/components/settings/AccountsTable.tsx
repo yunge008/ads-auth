@@ -44,6 +44,9 @@ export function AccountsTable() {
   const [editingShopAdv, setEditingShopAdv] = useState<string | null>(null);
   const [editingShopId, setEditingShopId] = useState("");
   const [editingShopName, setEditingShopName] = useState("");
+  const [editingBcConnId, setEditingBcConnId] = useState<string | null>(null);
+  const [editingBcId, setEditingBcId] = useState("");
+  const [editingBcName, setEditingBcName] = useState("");
 
   // Handle OAuth callback flag (new connection just added)
   useEffect(() => {
@@ -132,6 +135,19 @@ export function AccountsTable() {
       toast.success("已保存店铺信息");
       setEditingShopAdv(null);
       setShops((prev) => ({ ...prev, [advertiser_id]: { shop_id: shop_id || null, shop_name: shop_name || null } }));
+    } catch (e) {
+      toast.error(`保存失败：${(e as Error).message}`);
+    }
+  };
+
+  const handleSaveBc = async (connId: string) => {
+    const bc_id = editingBcId.trim();
+    const bc_name = editingBcName.trim();
+    try {
+      await invokeFn("tiktok-connections", { op: "set_bc", id: connId, bc_id, bc_name });
+      toast.success("已保存 BC 信息");
+      setEditingBcConnId(null);
+      refreshConnections();
     } catch (e) {
       toast.error(`保存失败：${(e as Error).message}`);
     }
@@ -250,8 +266,67 @@ export function AccountsTable() {
                           )
                         ) : null}
                       </TableCell>
-                      <TableCell className="text-xs">{r.is_first ? (r.bc_name || <span className="text-muted-foreground">—</span>) : null}</TableCell>
-                      <TableCell className="font-mono text-xs">{r.is_first ? (r.bc_id || <span className="text-muted-foreground font-sans">—</span>) : null}</TableCell>
+                      <TableCell>
+                        {!r.is_first ? null : editingBcConnId === r.conn_id ? (
+                          <div className="flex items-center gap-1">
+                            <Input
+                              value={editingBcName}
+                              onChange={(e) => setEditingBcName(e.target.value)}
+                              placeholder="BC 名称"
+                              className="h-7 w-28"
+                              autoFocus
+                            />
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 hover:underline text-xs"
+                            onClick={() => {
+                              setEditingBcConnId(r.conn_id);
+                              setEditingBcName(r.bc_name);
+                              setEditingBcId(r.bc_id);
+                            }}
+                          >
+                            {r.bc_name || <span className="text-muted-foreground">点击设置</span>}
+                            <Pencil className="h-3 w-3 text-muted-foreground" />
+                          </button>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {!r.is_first ? null : editingBcConnId === r.conn_id ? (
+                          <div className="flex items-center gap-1">
+                            <Input
+                              value={editingBcId}
+                              onChange={(e) => setEditingBcId(e.target.value)}
+                              placeholder="BC ID"
+                              className="h-7 w-36 font-mono text-xs"
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") handleSaveBc(r.conn_id);
+                                if (e.key === "Escape") setEditingBcConnId(null);
+                              }}
+                            />
+                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => handleSaveBc(r.conn_id)}>
+                              <Check className="h-4 w-4" />
+                            </Button>
+                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setEditingBcConnId(null)}>
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 hover:underline font-mono text-xs"
+                            onClick={() => {
+                              setEditingBcConnId(r.conn_id);
+                              setEditingBcName(r.bc_name);
+                              setEditingBcId(r.bc_id);
+                            }}
+                          >
+                            {r.bc_id || <span className="text-muted-foreground font-sans">点击设置</span>}
+                            <Pencil className="h-3 w-3 text-muted-foreground" />
+                          </button>
+                        )}
+                      </TableCell>
                       <TableCell>{r.advertiser_name}</TableCell>
                       <TableCell className="font-mono text-xs">{r.advertiser_id || "—"}</TableCell>
                       <TableCell>

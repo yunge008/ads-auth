@@ -42,7 +42,7 @@
 
 ## 数据库主要表
 
-`app_accounts`（账号/权限）、`staff_sheets`、`staff_vid_map`、`sku_product_map`、`advertiser_countries`（含 shop_id，即 GMV Max 建单用的 store_id）、`tiktok_connections`（token + bc_id/bc_name，bc_id 即 GMV Max 建单用的 store_authorized_bc_id）、`gmv_max_vid_daily`（明细大表，country×advertiser×campaign×item×day）、`gmv_max_vid_meta`（+posted_at 发布时间）、`gmv_max_sync_state`、`authorize_cron_state`（每日自动授权运行记录）、`tiktok_comments`(+sync_state)
+`app_accounts`（账号/权限）、`staff_sheets`、`staff_vid_map`、`sku_product_map`、`advertiser_countries`（含 shop_id，即 GMV Max 建单用的 store_id）、`tiktok_connections`（token + bc_id/bc_name，按连接/标签存一份，同一连接下所有广告户共享；bc_id 即 GMV Max 建单用的 store_authorized_bc_id；授权时从 TikTok 返回值自动带入，也可在设置页「TikTok 授权连接」表手动改）、`gmv_max_vid_daily`（明细大表，country×advertiser×campaign×item×day）、`gmv_max_vid_meta`（+posted_at 发布时间）、`gmv_max_sync_state`、`authorize_cron_state`（每日自动授权运行记录）、`tiktok_comments`(+sync_state)
 
 **GMV 归因**：`creator_registry`（达人登记原始行，按 source_sheet 全量重建）、`creator_ownership`（昵称/用户名→BD 保护期解析结果）、`site_handovers`（站点交接，昵称归因按发布时间分段）、`creator_alias`（别名：VID_INFERRED 自动推断 / MANUAL 人工判定，MANUAL 永不被自动覆盖）、`attribution_review`（审查项，review_key 幂等，回写飞书+读回人工判定）、`gmv_targets`（月度目标）、`ad_uploads`+`ad_upload_rows`（Excel 上传批次与行，含 attr_* 归因结果列）；RPC `gmv_attr_monthly_agg`（月度按 vid×账号×内容类型×国家×货币 聚合）
 
