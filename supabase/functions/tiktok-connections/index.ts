@@ -17,6 +17,8 @@ Deno.serve(async (req) => {
       op?: string;
       id?: string;
       label?: string;
+      bc_id?: string;
+      bc_name?: string;
       advertiser_id?: string;
       country?: string;
       shop_id?: string;
