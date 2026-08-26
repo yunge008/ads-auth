@@ -199,13 +199,14 @@ export function DataSyncCard() {
   const syncAllSheets = async () => {
     setBusy("同步飞书表");
     try {
-      const [ed, bd, sku] = await Promise.all([
+      const [ed, bd, sku, conn] = await Promise.all([
         invokeFn<Record<string, unknown>>("feishu-read-editors", {}).catch((e) => ({ error: (e as Error).message })),
         invokeFn<Record<string, unknown>>("feishu-read-bd-vids", {}).catch((e) => ({ error: (e as Error).message })),
         invokeFn<Record<string, unknown>>("feishu-read-sku", {}).catch((e) => ({ error: (e as Error).message })),
+        invokeFn<Record<string, unknown>>("feishu-read-connection-stats", {}).catch((e) => ({ error: (e as Error).message })),
       ]);
       toast.success(`飞书表完成：editor=${JSON.stringify(ed).slice(0,80)} ...`);
-      void bd; void sku;
+      void bd; void sku; void conn;
     } catch (e) { toast.error((e as Error).message); }
     finally { setBusy(null); }
   };

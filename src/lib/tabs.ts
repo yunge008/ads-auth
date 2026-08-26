@@ -1,7 +1,7 @@
 // Central registry of app tabs (UI nav + permission keys).
 // To add a new tab: add an entry here, create the route file, then admin
 // assigns the tab key in the account permissions UI.
-import { Database, MessageSquare, PlusCircle, Settings, Target, TerminalSquare, TrendingUp, Zap, type LucideIcon } from "lucide-react";
+import { Database, MessageSquare, PlusCircle, Settings, Target, TerminalSquare, TrendingUp, Users, Zap, type LucideIcon } from "lucide-react";
 
 export type TabDef = {
   key: string;
@@ -15,6 +15,7 @@ export const TABS: TabDef[] = [
   { key: "home", label: "执行授权", to: "/", icon: Zap },
   // 评论内容暂时隐藏，相关 API 暂不支持
   // { key: "comments", label: "评论内容", to: "/comments", icon: MessageSquare },
+  { key: "connection-stats", label: "发样及素材统计", to: "/connection-stats", icon: Users },
   { key: "material-performance", label: "素材成效", to: "/material-performance", icon: TrendingUp },
   { key: "gmv-max-create", label: "GMV MAX新建", to: "/gmv-max-create", icon: PlusCircle },
   { key: "gmv-attribution", label: "GMV 归因", to: "/gmv-attribution", icon: Target },
