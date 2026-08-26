@@ -392,39 +392,44 @@ function GmvMaxCreatePage() {
         </p>
       </div>
 
-      <Card>
-        <CardHeader><CardTitle className="text-base">单个新建</CardTitle></CardHeader>
-        <CardContent className="space-y-3">
-          <div className="space-y-3 max-w-3xl">
-            <div className="space-y-1">
-              <span className="text-xs text-muted-foreground">广告户</span>
-              <Select value={advertiserId} onValueChange={setAdvertiserId}>
-                <SelectTrigger><SelectValue placeholder="选择广告户" /></SelectTrigger>
-                <SelectContent>
-                  {advOptions.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>
-                      {a.name}（{a.id}）{(!a.shopId || !a.bcId) ? " · 缺店铺/BC信息" : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {advNotReady && (
-                <p className="text-xs text-amber-600 flex items-center gap-1">
-                  <AlertTriangle className="h-3 w-3" />
-                  该广告户缺少{!selectedAdv?.shopId ? "店铺ID" : ""}{!selectedAdv?.shopId && !selectedAdv?.bcId ? "、" : ""}{!selectedAdv?.bcId ? "BC ID" : ""}，请先去「设置」补齐
-                </p>
-              )}
-            </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-stretch">
+        <Card>
+          <CardHeader><CardTitle className="text-base">单个新建</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <span className="text-xs text-muted-foreground">商品ID（一行一个，也支持用逗号分隔，中英文逗号均可，框内自动换行）</span>
-                <Textarea value={itemGroupIdsText} onChange={(e) => setItemGroupIdsText(e.target.value)} className="min-h-[212px] font-mono text-xs" placeholder={"1731973887448024673\n1731912594758796897"} />
+                <span className="text-xs text-muted-foreground">广告户</span>
+                <Select value={advertiserId} onValueChange={setAdvertiserId}>
+                  <SelectTrigger><SelectValue placeholder="选择广告户" /></SelectTrigger>
+                  <SelectContent>
+                    {advOptions.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.name}（{a.id}）{(!a.shopId || !a.bcId) ? " · 缺店铺/BC信息" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {advNotReady && (
+                  <p className="text-xs text-amber-600 flex items-center gap-1">
+                    <AlertTriangle className="h-3 w-3" />
+                    该广告户缺少{!selectedAdv?.shopId ? "店铺ID" : ""}{!selectedAdv?.shopId && !selectedAdv?.bcId ? "、" : ""}{!selectedAdv?.bcId ? "BC ID" : ""}，请先去「设置」补齐
+                  </p>
+                )}
               </div>
-              <div className="space-y-3">
-                <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground">广告组名称</span>
-                  <Input value={campaignName} onChange={(e) => setCampaignName(e.target.value)} placeholder="如 观察组3-R3.2" />
-                </div>
+              <div className="space-y-1">
+                <span className="text-xs text-muted-foreground">广告组名称</span>
+                <Input value={campaignName} onChange={(e) => setCampaignName(e.target.value)} placeholder="如 观察组3-R3.2" />
+              </div>
+            </div>
+            <div className="flex flex-col md:flex-row gap-3 items-stretch">
+              <div className="flex-1 flex flex-col space-y-1 min-w-0">
+                <span className="flex flex-col text-xs text-muted-foreground">
+                  <span>商品ID</span>
+                  <span>（一行一个，也支持用逗号分隔，中英文逗号均可，框内自动换行）</span>
+                </span>
+                <Textarea value={itemGroupIdsText} onChange={(e) => setItemGroupIdsText(e.target.value)} className="flex-1 min-h-[152px] font-mono text-xs" placeholder={"1731973887448024673\n1731912594758796897"} />
+              </div>
+              <div className="flex-1 flex flex-col justify-between gap-3 min-w-0">
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground">ROI（roas_bid）</span>
                   <Input type="number" step="0.1" min="0" value={roasBid} onChange={(e) => setRoasBid(e.target.value)} placeholder="如 3.2" />
@@ -443,55 +448,55 @@ function GmvMaxCreatePage() {
                 </div>
               </div>
             </div>
-          </div>
-          <Button onClick={handleSubmit} disabled={submitting}>
-            <Play className="h-4 w-4 mr-1" />{submitting ? "创建中…" : "创建广告组"}
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader><CardTitle className="text-base">Excel 批量新建</CardTitle></CardHeader>
-        <CardContent className="space-y-3">
-          <p className="text-xs text-muted-foreground">
-            列：广告户ID / 广告组名称 / 商品ID（多个用逗号或换行分隔）/ ROI / 预算 / 开始时间（可空）/ 结束时间（可空）。设置逻辑同「单个新建」。
-            模板 A:C 列固定为文本格式，F:G 列固定为日期时间格式。
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" variant="outline" onClick={downloadTemplate}><Download className="h-4 w-4 mr-1" />下载模板</Button>
-            <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={batchSubmitting}>
-              <Upload className="h-4 w-4 mr-1" />上传文件
+            <Button onClick={handleSubmit} disabled={submitting}>
+              <Play className="h-4 w-4 mr-1" />{submitting ? "创建中…" : "创建广告组"}
             </Button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".xlsx,.xls"
-              className="hidden"
-              disabled={batchSubmitting}
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) handleFile(f);
-                e.target.value = "";
-              }}
-            />
-            {batchRows.length > 0 && (
-              <Button size="sm" variant="outline" onClick={downloadBatchResults}>
-                <Download className="h-4 w-4 mr-1" />下载结果
-              </Button>
-            )}
-          </div>
-          {fileName && (
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle className="text-base">Excel 批量新建</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              {fileName} · 解析到 {batchRows.length} 行
-              {batchRows.some((r) => r.status === "invalid") ? `，${batchRows.filter((r) => r.status === "invalid").length} 行校验未通过` : ""}
+              列：广告户ID / 广告组名称 / 商品ID（多个用逗号或换行分隔）/ ROI / 预算 / 开始时间（可空）/ 结束时间（可空）。设置逻辑同「单个新建」。
+              模板 A:C 列固定为文本格式，F:G 列固定为日期时间格式。
             </p>
-          )}
-          <BatchPreviewTable rows={batchRows} statusLabel={batchStatusLabel} />
-          <Button onClick={executeBatch} disabled={!batchRows.length || batchRows.every((r) => r.status === "invalid") || batchSubmitting}>
-            <Play className="h-4 w-4 mr-1" />{batchSubmitting ? "批量创建中…" : `执行创建（${batchRows.filter((r) => r.status !== "invalid").length} 行）`}
-          </Button>
-        </CardContent>
-      </Card>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="outline" onClick={downloadTemplate}><Download className="h-4 w-4 mr-1" />下载模板</Button>
+              <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={batchSubmitting}>
+                <Upload className="h-4 w-4 mr-1" />上传文件
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                className="hidden"
+                disabled={batchSubmitting}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleFile(f);
+                  e.target.value = "";
+                }}
+              />
+              {batchRows.length > 0 && (
+                <Button size="sm" variant="outline" onClick={downloadBatchResults}>
+                  <Download className="h-4 w-4 mr-1" />下载结果
+                </Button>
+              )}
+            </div>
+            {fileName && (
+              <p className="text-xs text-muted-foreground">
+                {fileName} · 解析到 {batchRows.length} 行
+                {batchRows.some((r) => r.status === "invalid") ? `，${batchRows.filter((r) => r.status === "invalid").length} 行校验未通过` : ""}
+              </p>
+            )}
+            <BatchPreviewTable rows={batchRows} statusLabel={batchStatusLabel} />
+            <Button onClick={executeBatch} disabled={!batchRows.length || batchRows.every((r) => r.status === "invalid") || batchSubmitting}>
+              <Play className="h-4 w-4 mr-1" />{batchSubmitting ? "批量创建中…" : `执行创建（${batchRows.filter((r) => r.status !== "invalid").length} 行）`}
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
 
       <ResultsTable results={results} />
     </div>
