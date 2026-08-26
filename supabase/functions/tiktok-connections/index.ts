@@ -3,6 +3,7 @@
 //   { op: "list" } -> { connections: [...], countries: {advertiser_id: country}, shops: {...}, active: {advertiser_id: boolean} }
 //   { op: "delete", id }                  -> { ok }
 //   { op: "update", id, label }           -> { ok }
+//   { op: "set_bc", id, bc_id, bc_name }  -> { ok }  // 编辑 BC 名称/BC ID
 //   { op: "set_country", advertiser_id, country }  // empty country to clear；首次设置默认 active=false
 //   { op: "set_active", advertiser_id, active }    // 国家唯一性只在 active=true 的广告户间强制
 import { corsHeaders } from "../_shared/feishu.ts";
