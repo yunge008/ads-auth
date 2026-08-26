@@ -395,7 +395,7 @@ function GmvMaxCreatePage() {
       <Card>
         <CardHeader><CardTitle className="text-base">单个新建</CardTitle></CardHeader>
         <CardContent className="space-y-3">
-          <div className="grid grid-cols-2 gap-3 max-w-3xl">
+          <div className="space-y-3 max-w-3xl">
             <div className="space-y-1">
               <span className="text-xs text-muted-foreground">广告户</span>
               <Select value={advertiserId} onValueChange={setAdvertiserId}>
@@ -415,29 +415,33 @@ function GmvMaxCreatePage() {
                 </p>
               )}
             </div>
-            <div className="space-y-1">
-              <span className="text-xs text-muted-foreground">广告组名称</span>
-              <Input value={campaignName} onChange={(e) => setCampaignName(e.target.value)} placeholder="如 观察组3-R3.2" />
-            </div>
-            <div className="space-y-1 col-span-2">
-              <span className="text-xs text-muted-foreground">商品ID（一行一个）</span>
-              <Textarea value={itemGroupIdsText} onChange={(e) => setItemGroupIdsText(e.target.value)} className="min-h-20 font-mono text-xs" placeholder={"1731973887448024673\n1731912594758796897"} />
-            </div>
-            <div className="space-y-1">
-              <span className="text-xs text-muted-foreground">ROI（roas_bid）</span>
-              <Input type="number" step="0.1" min="0" value={roasBid} onChange={(e) => setRoasBid(e.target.value)} placeholder="如 3.2" />
-            </div>
-            <div className="space-y-1">
-              <span className="text-xs text-muted-foreground">预算</span>
-              <Input type="number" step="1" min="0" value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="如 30" />
-            </div>
-            <div className="space-y-1">
-              <span className="text-xs text-muted-foreground">开始时间（默认马上开始）</span>
-              <Input type="datetime-local" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <span className="text-xs text-muted-foreground">结束时间（默认不设置）</span>
-              <Input type="datetime-local" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <span className="text-xs text-muted-foreground">商品ID（一行一个，也支持用逗号分隔，中英文逗号均可，框内自动换行）</span>
+                <Textarea value={itemGroupIdsText} onChange={(e) => setItemGroupIdsText(e.target.value)} className="min-h-[212px] font-mono text-xs" placeholder={"1731973887448024673\n1731912594758796897"} />
+              </div>
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground">广告组名称</span>
+                  <Input value={campaignName} onChange={(e) => setCampaignName(e.target.value)} placeholder="如 观察组3-R3.2" />
+                </div>
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground">ROI（roas_bid）</span>
+                  <Input type="number" step="0.1" min="0" value={roasBid} onChange={(e) => setRoasBid(e.target.value)} placeholder="如 3.2" />
+                </div>
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground">预算</span>
+                  <Input type="number" step="1" min="0" value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="如 30" />
+                </div>
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground">开始时间（默认马上开始）</span>
+                  <Input type="datetime-local" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
+                </div>
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground">结束时间（默认不设置）</span>
+                  <Input type="datetime-local" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+                </div>
+              </div>
             </div>
           </div>
           <Button onClick={handleSubmit} disabled={submitting}>

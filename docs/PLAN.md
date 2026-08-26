@@ -27,6 +27,8 @@
 
 ## 已完成
 
+- ✅ 2026-08-26 [claude] GMV MAX新建页面 · 单个新建表单布局调整：广告户单独一行；下方左右两栏——左栏商品ID多行文本框（一行一个，同时兼容中英文逗号分隔，文本框内自动换行，沿用已有 splitIds 解析逻辑未改后端，加高对齐右栏高度）；右栏由上到下竖排广告组名称、ROI、预算、开始时间、结束时间 5 项，与左侧商品ID框左右并排。仅调整字段布局与提示文案，未改校验和提交逻辑。 | src/routes/gmv-max-create.tsx, src/lib/version.ts | 不需要做任何事，Lovable 同步 main 自动生效。
+
 - ✅ 2026-08-26 [claude] GMV MAX新建页面 · Excel 批量新建交互优化：①「下载模板」右侧改为「上传文件」按钮（隐藏 input + 触发点击，样式同「下载模板」），不再用原生文件选择框；②上传后直接在模板正下方渲染预览表格（含每行商品ID/ROI/预算/时间等全部字段），不用等点「批量创建」才能看到内容；③点「执行创建」后改为逐行串行调用 `gmv-max-adgroup-batch-create`（每次只传 1 行），每行状态在表格里实时刷新为「创建中…→成功/失败」，校验不通过的行直接标「校验未通过」并跳过调用，不再要求整批先修完校验错误才能提交；④结果表格支持「下载结果」导出为 xlsx（含状态列 + CampaignID/错误原因列）；⑤下载模板生成逻辑改为对 A:C（广告户ID/广告组名称/商品ID）列预设文本格式（`z:"@"`，避免大数字 ID 被 Excel 转科学计数法），F:G（开始/结束时间）列预设 `yyyy-mm-dd hh:mm:ss` 日期时间格式，预格式化到 200 行（对齐批量接口单次上限），后续在模板里继续填行也保持格式。纯前端改动，未碰 Edge Function / DB。 | src/routes/gmv-max-create.tsx, src/lib/version.ts | 不需要做任何事，Lovable 同步 main 自动生效。
 
 - ✅ 2026-08-13 [claude] 广告户启用/停用开关 + 国家唯一性收紧为仅在启用广告户间强制；执行授权目标改为「素材列表筛选」与「待授权账户面板开关」AND 生效；执行授权拉取只读 BD 角色；人员表加只读「飞书表格」派生列。**待人工**：跑迁移 `20260813120000_advertiser_countries_active.sql`。`tiktok-connections`、`feishu-read`、`authorize-batch` 三个 Edge Function 已重新部署。 | supabase/migrations/20260813120000_advertiser_countries_active.sql, supabase/functions/{tiktok-connections,feishu-read,authorize-batch}/index.ts, src/lib/store.ts, src/components/settings/{AccountsTable,StaffTable}.tsx, src/routes/index.tsx
