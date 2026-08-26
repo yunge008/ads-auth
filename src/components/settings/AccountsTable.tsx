@@ -39,6 +39,7 @@ export function AccountsTable() {
   const [connecting, setConnecting] = useState(false);
   const [editingConnId, setEditingConnId] = useState<string | null>(null);
   const [editingConnLabel, setEditingConnLabel] = useState("");
+  const [editingConnBC, setEditingConnBC] = useState<{ id: string; bc_name: string; bc_id: string } | null>(null);
   const [editingCountryAdv, setEditingCountryAdv] = useState<string | null>(null);
   const [editingCountryVal, setEditingCountryVal] = useState("");
   const [editingShopAdv, setEditingShopAdv] = useState<string | null>(null);
