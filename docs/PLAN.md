@@ -27,6 +27,8 @@
 
 ## 已完成
 
+- ✅ 2026-08-26 [claude] GMV MAX新建页面底部加两个 TikTok 官方 API 文档链接（新标签页打开）：「GMV MAX创建API」→ https://business-api.tiktok.com/portal/docs/create-product-gmv-max-campaigns/v1.3 ，「GMV MAX修改API」→ https://business-api.tiktok.com/portal/docs/update-a-gmv-max-campaign/v1.3 。纯前端文案改动。 | src/routes/gmv-max-create.tsx, src/lib/version.ts | 不需要做任何事，Lovable 同步 main 自动生效。
+
 - ✅ 2026-08-26 [claude] GMV MAX新建页面 · 恢复上下排版：「单个新建」/「Excel 批量新建」两张卡片改回上下堆叠（撤销上一次的左右并排 grid）；「单个新建」内部改为第一行 6 项并排（广告户/广告组名称/ROI/预算/开始时间/结束时间，`grid-cols-2 sm:grid-cols-3 lg:grid-cols-6`），第二行商品ID多行文本框独占整行（`rows={2}` 默认两行高、`w-full`）。仅布局调整，未改校验/提交逻辑。 | src/routes/gmv-max-create.tsx, src/lib/version.ts | 不需要做任何事，Lovable 同步 main 自动生效。
 
 - ✅ 2026-08-26 [claude] GMV MAX新建页面 · 「单个新建」/「Excel 批量新建」两张卡片改左右并排（`grid lg:grid-cols-2 items-stretch`，两卡整体高度保持一致）；单个新建内部布局改回：广告户/广告组名称同一行，下方商品ID文本框与 ROI/预算/开始时间/结束时间 4 项左右并排（flex + `items-stretch` + 商品ID 用 `flex-1` 自适应高度，下边缘自动跟结束时间框对齐，不用硬编码像素）；商品ID提示语「（一行一个，也支持用逗号分隔，中英文逗号均可，框内自动换行）」拆到独立第二行显示，不与「商品ID」共一行挤压换行。仅布局调整，未改校验/提交逻辑。 | src/routes/gmv-max-create.tsx, src/lib/version.ts | 不需要做任何事，Lovable 同步 main 自动生效。

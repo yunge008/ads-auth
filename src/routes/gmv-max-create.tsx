@@ -493,6 +493,25 @@ function GmvMaxCreatePage() {
       </Card>
 
       <ResultsTable results={results} />
+
+      <p className="text-xs text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
+        <a
+          href="https://business-api.tiktok.com/portal/docs/create-product-gmv-max-campaigns/v1.3"
+          target="_blank"
+          rel="noreferrer"
+          className="text-primary hover:underline"
+        >
+          GMV MAX创建API
+        </a>
+        <a
+          href="https://business-api.tiktok.com/portal/docs/update-a-gmv-max-campaign/v1.3"
+          target="_blank"
+          rel="noreferrer"
+          className="text-primary hover:underline"
+        >
+          GMV MAX修改API
+        </a>
+      </p>
     </div>
   );
 }
