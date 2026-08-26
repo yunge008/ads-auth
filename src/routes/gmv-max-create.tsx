@@ -157,8 +157,8 @@ function BatchPreviewTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((r, i) => (
-            <TableRow key={i}>
+          {rows.map((r) => (
+            <TableRow key={r.rowNo}>
               <TableCell className="text-xs text-muted-foreground">{r.rowNo}</TableCell>
               <TableCell className="font-mono text-xs">{r.advertiser_id}</TableCell>
               <TableCell className="text-xs">{r.campaign_name}</TableCell>
@@ -455,7 +455,7 @@ function GmvMaxCreatePage() {
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" variant="outline" onClick={downloadTemplate}><Download className="h-4 w-4 mr-1" />下载模板</Button>
-            <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()}>
+            <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={batchSubmitting}>
               <Upload className="h-4 w-4 mr-1" />上传文件
             </Button>
             <input
@@ -463,6 +463,7 @@ function GmvMaxCreatePage() {
               type="file"
               accept=".xlsx,.xls"
               className="hidden"
+              disabled={batchSubmitting}
               onChange={(e) => {
                 const f = e.target.files?.[0];
                 if (f) handleFile(f);
