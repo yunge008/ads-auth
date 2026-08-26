@@ -27,6 +27,8 @@
 
 ## 已完成
 
+- ✅ 2026-08-26 [claude] 新增只读诊断 Edge Function `gmv-max-identity-get`：透传 TikTok `GET /gmv_max/identity/get/`，用于在 API测试页验证「授权所有账号（BC 已授权 TikTok 账号）」能否被查到，为「GMV Max 建单缺 identity_list」修复计划（见本文件下方任务）做前期验证，本身只读不建单不改动任何数据。**待人工**：部署该 Edge Function（见下方 B 类清单）。 | supabase/functions/gmv-max-identity-get/index.ts, src/lib/version.ts | 部署后在「API测试」页「通用查询指令」框粘贴：`gmv-max-identity-get {"advertiser_id":"你的广告户ID"}` 执行测试，store_id 会自动从 advertiser_countries.shop_id 取，不用手填。
+
 - ✅ 2026-08-26 [claude] GMV MAX新建页面底部加两个 TikTok 官方 API 文档链接（新标签页打开）：「GMV MAX创建API」→ https://business-api.tiktok.com/portal/docs/create-product-gmv-max-campaigns/v1.3 ，「GMV MAX修改API」→ https://business-api.tiktok.com/portal/docs/update-a-gmv-max-campaign/v1.3 。纯前端文案改动。 | src/routes/gmv-max-create.tsx, src/lib/version.ts | 不需要做任何事，Lovable 同步 main 自动生效。
 
 - ✅ 2026-08-26 [claude] GMV MAX新建页面 · 恢复上下排版：「单个新建」/「Excel 批量新建」两张卡片改回上下堆叠（撤销上一次的左右并排 grid）；「单个新建」内部改为第一行 6 项并排（广告户/广告组名称/ROI/预算/开始时间/结束时间，`grid-cols-2 sm:grid-cols-3 lg:grid-cols-6`），第二行商品ID多行文本框独占整行（`rows={2}` 默认两行高、`w-full`）。仅布局调整，未改校验/提交逻辑。 | src/routes/gmv-max-create.tsx, src/lib/version.ts | 不需要做任何事，Lovable 同步 main 自动生效。
