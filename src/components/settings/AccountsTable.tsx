@@ -39,6 +39,7 @@ export function AccountsTable() {
   const [connecting, setConnecting] = useState(false);
   const [editingConnId, setEditingConnId] = useState<string | null>(null);
   const [editingConnLabel, setEditingConnLabel] = useState("");
+  const [editingConnBC, setEditingConnBC] = useState<{ id: string; bc_name: string; bc_id: string } | null>(null);
   const [editingCountryAdv, setEditingCountryAdv] = useState<string | null>(null);
   const [editingCountryVal, setEditingCountryVal] = useState("");
   const [editingShopAdv, setEditingShopAdv] = useState<string | null>(null);
@@ -103,6 +104,20 @@ export function AccountsTable() {
       refreshConnections();
     } catch (e) {
       toast.error(`更新失败：${(e as Error).message}`);
+    }
+  };
+
+  const handleSaveBC = async (id: string) => {
+    if (!editingConnBC) return;
+    const bc_name = editingConnBC.bc_name.trim();
+    const bc_id = editingConnBC.bc_id.trim();
+    try {
+      await invokeFn("tiktok-connections", { op: "set_bc", id, bc_name, bc_id });
+      toast.success("已保存 BC 信息");
+      setEditingConnBC(null);
+      refreshConnections();
+    } catch (e) {
+      toast.error(`保存失败：${(e as Error).message}`);
     }
   };
 
@@ -250,8 +265,65 @@ export function AccountsTable() {
                           )
                         ) : null}
                       </TableCell>
-                      <TableCell className="text-xs">{r.is_first ? (r.bc_name || <span className="text-muted-foreground">—</span>) : null}</TableCell>
-                      <TableCell className="font-mono text-xs">{r.is_first ? (r.bc_id || <span className="text-muted-foreground font-sans">—</span>) : null}</TableCell>
+                      <TableCell className="text-xs">
+                        {r.is_first ? (
+                          editingConnBC?.id === r.conn_id ? (
+                            <Input
+                              value={editingConnBC.bc_name}
+                              onChange={(e) => setEditingConnBC({ ...editingConnBC, bc_name: e.target.value })}
+                              placeholder="BC 名称"
+                              className="h-7 w-32"
+                              autoFocus
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") handleSaveBC(r.conn_id);
+                                if (e.key === "Escape") setEditingConnBC(null);
+                              }}
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 hover:underline"
+                              onClick={() => setEditingConnBC({ id: r.conn_id, bc_name: r.bc_name, bc_id: r.bc_id })}
+                            >
+                              {r.bc_name || <span className="text-muted-foreground">点击设置</span>}
+                              <Pencil className="h-3 w-3 text-muted-foreground" />
+                            </button>
+                          )
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {r.is_first ? (
+                          editingConnBC?.id === r.conn_id ? (
+                            <div className="flex items-center gap-1">
+                              <Input
+                                value={editingConnBC.bc_id}
+                                onChange={(e) => setEditingConnBC({ ...editingConnBC, bc_id: e.target.value })}
+                                placeholder="BC ID"
+                                className="h-7 w-32 font-mono text-xs"
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") handleSaveBC(r.conn_id);
+                                  if (e.key === "Escape") setEditingConnBC(null);
+                                }}
+                              />
+                              <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => handleSaveBC(r.conn_id)}>
+                                <Check className="h-4 w-4" />
+                              </Button>
+                              <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setEditingConnBC(null)}>
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 hover:underline font-mono text-xs"
+                              onClick={() => setEditingConnBC({ id: r.conn_id, bc_name: r.bc_name, bc_id: r.bc_id })}
+                            >
+                              {r.bc_id || <span className="text-muted-foreground font-sans">点击设置</span>}
+                              <Pencil className="h-3 w-3 text-muted-foreground" />
+                            </button>
+                          )
+                        ) : null}
+                      </TableCell>
                       <TableCell>{r.advertiser_name}</TableCell>
                       <TableCell className="font-mono text-xs">{r.advertiser_id || "—"}</TableCell>
                       <TableCell>

@@ -3,6 +3,7 @@
 //   { op: "list" } -> { connections: [...], countries: {advertiser_id: country}, shops: {...}, active: {advertiser_id: boolean} }
 //   { op: "delete", id }                  -> { ok }
 //   { op: "update", id, label }           -> { ok }
+//   { op: "set_bc", id, bc_id, bc_name }  -> { ok }  // 编辑 BC 名称/BC ID
 //   { op: "set_country", advertiser_id, country }  // empty country to clear；首次设置默认 active=false
 //   { op: "set_active", advertiser_id, active }    // 国家唯一性只在 active=true 的广告户间强制
 import { corsHeaders } from "../_shared/feishu.ts";
@@ -16,6 +17,8 @@ Deno.serve(async (req) => {
       op?: string;
       id?: string;
       label?: string;
+      bc_id?: string;
+      bc_name?: string;
       advertiser_id?: string;
       country?: string;
       shop_id?: string;
@@ -39,6 +42,20 @@ Deno.serve(async (req) => {
       const { error } = await admin()
         .from("tiktok_connections")
         .update({ label })
+        .eq("id", body.id);
+      if (error) throw new Error(error.message);
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (body.op === "set_bc") {
+      if (!body.id) throw new Error("id 必填");
+      const bc_id = (body.bc_id ?? "").trim();
+      const bc_name = (body.bc_name ?? "").trim();
+      const { error } = await admin()
+        .from("tiktok_connections")
+        .update({ bc_id: bc_id || null, bc_name: bc_name || null })
         .eq("id", body.id);
       if (error) throw new Error(error.message);
       return new Response(JSON.stringify({ ok: true }), {
