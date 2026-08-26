@@ -107,6 +107,20 @@ export function AccountsTable() {
     }
   };
 
+  const handleSaveBC = async (id: string) => {
+    if (!editingConnBC) return;
+    const bc_name = editingConnBC.bc_name.trim();
+    const bc_id = editingConnBC.bc_id.trim();
+    try {
+      await invokeFn("tiktok-connections", { op: "set_bc", id, bc_name, bc_id });
+      toast.success("已保存 BC 信息");
+      setEditingConnBC(null);
+      refreshConnections();
+    } catch (e) {
+      toast.error(`保存失败：${(e as Error).message}`);
+    }
+  };
+
   const handleSaveCountry = async (advertiser_id: string) => {
     const country = editingCountryVal.trim();
     try {
