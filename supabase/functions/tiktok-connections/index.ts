@@ -49,6 +49,20 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (body.op === "set_bc") {
+      if (!body.id) throw new Error("id 必填");
+      const bc_id = (body.bc_id ?? "").trim();
+      const bc_name = (body.bc_name ?? "").trim();
+      const { error } = await admin()
+        .from("tiktok_connections")
+        .update({ bc_id: bc_id || null, bc_name: bc_name || null })
+        .eq("id", body.id);
+      if (error) throw new Error(error.message);
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     if (body.op === "set_country") {
       const aid = (body.advertiser_id ?? "").trim();
       if (!aid) throw new Error("advertiser_id 必填");
