@@ -6,7 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RotateCw, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import { toast } from "sonner";
 import { invokeFn } from "@/lib/api";
-import { DateRangeQuickSelect } from "@/components/DateRangeQuickSelect";
 
 export const Route = createFileRoute("/connection-stats")({
   head: () => ({ meta: [{ title: "发样及素材统计 - TikTok授权工具" }] }),
@@ -54,6 +53,7 @@ const C_SEND = "oklch(0.80 0.075 245)";
 const C_REC = "oklch(0.42 0.115 253)";
 const C_LINE = "oklch(0.66 0.16 55)";
 const PERSON_LINE = "oklch(0.80 0.11 62)";
+const QUICK_DAYS = [7, 15, 30, 60];
 
 const fmtNum = (n: number) => (n ?? 0).toLocaleString("en-US", { maximumFractionDigits: 1 });
 const fmtPct = (n: number | null) => (n == null ? "—" : (n * 100).toFixed(1) + "%");
@@ -73,10 +73,26 @@ function donutSlices(items: { value: number; color: string }[], total: number, r
 function todayIso() { return new Date().toISOString().slice(0, 10); }
 function agoIso(days: number) { return new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 10); }
 
+// Flex-row "table" column layout, shared by header/body/footer so widths stay in sync.
+const COL_DETAIL = [
+  { key: "staff_name", label: "人员", flex: 1.15, align: "left" as const },
+  { key: "country", label: "国家", flex: 0.8, align: "left" as const },
+  { key: "sku", label: "SKU", flex: 1.4, align: "left" as const },
+  { key: "samples", label: "发样数量", flex: 0.9, align: "right" as const },
+  { key: "recovered", label: "回收素材", flex: 0.9, align: "right" as const },
+  { key: "rate", label: "素材回收率", flex: 1.6, align: "right" as const },
+];
+const COL_SUMMARY = [
+  { key: "staff_name", label: "人员", flex: 1.3, align: "left" as const },
+  { key: "samples", label: "发样数量", flex: 1, align: "right" as const },
+  { key: "recovered", label: "回收素材", flex: 1, align: "right" as const },
+  { key: "rate", label: "素材回收率", flex: 1.8, align: "right" as const },
+];
+
 function SortTH({
-  k, label, align = "left", sortKey, sortDir, onSort,
+  k, label, align, sortKey, sortDir, onSort,
 }: {
-  k: string; label: string; align?: "left" | "right";
+  k: string; label: string; align: "left" | "right";
   sortKey: string | null; sortDir: "asc" | "desc"; onSort: (k: string) => void;
 }) {
   const active = sortKey === k;
@@ -85,10 +101,10 @@ function SortTH({
     <button
       type="button"
       onClick={() => onSort(k)}
-      className={`inline-flex items-center gap-1 hover:text-foreground ${active ? "text-foreground font-medium" : "text-muted-foreground"} ${align === "right" ? "flex-row-reverse w-full justify-start" : ""}`}
+      className={`inline-flex items-center gap-1 hover:text-foreground w-full ${active ? "text-foreground font-medium" : "text-muted-foreground"} ${align === "right" ? "flex-row-reverse" : ""}`}
     >
       <span>{label}</span>
-      <Icon className={`h-3 w-3 ${active ? "opacity-100" : "opacity-40"}`} />
+      <Icon className={`h-3 w-3 flex-none ${active ? "opacity-100" : "opacity-40"}`} />
     </button>
   );
 }
@@ -98,7 +114,7 @@ function Pill({ on, color, onClick, children }: { on: boolean; color?: string; o
     <button
       type="button"
       onClick={onClick}
-      className="text-xs px-2.5 py-1 rounded-md border whitespace-nowrap transition-colors"
+      className="text-xs px-2.5 py-1 rounded-md border whitespace-nowrap transition-colors flex-none"
       style={{
         border: `1px solid ${on ? "transparent" : "rgba(0,0,0,.14)"}`,
         background: on ? (color ?? "#1b1a18") : "transparent",
@@ -261,30 +277,32 @@ function ConnectionStatsPage() {
 
   const hv = hover ? days[hover.i] : null;
   const s = data?.summary;
+  const cols = detail ? COL_DETAIL : COL_SUMMARY;
+  const isQuick = (d: number) => from === agoIso(d - 1) && to === todayIso();
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+    <div className="h-full min-h-0 flex flex-col gap-2.5">
+      {/* Header */}
+      <div className="flex-none flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-xl font-semibold tracking-tight">发样及素材统计</h2>
-          <p className="text-sm text-muted-foreground mt-1">BD 建联表发样/回收 + 剪辑登记表产出 · 按人员 / 国家 / SKU</p>
+          <h2 className="text-lg font-semibold tracking-tight">发样及素材统计</h2>
+          <p className="text-xs text-muted-foreground">BD 建联表发样/回收 + 剪辑登记表产出 · 按人员 / 国家 / SKU</p>
         </div>
-        <div className="flex flex-wrap items-end gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant="outline" disabled={syncing} onClick={doSync}>
             <RotateCw className={`h-4 w-4 mr-1.5 ${syncing ? "animate-spin" : ""}`} />同步飞书数据
           </Button>
           <Button size="sm" disabled={loading} onClick={runQuery}>
             <RotateCw className={`h-4 w-4 mr-1.5 ${loading ? "animate-spin" : ""}`} />刷新
           </Button>
-          <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-            <span>最近同步</span>
-            <span className="tabular-nums">{data?.last_synced_at ? new Date(data.last_synced_at).toLocaleString() : "—"}</span>
-          </div>
+          <span className="text-xs text-muted-foreground tabular-nums">
+            最近同步：{data?.last_synced_at ? new Date(data.last_synced_at).toLocaleString() : "—"}
+          </span>
         </div>
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+      <div className="flex-none grid grid-cols-3 xl:grid-cols-6 gap-2">
         {[
           { label: "BD发样总数", value: s ? fmtNum(s.bd_sample_total) : "—" },
           { label: "BD回收素材", value: s ? fmtNum(s.bd_recover_total) : "—" },
@@ -294,20 +312,20 @@ function ConnectionStatsPage() {
           { label: "剪辑日均素材产出", value: s && s.editor_daily_avg_output != null ? s.editor_daily_avg_output.toFixed(1) : "—" },
         ].map((k) => (
           <Card key={k.label}>
-            <CardContent className="p-3.5">
-              <div className="text-[11px] tracking-wide text-muted-foreground whitespace-nowrap">{k.label}</div>
-              <div className={`font-mono text-xl font-semibold mt-0.5 ${k.accent ? "text-primary" : ""}`}>{k.value}</div>
+            <CardContent className="p-2.5">
+              <div className="text-[10.5px] tracking-wide text-muted-foreground whitespace-nowrap">{k.label}</div>
+              <div className={`font-mono text-lg font-semibold mt-0.5 ${k.accent ? "text-primary" : ""}`}>{k.value}</div>
             </CardContent>
           </Card>
         ))}
       </div>
 
       {/* Filters */}
-      <Card>
-        <CardContent className="p-3.5 flex flex-col gap-2.5">
+      <Card className="flex-none">
+        <CardContent className="p-2.5 flex flex-col gap-2">
           <div className="flex items-start gap-3">
-            <span className="text-xs text-muted-foreground pt-1.5 flex-none w-10">同事</span>
-            <div className="flex flex-col gap-1.5">
+            <span className="text-xs text-muted-foreground pt-1.5 flex-none w-9">同事</span>
+            <div className="flex flex-col gap-1">
               <div className="flex items-center gap-1.5 flex-wrap">
                 <Pill on={data ? data.staff.bd.length > 0 && data.staff.bd.every((n) => selStaff.includes(n)) : false} onClick={() => toggleGroup(data?.staff.bd ?? [])}>BD</Pill>
                 {(data?.staff.bd ?? []).map((n) => (
@@ -323,7 +341,7 @@ function ConnectionStatsPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-xs text-muted-foreground flex-none w-10">国家</span>
+            <span className="text-xs text-muted-foreground flex-none w-9">国家</span>
             <div className="flex items-center gap-1.5 flex-wrap">
               <Pill on={selCountry.length === 0} onClick={() => setSelCountry([])}>全部</Pill>
               {countryOrder.map((c) => (
@@ -331,185 +349,184 @@ function ConnectionStatsPage() {
               ))}
             </div>
           </div>
-          <div className="flex items-center gap-2 flex-wrap pt-1 border-t">
+          <div className="flex items-center gap-2 flex-wrap pt-1.5 border-t">
             <span className="text-xs text-muted-foreground">日期</span>
-            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-8 w-40" />
+            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-8 w-36" />
             <span className="text-xs text-muted-foreground">至</span>
-            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-8 w-40" />
-            <DateRangeQuickSelect onPick={(a, b) => { setFrom(a); setTo(b); }} />
-            <label className="flex items-center gap-1.5 text-xs cursor-pointer ml-2">
-              <input type="checkbox" checked={detail} onChange={(e) => setDetail(e.target.checked)} className="h-3.5 w-3.5" />
-              展示明细（国家 / SKU）
-            </label>
+            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-8 w-36" />
+            <div className="flex gap-0.5 p-0.5 bg-muted rounded-md">
+              {QUICK_DAYS.map((d) => (
+                <button
+                  key={d}
+                  onClick={() => { setTo(todayIso()); setFrom(agoIso(d - 1)); }}
+                  className={`text-[11px] px-2.5 py-1 rounded ${isQuick(d) ? "bg-background shadow-sm font-medium" : "text-muted-foreground"}`}
+                >近{d}天</button>
+              ))}
+            </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Main grid */}
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1.4fr)] gap-3 items-start">
+      {/* Main grid — fixed rows so panels never resize with data, and 回收明细's bottom
+          always lines up with the daily-chart card's bottom (both track the same grid rows). */}
+      <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1.4fr)] xl:grid-rows-[minmax(0,0.78fr)_minmax(0,1fr)] gap-2.5">
         {/* 回收明细表 */}
-        <Card className="xl:row-span-2">
-          <CardHeader className="pb-2">
-            <div className="flex items-baseline gap-2">
-              <CardTitle className="text-base">回收明细</CardTitle>
-              <span className="text-xs text-muted-foreground">{sortedRows.length} 行 · {detail ? "人员 / 国家 / SKU" : "按人员汇总"}</span>
+        <Card className="xl:row-span-2 flex flex-col min-h-0 overflow-hidden">
+          <CardHeader className="pb-2 flex-none">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-baseline gap-2">
+                <CardTitle className="text-base">回收明细</CardTitle>
+                <span className="text-xs text-muted-foreground">{sortedRows.length} 行 · {detail ? "人员 / 国家 / SKU" : "按人员汇总"}</span>
+              </div>
+              <label className="flex items-center gap-1.5 text-xs cursor-pointer flex-none">
+                <input type="checkbox" checked={detail} onChange={(e) => setDetail(e.target.checked)} className="h-3.5 w-3.5" />
+                展示明细（国家 / SKU）
+              </label>
             </div>
           </CardHeader>
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-muted/50 border-y text-xs">
-                    <th className="text-left font-normal px-3 py-1.5"><SortTH k="staff_name" label="人员" sortKey={sortKey} sortDir={sortDir} onSort={onSort} /></th>
-                    {detail && <th className="text-left font-normal px-3 py-1.5"><SortTH k="country" label="国家" sortKey={sortKey} sortDir={sortDir} onSort={onSort} /></th>}
-                    {detail && <th className="text-left font-normal px-3 py-1.5"><SortTH k="sku" label="SKU" sortKey={sortKey} sortDir={sortDir} onSort={onSort} /></th>}
-                    <th className="text-right font-normal px-3 py-1.5"><SortTH k="samples" label="发样数量" align="right" sortKey={sortKey} sortDir={sortDir} onSort={onSort} /></th>
-                    <th className="text-right font-normal px-3 py-1.5"><SortTH k="recovered" label="回收素材" align="right" sortKey={sortKey} sortDir={sortDir} onSort={onSort} /></th>
-                    <th className="text-right font-normal px-3 py-1.5 min-w-[120px]"><SortTH k="rate" label="素材回收率" align="right" sortKey={sortKey} sortDir={sortDir} onSort={onSort} /></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedRows.map((r, i) => (
-                    <tr
-                      key={`${r.role}|${r.staff_name}|${r.country}|${r.sku}|${i}`}
-                      className="border-b last:border-0"
-                      style={{ background: i % 2 ? "rgba(0,0,0,.015)" : "transparent", opacity: highlightStaff && highlightStaff !== r.staff_name ? 0.4 : 1 }}
-                    >
-                      <td className="px-3 py-1.5">
-                        <span className="inline-flex items-center gap-1.5">
-                          <span className="w-1.5 h-1.5 rounded-full flex-none" style={{ background: staffColor(r.staff_name) }} />
-                          {r.staff_name}
-                          <span className="text-[10px] text-muted-foreground">{r.role === "BD" ? "BD" : "剪辑"}</span>
-                        </span>
-                      </td>
-                      {detail && <td className="px-3 py-1.5 text-muted-foreground">{r.country}</td>}
-                      {detail && <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground/90">{r.sku}</td>}
-                      <td className="px-3 py-1.5 text-right font-mono">{r.samples == null ? "—" : fmtNum(r.samples)}</td>
-                      <td className="px-3 py-1.5 text-right font-mono">{fmtNum(r.recovered)}</td>
-                      <td className="px-3 py-1.5">
-                        {r.rate == null ? <div className="text-right font-mono text-muted-foreground">—</div> : (
-                          <div className="flex items-center gap-2">
-                            <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                              <div className="h-full rounded-full" style={{ width: `${Math.min(100, r.rate * 100)}%`, background: r.rate >= 0.5 ? "hsl(var(--primary))" : "oklch(0.72 0.09 " + (40 + r.rate * 260) + ")" }} />
-                            </div>
-                            <span className="font-mono text-xs whitespace-nowrap">{fmtPct(r.rate)}</span>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                  {!sortedRows.length && (
-                    <tr><td colSpan={detail ? 6 : 4} className="px-3 py-6 text-center text-muted-foreground text-xs">{loading ? "加载中…" : "暂无数据"}</td></tr>
-                  )}
-                </tbody>
-                <tfoot>
-                  <tr className="bg-muted/50 border-t font-semibold">
-                    <td className="px-3 py-2">合计</td>
-                    {detail && <td className="px-3 py-2" />}
-                    {detail && <td className="px-3 py-2" />}
-                    <td className="px-3 py-2 text-right font-mono">{fmtNum(totals.samples)}</td>
-                    <td className="px-3 py-2 text-right font-mono">{fmtNum(totals.recovered)}</td>
-                    <td className="px-3 py-2 text-right font-mono">{s ? fmtPct(s.bd_recover_rate) : "—"}</td>
-                  </tr>
-                </tfoot>
-              </table>
+          <CardContent className="p-0 flex-1 min-h-0 flex flex-col">
+            <div className="flex-none flex items-center gap-2 px-3 py-1.5 bg-muted/50 border-y text-xs">
+              {cols.map((c) => (
+                <div key={c.key} style={{ flex: `${c.flex} 1 0`, textAlign: c.align }}>
+                  <SortTH k={c.key} label={c.label} align={c.align} sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+                </div>
+              ))}
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              {sortedRows.map((r, i) => (
+                <div
+                  key={`${r.role}|${r.staff_name}|${r.country}|${r.sku}|${i}`}
+                  className="flex items-center gap-2 px-3 h-8 border-b text-sm"
+                  style={{ background: i % 2 ? "rgba(0,0,0,.015)" : "transparent", opacity: highlightStaff && highlightStaff !== r.staff_name ? 0.4 : 1 }}
+                >
+                  <div style={{ flex: `${cols[0].flex} 1 0` }} className="min-w-0 overflow-hidden">
+                    <span className="inline-flex items-center gap-1.5 max-w-full">
+                      <span className="w-1.5 h-1.5 rounded-full flex-none" style={{ background: staffColor(r.staff_name) }} />
+                      <span className="truncate">{r.staff_name}</span>
+                      <span className="text-[10px] text-muted-foreground flex-none">{r.role === "BD" ? "BD" : "剪辑"}</span>
+                    </span>
+                  </div>
+                  {detail && <div style={{ flex: "0.8 1 0" }} className="text-muted-foreground truncate">{r.country}</div>}
+                  {detail && <div style={{ flex: "1.4 1 0" }} className="font-mono text-xs text-muted-foreground/90 truncate">{r.sku}</div>}
+                  <div style={{ flex: "0.9 1 0", textAlign: "right" }} className="font-mono">{r.samples == null ? "—" : fmtNum(r.samples)}</div>
+                  <div style={{ flex: "0.9 1 0", textAlign: "right" }} className="font-mono">{fmtNum(r.recovered)}</div>
+                  <div style={{ flex: detail ? "1.6 1 0" : "1.8 1 0" }}>
+                    {r.rate == null ? <div className="text-right font-mono text-muted-foreground text-xs">—</div> : (
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                          <div className="h-full rounded-full" style={{ width: `${Math.min(100, r.rate * 100)}%`, background: r.rate >= 0.5 ? "hsl(var(--primary))" : "oklch(0.72 0.09 " + (40 + r.rate * 260) + ")" }} />
+                        </div>
+                        <span className="font-mono text-xs whitespace-nowrap">{fmtPct(r.rate)}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {!sortedRows.length && (
+                <div className="h-full flex items-center justify-center text-xs text-muted-foreground">{loading ? "加载中…" : "暂无数据"}</div>
+              )}
+            </div>
+            <div className="flex-none flex items-center gap-2 px-3 py-2 bg-muted/50 border-t text-sm font-semibold">
+              <div style={{ flex: `${cols[0].flex} 1 0` }}>合计</div>
+              {detail && <div style={{ flex: "0.8 1 0" }} />}
+              {detail && <div style={{ flex: "1.4 1 0" }} />}
+              <div style={{ flex: "0.9 1 0", textAlign: "right" }} className="font-mono">{fmtNum(totals.samples)}</div>
+              <div style={{ flex: "0.9 1 0", textAlign: "right" }} className="font-mono">{fmtNum(totals.recovered)}</div>
+              <div style={{ flex: detail ? "1.6 1 0" : "1.8 1 0", textAlign: "right" }} className="font-mono">{s ? fmtPct(s.bd_recover_rate) : "—"}</div>
             </div>
           </CardContent>
         </Card>
 
         {/* 国家占比 */}
-        <Card>
-          <CardHeader className="pb-2">
+        <Card className="flex flex-col min-h-0 overflow-hidden">
+          <CardHeader className="pb-1.5 flex-none">
             <div className="flex items-center justify-between gap-2">
-              <CardTitle className="text-base">国家占比（BD）</CardTitle>
-              <div className="flex gap-0.5 p-0.5 bg-muted rounded-md">
+              <CardTitle className="text-sm">国家占比（BD）</CardTitle>
+              <div className="flex gap-0.5 p-0.5 bg-muted rounded-md flex-none">
                 {(["发样达人", "回收素材"] as const).map((m) => (
                   <button
                     key={m}
                     onClick={() => setMetric(m)}
-                    className={`text-[11px] px-2.5 py-1 rounded ${metric === m ? "bg-background shadow-sm font-medium" : "text-muted-foreground"}`}
+                    className={`text-[10.5px] px-2 py-1 rounded whitespace-nowrap ${metric === m ? "bg-background shadow-sm font-medium" : "text-muted-foreground"}`}
                   >{m}</button>
                 ))}
               </div>
             </div>
-            <div className="text-[11px] text-muted-foreground">点击切片/图例下钻，联动右侧粉丝分层图的统计范围</div>
+            <div className="text-[10.5px] text-muted-foreground">点击切片/图例下钻，联动右侧粉丝分层统计范围</div>
           </CardHeader>
-          <CardContent>
-            <div className="flex items-center justify-center gap-5">
-              <div className="relative flex-none" style={{ width: 150, height: 150 }}>
-                <svg viewBox="0 0 150 150" width={150} height={150}>
-                  {countrySlices.map((sl, i) => (
-                    <circle key={i} cx={75} cy={75} r={sl.r} fill="none" stroke={sl.color} strokeWidth={sl.sw}
-                      strokeDasharray={sl.dash} strokeDashoffset={sl.offset} transform="rotate(-90 75 75)"
-                      style={{ cursor: "pointer" }}
-                      onClick={() => setPieCountryDrill((p) => (p === countryPieItems[i]?.country ? null : countryPieItems[i]?.country ?? null))} />
-                  ))}
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                  <div className="font-mono text-lg font-semibold">{fmtNum(countryPieTotal)}</div>
-                </div>
-              </div>
-              <div className="flex flex-col gap-0.5 min-w-0">
-                {countryPieItems.map((it) => (
-                  <div key={it.country}
-                    className="flex items-center gap-2 text-xs px-1.5 py-0.5 rounded cursor-pointer"
-                    style={{ background: pieCountryDrill === it.country ? "rgba(0,0,0,.06)" : "transparent", fontWeight: pieCountryDrill === it.country ? 600 : 400 }}
-                    onClick={() => setPieCountryDrill((p) => (p === it.country ? null : it.country))}
-                  >
-                    <span className="w-2 h-2 rounded-sm flex-none" style={{ background: countryColor(it.country) }} />
-                    <span className="w-10 flex-none">{it.country}</span>
-                    <span className="w-12 flex-none text-right font-mono font-semibold">{fmtPct(countryPieTotal ? it.count / countryPieTotal : null)}</span>
-                    <span className="flex-1 text-right font-mono text-[11px] text-muted-foreground">{fmtNum(it.count)}</span>
-                  </div>
+          <CardContent className="flex-1 min-h-0 flex items-center justify-center gap-4 overflow-hidden pt-0">
+            <div className="relative flex-none" style={{ width: 120, height: 120 }}>
+              <svg viewBox="0 0 150 150" width={120} height={120}>
+                {countrySlices.map((sl, i) => (
+                  <circle key={i} cx={75} cy={75} r={sl.r} fill="none" stroke={sl.color} strokeWidth={sl.sw}
+                    strokeDasharray={sl.dash} strokeDashoffset={sl.offset} transform="rotate(-90 75 75)"
+                    style={{ cursor: "pointer" }}
+                    onClick={() => setPieCountryDrill((p) => (p === countryPieItems[i]?.country ? null : countryPieItems[i]?.country ?? null))} />
                 ))}
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                <div className="font-mono text-base font-semibold">{fmtNum(countryPieTotal)}</div>
               </div>
+            </div>
+            <div className="flex flex-col gap-0.5 min-w-0 h-full overflow-y-auto py-1">
+              {countryPieItems.map((it) => (
+                <div key={it.country}
+                  className="flex items-center gap-1.5 text-[11px] px-1.5 py-0.5 rounded cursor-pointer flex-none"
+                  style={{ background: pieCountryDrill === it.country ? "rgba(0,0,0,.06)" : "transparent", fontWeight: pieCountryDrill === it.country ? 600 : 400 }}
+                  onClick={() => setPieCountryDrill((p) => (p === it.country ? null : it.country))}
+                >
+                  <span className="w-2 h-2 rounded-sm flex-none" style={{ background: countryColor(it.country) }} />
+                  <span className="w-9 flex-none truncate">{it.country}</span>
+                  <span className="w-11 flex-none text-right font-mono font-semibold">{fmtPct(countryPieTotal ? it.count / countryPieTotal : null)}</span>
+                  <span className="flex-1 text-right font-mono text-[10px] text-muted-foreground">{fmtNum(it.count)}</span>
+                </div>
+              ))}
+              {!countryPieItems.length && <div className="text-xs text-muted-foreground">{loading ? "加载中…" : "暂无数据"}</div>}
             </div>
           </CardContent>
         </Card>
 
         {/* 粉丝分层 */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">粉丝量分布（BD{pieCountryDrill ? ` · ${pieCountryDrill}` : " · 全部国家"}）</CardTitle>
-            <div className="text-[11px] text-muted-foreground">各达人按自己所在国家的门槛定档后合并统计</div>
+        <Card className="flex flex-col min-h-0 overflow-hidden">
+          <CardHeader className="pb-1.5 flex-none">
+            <CardTitle className="text-sm">粉丝量分布（BD{pieCountryDrill ? ` · ${pieCountryDrill}` : " · 全部国家"}）</CardTitle>
+            <div className="text-[10.5px] text-muted-foreground">各达人按自己所在国家的门槛定档后合并统计</div>
           </CardHeader>
-          <CardContent>
-            <div className="flex items-center justify-center gap-5">
-              <div className="relative flex-none" style={{ width: 130, height: 130 }}>
-                <svg viewBox="0 0 150 150" width={130} height={130}>
-                  {tierSlices.map((sl, i) => (
-                    <circle key={i} cx={75} cy={75} r={sl.r} fill="none" stroke={sl.color} strokeWidth={sl.sw}
-                      strokeDasharray={sl.dash} strokeDashoffset={sl.offset} transform="rotate(-90 75 75)" />
-                  ))}
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                  <div className="font-mono text-lg font-semibold">{fmtNum(tierTotal)}</div>
-                </div>
+          <CardContent className="flex-1 min-h-0 flex items-center justify-center gap-3 overflow-hidden pt-0">
+            <div className="relative flex-none" style={{ width: 108, height: 108 }}>
+              <svg viewBox="0 0 150 150" width={108} height={108}>
+                {tierSlices.map((sl, i) => (
+                  <circle key={i} cx={75} cy={75} r={sl.r} fill="none" stroke={sl.color} strokeWidth={sl.sw}
+                    strokeDasharray={sl.dash} strokeDashoffset={sl.offset} transform="rotate(-90 75 75)" />
+                ))}
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                <div className="font-mono text-base font-semibold">{fmtNum(tierTotal)}</div>
               </div>
-              <div className="flex flex-col gap-1 min-w-0">
-                {tierSource.map((it) => {
-                  const th = data?.fan_tier_pie.thresholds[it.tier];
-                  return (
-                    <div key={it.tier} className="flex items-center gap-1.5 text-[11px]">
-                      <span className="w-2 h-2 rounded-sm flex-none" style={{ background: TIER_COLOR[it.tier] }} />
-                      <span className="w-7 flex-none font-semibold">{it.tier}</span>
-                      <span className="w-[118px] flex-none font-mono text-[10px] text-muted-foreground whitespace-nowrap">{th ? `其他${th.其他} · MX${th.MX}` : ""}</span>
-                      <span className="flex-1 text-right font-mono">{fmtPct(tierTotal ? it.count / tierTotal : null)}</span>
-                      <span className="w-9 flex-none text-right font-mono text-muted-foreground">{it.count}人</span>
-                    </div>
-                  );
-                })}
-              </div>
+            </div>
+            <div className="flex flex-col gap-1 min-w-0 h-full justify-center overflow-y-auto">
+              {tierSource.map((it) => {
+                const th = data?.fan_tier_pie.thresholds[it.tier];
+                return (
+                  <div key={it.tier} className="flex items-center gap-1.5 text-[10.5px] flex-none">
+                    <span className="w-2 h-2 rounded-sm flex-none" style={{ background: TIER_COLOR[it.tier] }} />
+                    <span className="w-6 flex-none font-semibold">{it.tier}</span>
+                    <span className="w-[104px] flex-none font-mono text-[9.5px] text-muted-foreground whitespace-nowrap">{th ? `其他${th.其他}·MX${th.MX}` : ""}</span>
+                    <span className="flex-1 text-right font-mono">{fmtPct(tierTotal ? it.count / tierTotal : null)}</span>
+                    <span className="w-8 flex-none text-right font-mono text-muted-foreground">{it.count}人</span>
+                  </div>
+                );
+              })}
             </div>
           </CardContent>
         </Card>
 
         {/* 每日发样/回收 */}
-        <Card className="xl:col-span-2">
-          <CardHeader className="pb-2">
+        <Card className="xl:col-span-2 flex flex-col min-h-0 overflow-hidden">
+          <CardHeader className="pb-1.5 flex-none">
             <div className="flex items-baseline justify-between gap-3 flex-wrap">
-              <CardTitle className="text-base">发样数量 / 回收素材数量（BD）</CardTitle>
-              <div className="flex items-center gap-3 text-[11px] text-muted-foreground flex-wrap">
+              <CardTitle className="text-sm">发样数量 / 回收素材数量（BD）</CardTitle>
+              <div className="flex items-center gap-3 text-[10.5px] text-muted-foreground flex-wrap">
                 <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: C_SEND }} />发样</span>
                 <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: C_REC }} />回收素材</span>
                 <span className="inline-flex items-center gap-1"><span className="w-3 h-0.5 inline-block" style={{ background: C_LINE }} />回收率（右轴）</span>
@@ -517,8 +534,8 @@ function ConnectionStatsPage() {
               </div>
             </div>
           </CardHeader>
-          <CardContent>
-            <div className="relative h-[340px]">
+          <CardContent className="flex-1 min-h-0 flex flex-col pt-0">
+            <div className="relative flex-1 min-h-0">
               {chart ? (
                 <>
                   <svg viewBox={`0 0 ${chart.W} ${chart.H}`} preserveAspectRatio="none" width="100%" height="100%" style={{ display: "block" }}>
@@ -539,13 +556,13 @@ function ConnectionStatsPage() {
                   </svg>
                   <div className="absolute inset-0 pointer-events-none">
                     {chart.yLeft.map((t, i) => (
-                      <div key={`l${i}`} className="absolute text-[11px] font-mono text-muted-foreground" style={{ top: `${(t.y / chart.H) * 100}%`, right: `${100 - (50 / chart.W) * 100}%`, transform: "translateY(-50%)" }}>{t.label}</div>
+                      <div key={`l${i}`} className="absolute text-[10.5px] font-mono text-muted-foreground" style={{ top: `${(t.y / chart.H) * 100}%`, right: `${100 - (50 / chart.W) * 100}%`, transform: "translateY(-50%)" }}>{t.label}</div>
                     ))}
                     {chart.yRight.map((t, i) => (
-                      <div key={`r${i}`} className="absolute text-[11px] font-mono" style={{ color: C_LINE, top: `${(t.y / chart.H) * 100}%`, left: `${(1070 / chart.W) * 100}%`, transform: "translateY(-50%)" }}>{t.label}</div>
+                      <div key={`r${i}`} className="absolute text-[10.5px] font-mono" style={{ color: C_LINE, top: `${(t.y / chart.H) * 100}%`, left: `${(1070 / chart.W) * 100}%`, transform: "translateY(-50%)" }}>{t.label}</div>
                     ))}
                     {chart.xTicks.map((t, i) => (
-                      <div key={`x${i}`} className="absolute text-[11px] font-mono text-muted-foreground/70" style={{ top: `${(372 / chart.H) * 100}%`, left: `${(t.x / chart.W) * 100}%`, transform: "translate(-50%,-50%)" }}>{t.label}</div>
+                      <div key={`x${i}`} className="absolute text-[10.5px] font-mono text-muted-foreground/70" style={{ top: `${(372 / chart.H) * 100}%`, left: `${(t.x / chart.W) * 100}%`, transform: "translate(-50%,-50%)" }}>{t.label}</div>
                     ))}
                   </div>
                   <div onMouseMove={onChartMove} onMouseLeave={() => setHover(null)} className="absolute inset-0" style={{ cursor: "crosshair" }} />
@@ -574,13 +591,13 @@ function ConnectionStatsPage() {
                 <div className="flex items-center justify-center h-full text-xs text-muted-foreground">{loading ? "加载中…" : "暂无数据"}</div>
               )}
             </div>
-            <div className="flex flex-wrap items-center justify-center gap-1.5 pt-2">
-              <span className="text-[11px] text-muted-foreground mr-1">点击高亮同事</span>
+            <div className="flex-none flex flex-wrap items-center justify-center gap-1.5 pt-1.5">
+              <span className="text-[10.5px] text-muted-foreground mr-1">点击高亮同事</span>
               {(data?.staff.bd ?? []).map((n) => (
                 <button
                   key={n}
                   onClick={() => setHighlightStaff((p) => (p === n ? null : n))}
-                  className="text-[11px] px-2.5 py-1 rounded-full border inline-flex items-center gap-1.5"
+                  className="text-[10.5px] px-2.5 py-1 rounded-full border inline-flex items-center gap-1.5"
                   style={{ border: `1px solid ${highlightStaff === n ? "transparent" : "rgba(0,0,0,.13)"}`, background: highlightStaff === n ? staffColor(n) : "transparent", color: highlightStaff === n ? "#fff" : "rgba(0,0,0,.65)" }}
                 >
                   <span className="w-2 h-2 rounded-full flex-none" style={{ background: highlightStaff === n ? "#fff" : staffColor(n) }} />
