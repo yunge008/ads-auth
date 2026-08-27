@@ -47,8 +47,14 @@ const TIER_COLOR: Record<string, string> = {
   小: "oklch(0.76 0.07 250)", 特小: "oklch(0.86 0.04 250)",
 };
 const TIERS = ["大", "中", "中小", "小", "特小"];
-const HUES = [250, 40, 155, 325, 90, 200, 10, 280, 60, 220, 340, 120];
-const paletteColor = (i: number) => `oklch(0.60 0.12 ${HUES[i % HUES.length]})`;
+// Golden-angle hue steps: never repeats or clusters two nearby indices on a similar hue,
+// unlike a short fixed palette that wraps (and collides) once the item count exceeds it.
+const paletteColor = (i: number) => `oklch(0.62 0.13 ${(((i * 137.508) % 360) + 360) % 360})`;
+function hashIndex(s: string) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h % 997;
+}
 const C_SEND = "oklch(0.80 0.075 245)";
 const C_REC = "oklch(0.42 0.115 253)";
 const C_LINE = "oklch(0.66 0.16 55)";
@@ -109,16 +115,17 @@ function SortTH({
   );
 }
 
-function Pill({ on, color, onClick, children }: { on: boolean; color?: string; onClick: () => void; children: React.ReactNode }) {
+function Pill({ on, color, onClick, children, strong }: { on: boolean; color?: string; onClick: () => void; children: React.ReactNode; strong?: boolean }) {
   return (
     <button
       type="button"
       onClick={onClick}
       className="text-xs px-2.5 py-1 rounded-md border whitespace-nowrap transition-colors flex-none"
       style={{
-        border: `1px solid ${on ? "transparent" : "rgba(0,0,0,.14)"}`,
+        border: `${strong ? 2 : 1}px solid ${on ? "transparent" : strong ? "#000" : "rgba(0,0,0,.14)"}`,
         background: on ? (color ?? "#1b1a18") : "transparent",
-        color: on ? "#fff" : "rgba(0,0,0,.7)",
+        color: on ? "#fff" : strong ? "#000" : "rgba(0,0,0,.7)",
+        fontWeight: strong ? 700 : 400,
       }}
     >
       {children}
@@ -198,9 +205,15 @@ function ConnectionStatsPage() {
   const toggleCountry = (c: string) => setSelCountry((prev) => (prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]));
 
   const staffOrder = React.useMemo(() => [...(meta?.staff.bd ?? []), ...(meta?.staff.editor ?? [])], [meta]);
-  const staffColor = React.useCallback((name: string) => paletteColor(staffOrder.indexOf(name)), [staffOrder]);
+  const staffColor = React.useCallback((name: string) => {
+    const idx = staffOrder.indexOf(name);
+    return paletteColor(idx >= 0 ? idx : hashIndex(name));
+  }, [staffOrder]);
   const countryOrder = React.useMemo(() => meta?.countries ?? [], [meta]);
-  const countryColor = React.useCallback((c: string) => paletteColor(countryOrder.indexOf(c)), [countryOrder]);
+  const countryColor = React.useCallback((c: string) => {
+    const idx = countryOrder.indexOf(c);
+    return paletteColor(idx >= 0 ? idx : hashIndex(c));
+  }, [countryOrder]);
 
   const onSort = (k: string) => {
     if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -336,35 +349,37 @@ function ConnectionStatsPage() {
         ))}
       </div>
 
-      {/* Filters — 同事 as its own left column (2 rows: BD / 剪辑), 国家+日期 stacked as a right column */}
+      {/* Filters — 同事 as its own left half (2 rows: BD / 剪辑), 国家+日期 as a right half
+          that always starts at the horizontal middle of the card (grid-cols-2, not flex-1),
+          so its position doesn't drift with how many names happen to be in the left half. */}
       <Card className="flex-none">
-        <CardContent className="p-2.5 flex gap-6 flex-wrap">
-          <div className="flex flex-col gap-1 flex-none">
+        <CardContent className="p-2.5 grid grid-cols-2 gap-6">
+          <div className="flex flex-col gap-1 min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-xs text-muted-foreground flex-none w-9">同事</span>
-              <Pill on={meta ? meta.staff.bd.length > 0 && meta.staff.bd.every((n) => selStaff.includes(n)) : false} onClick={() => toggleGroup(meta?.staff.bd ?? [])}>BD</Pill>
+              <span className="text-xs font-bold text-foreground flex-none w-9">同事</span>
+              <Pill strong on={meta ? meta.staff.bd.length > 0 && meta.staff.bd.every((n) => selStaff.includes(n)) : false} onClick={() => toggleGroup(meta?.staff.bd ?? [])}>BD</Pill>
               {(meta?.staff.bd ?? []).map((n) => (
                 <Pill key={n} on={selStaff.includes(n)} color={staffColor(n)} onClick={() => toggleOne(n)}>{n}</Pill>
               ))}
             </div>
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-xs text-muted-foreground flex-none w-9" />
-              <Pill on={meta ? meta.staff.editor.length > 0 && meta.staff.editor.every((n) => selStaff.includes(n)) : false} onClick={() => toggleGroup(meta?.staff.editor ?? [])}>剪辑</Pill>
+              <span className="text-xs text-foreground flex-none w-9" />
+              <Pill strong on={meta ? meta.staff.editor.length > 0 && meta.staff.editor.every((n) => selStaff.includes(n)) : false} onClick={() => toggleGroup(meta?.staff.editor ?? [])}>剪辑</Pill>
               {(meta?.staff.editor ?? []).map((n) => (
                 <Pill key={n} on={selStaff.includes(n)} color={staffColor(n)} onClick={() => toggleOne(n)}>{n}</Pill>
               ))}
             </div>
           </div>
-          <div className="flex flex-col gap-1 flex-1 min-w-0">
+          <div className="flex flex-col gap-1 min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-xs text-muted-foreground flex-none w-9">国家</span>
-              <Pill on={selCountry.length === 0} onClick={() => setSelCountry([])}>全部</Pill>
+              <span className="text-xs font-bold text-foreground flex-none w-9">国家</span>
+              <Pill strong on={selCountry.length === 0} onClick={() => setSelCountry([])}>全部</Pill>
               {countryOrder.map((c) => (
                 <Pill key={c} on={selCountry.includes(c)} color={countryColor(c)} onClick={() => toggleCountry(c)}>{c}</Pill>
               ))}
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs text-muted-foreground flex-none w-9">日期</span>
+              <span className="text-xs font-bold text-foreground flex-none w-9">日期</span>
               <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-8 w-36" />
               <span className="text-xs text-muted-foreground">至</span>
               <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-8 w-36" />
@@ -384,7 +399,7 @@ function ConnectionStatsPage() {
 
       {/* Main grid — fixed rows so panels never resize with data, and 回收明细's bottom
           always lines up with the daily-chart card's bottom (both track the same grid rows). */}
-      <div className={`flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1.4fr)] xl:grid-rows-[minmax(0,0.78fr)_minmax(0,1fr)] gap-2.5 transition-opacity ${loading ? "opacity-60" : ""}`}>
+      <div className={`flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] xl:grid-rows-[minmax(0,0.78fr)_minmax(0,1fr)] gap-2.5 transition-opacity ${loading ? "opacity-60" : ""}`}>
         {/* 回收明细表 */}
         <Card className="xl:row-span-2 flex flex-col min-h-0 overflow-hidden">
           <CardHeader className="pb-2 flex-none">
@@ -464,9 +479,9 @@ function ConnectionStatsPage() {
             </div>
             <div className="text-[10.5px] text-muted-foreground">点击切片/图例下钻，联动右侧粉丝分层统计范围</div>
           </CardHeader>
-          <CardContent className="flex-1 min-h-0 flex items-center gap-3 overflow-hidden pt-0">
-            <div className="relative flex-none" style={{ width: 138, height: 138 }}>
-              <svg viewBox="0 0 150 150" width={138} height={138}>
+          <CardContent className="flex-1 min-h-0 flex items-center gap-2 overflow-hidden pt-0">
+            <div className="relative flex-none h-full aspect-square" style={{ maxWidth: "48%" }}>
+              <svg viewBox="0 0 150 150" className="w-full h-full block">
                 {countrySlices.map((sl, i) => (
                   <circle key={i} cx={75} cy={75} r={sl.r} fill="none" stroke={sl.color} strokeWidth={sl.sw}
                     strokeDasharray={sl.dash} strokeDashoffset={sl.offset} transform="rotate(-90 75 75)"
@@ -475,7 +490,7 @@ function ConnectionStatsPage() {
                 ))}
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                <div className="font-mono text-base font-semibold">{fmtNum(countryPieTotal)}</div>
+                <div className="font-mono text-lg font-semibold">{fmtNum(countryPieTotal)}</div>
               </div>
             </div>
             <div
@@ -484,16 +499,16 @@ function ConnectionStatsPage() {
             >
               {countryPieItems.map((it) => (
                 <div key={it.country}
-                  className="grid items-center gap-x-1 text-[10.5px] px-1 py-0.5 rounded cursor-pointer min-w-0"
+                  className="grid items-center gap-x-1 text-[10.5px] px-1 py-0.5 rounded cursor-pointer min-w-0 w-fit"
                   style={{
-                    gridTemplateColumns: "8px 1fr auto",
+                    gridTemplateColumns: "8px auto auto",
                     background: pieCountryDrill === it.country ? "rgba(0,0,0,.06)" : "transparent",
                     fontWeight: pieCountryDrill === it.country ? 600 : 400,
                   }}
                   onClick={() => setPieCountryDrill((p) => (p === it.country ? null : it.country))}
                 >
                   <span className="w-2 h-2 rounded-sm" style={{ background: countryColor(it.country) }} />
-                  <span className="truncate">{it.country}</span>
+                  <span className="truncate max-w-[60px]">{it.country}</span>
                   <span className="text-right font-mono">{fmtPct(countryPieTotal ? it.count / countryPieTotal : null)}</span>
                 </div>
               ))}
@@ -508,19 +523,19 @@ function ConnectionStatsPage() {
             <CardTitle className="text-sm">粉丝量分布（BD{pieCountryDrill ? ` · ${pieCountryDrill}` : " · 全部国家"}）</CardTitle>
             <div className="text-[10.5px] text-muted-foreground">各达人按自己所在国家的门槛定档后合并统计</div>
           </CardHeader>
-          <CardContent className="flex-1 min-h-0 flex items-center gap-3 overflow-hidden pt-0">
-            <div className="relative flex-none" style={{ width: 138, height: 138 }}>
-              <svg viewBox="0 0 150 150" width={138} height={138}>
+          <CardContent className="flex-1 min-h-0 flex items-center gap-2 overflow-hidden pt-0">
+            <div className="relative flex-none h-full aspect-square" style={{ maxWidth: "48%" }}>
+              <svg viewBox="0 0 150 150" className="w-full h-full block">
                 {tierSlices.map((sl, i) => (
                   <circle key={i} cx={75} cy={75} r={sl.r} fill="none" stroke={sl.color} strokeWidth={sl.sw}
                     strokeDasharray={sl.dash} strokeDashoffset={sl.offset} transform="rotate(-90 75 75)" />
                 ))}
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                <div className="font-mono text-base font-semibold">{fmtNum(tierTotal)}</div>
+                <div className="font-mono text-lg font-semibold">{fmtNum(tierTotal)}</div>
               </div>
             </div>
-            <div className="grid gap-x-1.5 gap-y-1 min-w-0 flex-1 text-[10.5px]" style={{ gridTemplateColumns: "8px auto 1fr auto auto" }}>
+            <div className="grid gap-x-1.5 gap-y-1 min-w-0 text-[10.5px] w-fit" style={{ gridTemplateColumns: "8px auto auto auto auto" }}>
               {tierSource.map((it) => {
                 const th = data?.fan_tier_pie.thresholds[it.tier];
                 return (
