@@ -521,6 +521,69 @@ export type Database = {
         }
         Relationships: []
       }
+      connection_material_registry: {
+        Row: {
+          auth_code: string | null
+          country: string
+          created_at: string
+          fan_count: number | null
+          gmv_usd: number | null
+          handle: string
+          id: string
+          post_date: string | null
+          register_date: string | null
+          row_number: number | null
+          sample_date: string | null
+          sku: string | null
+          source_sheet: string
+          source_type: string
+          staff_active: boolean
+          staff_name: string
+          synced_at: string
+          vid: string
+        }
+        Insert: {
+          auth_code?: string | null
+          country?: string
+          created_at?: string
+          fan_count?: number | null
+          gmv_usd?: number | null
+          handle?: string
+          id?: string
+          post_date?: string | null
+          register_date?: string | null
+          row_number?: number | null
+          sample_date?: string | null
+          sku?: string | null
+          source_sheet: string
+          source_type: string
+          staff_active?: boolean
+          staff_name: string
+          synced_at?: string
+          vid?: string
+        }
+        Update: {
+          auth_code?: string | null
+          country?: string
+          created_at?: string
+          fan_count?: number | null
+          gmv_usd?: number | null
+          handle?: string
+          id?: string
+          post_date?: string | null
+          register_date?: string | null
+          row_number?: number | null
+          sample_date?: string | null
+          sku?: string | null
+          source_sheet?: string
+          source_type?: string
+          staff_active?: boolean
+          staff_name?: string
+          synced_at?: string
+          vid?: string
+        }
+        Relationships: []
+      }
       creator_alias: {
         Row: {
           alias_display: string | null
