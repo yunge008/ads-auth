@@ -27,15 +27,20 @@ function SettingsPage() {
       <Tabs defaultValue="auth" className="space-y-4">
         <TabsList>
           <TabsTrigger value="auth">授权</TabsTrigger>
-          <TabsTrigger value="staff">人员表及账号</TabsTrigger>
+          <TabsTrigger value="staff">人员表</TabsTrigger>
+          {account?.isAdmin && <TabsTrigger value="accounts">账号管理</TabsTrigger>}
         </TabsList>
         <TabsContent value="auth">
           <AccountsTable />
         </TabsContent>
-        <TabsContent value="staff" className="space-y-4">
+        <TabsContent value="staff">
           <StaffTable />
-          {account?.isAdmin && <AccountsManager />}
         </TabsContent>
+        {account?.isAdmin && (
+          <TabsContent value="accounts">
+            <AccountsManager />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

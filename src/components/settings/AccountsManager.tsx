@@ -107,6 +107,27 @@ export function AccountsManager() {
     }
   };
 
+  const toggleActive = async (a: Account, next: boolean) => {
+    // Optimistic update so the switch feels responsive; revert on failure.
+    setAccounts((prev) => prev.map((x) => (x.id === a.id ? { ...x, active: next } : x)));
+    try {
+      await invokeFn("app-accounts", {
+        op: "update",
+        account: {
+          id: a.id,
+          name: a.name,
+          is_admin: a.is_admin,
+          tab_permissions: a.tab_permissions,
+          active: next,
+        },
+      });
+      toast.success(next ? `已启用「${a.name}」` : `已停用「${a.name}」`);
+    } catch (e) {
+      setAccounts((prev) => prev.map((x) => (x.id === a.id ? { ...x, active: a.active } : x)));
+      toast.error(`${next ? "启用" : "停用"}失败：${(e as Error).message}`);
+    }
+  };
+
   const handleDelete = async (a: Account) => {
     if (!confirm(`确认删除账号「${a.name}」？`)) return;
     try {
@@ -190,7 +211,7 @@ export function AccountsManager() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Switch checked={a.active} disabled />
+                      <Switch checked={a.active} onCheckedChange={(v) => toggleActive(a, v)} />
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="inline-flex gap-1">
