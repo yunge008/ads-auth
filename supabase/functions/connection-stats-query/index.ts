@@ -4,7 +4,7 @@
 // Body: {
 //   start_date, end_date,
 //   countries?: string[], staff_names?: string[],
-//   detail?: boolean,          // 展示明细：回收明细表下钻到 国家/SKU
+//   group_country?: boolean, group_sku?: boolean,   // 回收明细表分组维度，两者独立勾选、都勾则按 国家/SKU 合并分组
 // }
 //
 // 口径（对齐前端确认过的方案）：
@@ -78,11 +78,13 @@ Deno.serve(async (req) => {
       end_date: string;
       countries?: string[];
       staff_names?: string[];
-      detail?: boolean;
+      group_country?: boolean;
+      group_sku?: boolean;
       include_meta?: boolean;
     };
     if (!body.start_date || !body.end_date) throw new Error("start_date / end_date 必填");
-    const detail = !!body.detail;
+    const groupCountry = !!body.group_country;
+    const groupSku = !!body.group_sku;
     // Meta (staff dropdown + full country list) rarely changes and is expensive to scan
     // (full-table pagination) — the frontend only asks for it once per page visit, not on
     // every filter change, to keep filter clicks fast.
@@ -209,15 +211,15 @@ Deno.serve(async (req) => {
       equivalent_days: Math.round(equivDays * 10) / 10,
     };
 
-    // ---- 回收明细表：按 人员[/国家/SKU] 分组 ----
+    // ---- 回收明细表：按 人员[/国家][/SKU] 分组，国家/SKU 两个维度独立勾选 ----
     type GroupAgg = { staff: string; role: "BD" | "EDITOR"; country: string; sku: string; sampleKeys: Set<string>; recVids: Set<string> };
     const groups = new Map<string, GroupAgg>();
     const groupKey = (staff: string, role: "BD" | "EDITOR", country: string, sku: string) =>
-      detail ? `${role}|${staff}|${country}|${sku}` : `${role}|${staff}`;
+      `${role}|${staff}${groupCountry ? `|${country}` : ""}${groupSku ? `|${sku}` : ""}`;
     const getGroup = (staff: string, role: "BD" | "EDITOR", country: string, sku: string) => {
       const k = groupKey(staff, role, country, sku);
       let g = groups.get(k);
-      if (!g) { g = { staff, role, country: detail ? country : "", sku: detail ? sku : "", sampleKeys: new Set(), recVids: new Set() }; groups.set(k, g); }
+      if (!g) { g = { staff, role, country: groupCountry ? country : "", sku: groupSku ? sku : "", sampleKeys: new Set(), recVids: new Set() }; groups.set(k, g); }
       return g;
     };
     for (const s of sendEvents) getGroup(s.staff, "BD", s.country, s.sku).sampleKeys.add(s.key);

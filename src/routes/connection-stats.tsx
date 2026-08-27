@@ -80,20 +80,21 @@ function todayIso() { return new Date().toISOString().slice(0, 10); }
 function agoIso(days: number) { return new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 10); }
 
 // Flex-row "table" column layout, shared by header/body/footer so widths stay in sync.
-const COL_DETAIL = [
-  { key: "staff_name", label: "人员", flex: 1.15, align: "left" as const },
-  { key: "country", label: "国家", flex: 0.8, align: "left" as const },
-  { key: "sku", label: "SKU", flex: 1.4, align: "left" as const },
-  { key: "samples", label: "发样数量", flex: 0.9, align: "right" as const },
-  { key: "recovered", label: "回收素材", flex: 0.9, align: "right" as const },
-  { key: "rate", label: "素材回收率", flex: 1.6, align: "right" as const },
-];
-const COL_SUMMARY = [
-  { key: "staff_name", label: "人员", flex: 1.3, align: "left" as const },
-  { key: "samples", label: "发样数量", flex: 1, align: "right" as const },
-  { key: "recovered", label: "回收素材", flex: 1, align: "right" as const },
-  { key: "rate", label: "素材回收率", flex: 1.8, align: "right" as const },
-];
+// 国家 / SKU 两个分组维度各自独立勾选，都不勾 = 只按人员汇总。
+function buildCols(groupCountry: boolean, groupSku: boolean) {
+  const any = groupCountry || groupSku;
+  const cols: { key: string; label: string; flex: number; align: "left" | "right" }[] = [
+    { key: "staff_name", label: "人员", flex: any ? 1.15 : 1.3, align: "left" },
+  ];
+  if (groupCountry) cols.push({ key: "country", label: "国家", flex: 0.8, align: "left" });
+  if (groupSku) cols.push({ key: "sku", label: "SKU", flex: 1.4, align: "left" });
+  cols.push(
+    { key: "samples", label: "发样数量", flex: 0.9, align: "right" },
+    { key: "recovered", label: "回收素材", flex: 0.9, align: "right" },
+    { key: "rate", label: "素材回收率", flex: groupCountry && groupSku ? 1.6 : 1.8, align: "right" },
+  );
+  return cols;
+}
 
 function SortTH({
   k, label, align, sortKey, sortDir, onSort,
@@ -138,7 +139,8 @@ function ConnectionStatsPage() {
   const [to, setTo] = React.useState(todayIso());
   const [selStaff, setSelStaff] = React.useState<string[]>([]);
   const [selCountry, setSelCountry] = React.useState<string[]>([]);
-  const [detail, setDetail] = React.useState(true);
+  const [groupCountry, setGroupCountry] = React.useState(true);
+  const [groupSku, setGroupSku] = React.useState(true);
   const [metric, setMetric] = React.useState<"发样达人" | "回收素材">("发样达人");
   const [pieCountryDrill, setPieCountryDrill] = React.useState<string | null>(null);
   const [highlightStaff, setHighlightStaff] = React.useState<string | null>(null);
@@ -166,7 +168,8 @@ function ConnectionStatsPage() {
         start_date: from, end_date: to,
         countries: selCountry.length ? selCountry : undefined,
         staff_names: selStaff.length ? selStaff : undefined,
-        detail,
+        group_country: groupCountry,
+        group_sku: groupSku,
         include_meta: !metaLoadedRef.current,
       }, { signal: controller.signal });
       setData(r);
@@ -180,7 +183,7 @@ function ConnectionStatsPage() {
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [from, to, selCountry, selStaff, detail]);
+  }, [from, to, selCountry, selStaff, groupCountry, groupSku]);
 
   React.useEffect(() => { runQuery(); }, [runQuery]);
 
@@ -308,7 +311,8 @@ function ConnectionStatsPage() {
 
   const hv = hover ? days[hover.i] : null;
   const s = data?.summary;
-  const cols = detail ? COL_DETAIL : COL_SUMMARY;
+  const cols = React.useMemo(() => buildCols(groupCountry, groupSku), [groupCountry, groupSku]);
+  const groupLabel = groupCountry && groupSku ? "人员 / 国家 / SKU" : groupCountry ? "人员 / 国家" : groupSku ? "人员 / SKU" : "按人员汇总";
   const isQuick = (d: number) => from === agoIso(d - 1) && to === todayIso();
 
   return (
@@ -351,25 +355,9 @@ function ConnectionStatsPage() {
 
       {/* Filters — 同事 as its own left half (2 rows: BD / 剪辑), 国家+日期 as a right half
           that always starts at the horizontal middle of the card (grid-cols-2, not flex-1),
-          so its position doesn't drift with how many names happen to be in the left half. */}
+          so its position doesn't drift with how many names happen to be in the other half. */}
       <Card className="flex-none">
         <CardContent className="p-2.5 grid grid-cols-2 gap-6">
-          <div className="flex flex-col gap-1 min-w-0">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-xs font-bold text-foreground flex-none w-9">同事</span>
-              <Pill strong on={meta ? meta.staff.bd.length > 0 && meta.staff.bd.every((n) => selStaff.includes(n)) : false} onClick={() => toggleGroup(meta?.staff.bd ?? [])}>BD</Pill>
-              {(meta?.staff.bd ?? []).map((n) => (
-                <Pill key={n} on={selStaff.includes(n)} color={staffColor(n)} onClick={() => toggleOne(n)}>{n}</Pill>
-              ))}
-            </div>
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-xs text-foreground flex-none w-9" />
-              <Pill strong on={meta ? meta.staff.editor.length > 0 && meta.staff.editor.every((n) => selStaff.includes(n)) : false} onClick={() => toggleGroup(meta?.staff.editor ?? [])}>剪辑</Pill>
-              {(meta?.staff.editor ?? []).map((n) => (
-                <Pill key={n} on={selStaff.includes(n)} color={staffColor(n)} onClick={() => toggleOne(n)}>{n}</Pill>
-              ))}
-            </div>
-          </div>
           <div className="flex flex-col gap-1 min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-xs font-bold text-foreground flex-none w-9">国家</span>
@@ -394,6 +382,22 @@ function ConnectionStatsPage() {
               </div>
             </div>
           </div>
+          <div className="flex flex-col gap-1 min-w-0">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs font-bold text-foreground flex-none w-9">同事</span>
+              <Pill strong on={meta ? meta.staff.bd.length > 0 && meta.staff.bd.every((n) => selStaff.includes(n)) : false} onClick={() => toggleGroup(meta?.staff.bd ?? [])}>BD</Pill>
+              {(meta?.staff.bd ?? []).map((n) => (
+                <Pill key={n} on={selStaff.includes(n)} color={staffColor(n)} onClick={() => toggleOne(n)}>{n}</Pill>
+              ))}
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs text-foreground flex-none w-9" />
+              <Pill strong on={meta ? meta.staff.editor.length > 0 && meta.staff.editor.every((n) => selStaff.includes(n)) : false} onClick={() => toggleGroup(meta?.staff.editor ?? [])}>剪辑</Pill>
+              {(meta?.staff.editor ?? []).map((n) => (
+                <Pill key={n} on={selStaff.includes(n)} color={staffColor(n)} onClick={() => toggleOne(n)}>{n}</Pill>
+              ))}
+            </div>
+          </div>
         </CardContent>
       </Card>
 
@@ -406,12 +410,18 @@ function ConnectionStatsPage() {
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-baseline gap-2">
                 <CardTitle className="text-base">回收明细</CardTitle>
-                <span className="text-xs text-muted-foreground">{sortedRows.length} 行 · {detail ? "人员 / 国家 / SKU" : "按人员汇总"}</span>
+                <span className="text-xs text-muted-foreground">{sortedRows.length} 行 · {groupLabel}</span>
               </div>
-              <label className="flex items-center gap-1.5 text-xs cursor-pointer flex-none">
-                <input type="checkbox" checked={detail} onChange={(e) => setDetail(e.target.checked)} className="h-3.5 w-3.5" />
-                展示明细（国家 / SKU）
-              </label>
+              <div className="flex items-center gap-3 flex-none">
+                <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+                  <input type="checkbox" checked={groupCountry} onChange={(e) => setGroupCountry(e.target.checked)} className="h-3.5 w-3.5" />
+                  按国家分组
+                </label>
+                <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+                  <input type="checkbox" checked={groupSku} onChange={(e) => setGroupSku(e.target.checked)} className="h-3.5 w-3.5" />
+                  按SKU分组
+                </label>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="p-0 flex-1 min-h-0 flex flex-col">
@@ -436,11 +446,11 @@ function ConnectionStatsPage() {
                       <span className="text-[10px] text-muted-foreground flex-none">{r.role === "BD" ? "BD" : "剪辑"}</span>
                     </span>
                   </div>
-                  {detail && <div style={{ flex: "0.8 1 0" }} className="text-muted-foreground truncate">{r.country}</div>}
-                  {detail && <div style={{ flex: "1.4 1 0" }} className="font-mono text-xs text-muted-foreground/90 truncate">{r.sku}</div>}
+                  {groupCountry && <div style={{ flex: "0.8 1 0" }} className="text-muted-foreground truncate">{r.country}</div>}
+                  {groupSku && <div style={{ flex: "1.4 1 0" }} className="font-mono text-xs text-muted-foreground/90 truncate">{r.sku}</div>}
                   <div style={{ flex: "0.9 1 0", textAlign: "right" }} className="font-mono">{r.samples == null ? "—" : fmtNum(r.samples)}</div>
                   <div style={{ flex: "0.9 1 0", textAlign: "right" }} className="font-mono">{fmtNum(r.recovered)}</div>
-                  <div style={{ flex: detail ? "1.6 1 0" : "1.8 1 0", textAlign: "right" }}>
+                  <div style={{ flex: groupCountry && groupSku ? "1.6 1 0" : "1.8 1 0", textAlign: "right" }}>
                     <span className={`font-mono text-xs whitespace-nowrap ${r.rate != null && r.rate >= 0.5 ? "text-primary font-semibold" : ""}`}>
                       {fmtPct(r.rate)}
                     </span>
@@ -453,11 +463,11 @@ function ConnectionStatsPage() {
             </div>
             <div className="flex-none flex items-center gap-2 px-3 py-2 bg-muted/50 border-t text-sm font-semibold">
               <div style={{ flex: `${cols[0].flex} 1 0` }}>合计</div>
-              {detail && <div style={{ flex: "0.8 1 0" }} />}
-              {detail && <div style={{ flex: "1.4 1 0" }} />}
+              {groupCountry && <div style={{ flex: "0.8 1 0" }} />}
+              {groupSku && <div style={{ flex: "1.4 1 0" }} />}
               <div style={{ flex: "0.9 1 0", textAlign: "right" }} className="font-mono">{fmtNum(totals.samples)}</div>
               <div style={{ flex: "0.9 1 0", textAlign: "right" }} className="font-mono">{fmtNum(totals.recovered)}</div>
-              <div style={{ flex: detail ? "1.6 1 0" : "1.8 1 0", textAlign: "right" }} className="font-mono">{s ? fmtPct(s.bd_recover_rate) : "—"}</div>
+              <div style={{ flex: groupCountry && groupSku ? "1.6 1 0" : "1.8 1 0", textAlign: "right" }} className="font-mono">{s ? fmtPct(s.bd_recover_rate) : "—"}</div>
             </div>
           </CardContent>
         </Card>
