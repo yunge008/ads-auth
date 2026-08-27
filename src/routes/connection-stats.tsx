@@ -24,8 +24,8 @@ type DailyPoint = {
   by_staff: Record<string, { sample: number; recover: number }>;
 };
 type QueryResp = {
-  countries: string[];
-  staff: { bd: string[]; editor: string[] };
+  countries: string[] | null;
+  staff: { bd: string[]; editor: string[] } | null;
   summary: {
     bd_sample_total: number; bd_recover_total: number; bd_recover_rate: number | null;
     bd_daily_avg_recover: number | null; editor_output_total: number; editor_daily_avg_output: number | null;
@@ -140,10 +140,19 @@ function ConnectionStatsPage() {
   const [hover, setHover] = React.useState<{ i: number; px: number; py: number; flip: boolean } | null>(null);
 
   const [data, setData] = React.useState<QueryResp | null>(null);
+  // Stable filter-option lists (country/staff dropdown), fetched once and kept across later
+  // filter-change queries — the query function skips re-scanning them when include_meta=false,
+  // which is most of the perceived "click a filter -> feels slow" cost at this row count.
+  const [meta, setMeta] = React.useState<{ countries: string[]; staff: { bd: string[]; editor: string[] } } | null>(null);
+  const metaLoadedRef = React.useRef(false);
+  const abortRef = React.useRef<AbortController | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [syncing, setSyncing] = React.useState(false);
 
   const runQuery = React.useCallback(async () => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoading(true);
     try {
       const r = await invokeFn<QueryResp>("connection-stats-query", {
@@ -151,11 +160,19 @@ function ConnectionStatsPage() {
         countries: selCountry.length ? selCountry : undefined,
         staff_names: selStaff.length ? selStaff : undefined,
         detail,
-      });
+        include_meta: !metaLoadedRef.current,
+      }, { signal: controller.signal });
       setData(r);
+      if (r.countries && r.staff) {
+        metaLoadedRef.current = true;
+        setMeta({ countries: r.countries, staff: r.staff });
+      }
     } catch (e) {
+      if (controller.signal.aborted) return;
       toast.error(`查询失败：${(e as Error).message}`);
-    } finally { setLoading(false); }
+    } finally {
+      if (!controller.signal.aborted) setLoading(false);
+    }
   }, [from, to, selCountry, selStaff, detail]);
 
   React.useEffect(() => { runQuery(); }, [runQuery]);
@@ -165,6 +182,7 @@ function ConnectionStatsPage() {
     try {
       const r = await invokeFn<{ inserted: number; sheets_synced: number; missing_sheets: string[] }>("feishu-read-connection-stats", {});
       toast.success(`同步完成：写入 ${r.inserted} 行 / ${r.sheets_synced} 张表${r.missing_sheets?.length ? `（缺失：${r.missing_sheets.join("、")}）` : ""}`);
+      metaLoadedRef.current = false; // pull fresh country/staff lists once after a real re-sync
       await runQuery();
     } catch (e) {
       toast.error(`同步失败：${(e as Error).message}`);
@@ -179,9 +197,9 @@ function ConnectionStatsPage() {
   });
   const toggleCountry = (c: string) => setSelCountry((prev) => (prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]));
 
-  const staffOrder = React.useMemo(() => [...(data?.staff.bd ?? []), ...(data?.staff.editor ?? [])], [data]);
+  const staffOrder = React.useMemo(() => [...(meta?.staff.bd ?? []), ...(meta?.staff.editor ?? [])], [meta]);
   const staffColor = React.useCallback((name: string) => paletteColor(staffOrder.indexOf(name)), [staffOrder]);
-  const countryOrder = React.useMemo(() => data?.countries ?? [], [data]);
+  const countryOrder = React.useMemo(() => meta?.countries ?? [], [meta]);
   const countryColor = React.useCallback((c: string) => paletteColor(countryOrder.indexOf(c)), [countryOrder]);
 
   const onSort = (k: string) => {
@@ -292,16 +310,14 @@ function ConnectionStatsPage() {
           <Button size="sm" variant="outline" disabled={syncing} onClick={doSync}>
             <RotateCw className={`h-4 w-4 mr-1.5 ${syncing ? "animate-spin" : ""}`} />同步飞书数据
           </Button>
-          <Button size="sm" disabled={loading} onClick={runQuery}>
-            <RotateCw className={`h-4 w-4 mr-1.5 ${loading ? "animate-spin" : ""}`} />刷新
-          </Button>
-          <span className="text-xs text-muted-foreground tabular-nums">
+          <span className="text-xs text-muted-foreground tabular-nums inline-flex items-center gap-1.5">
+            {loading && <RotateCw className="h-3 w-3 animate-spin" />}
             最近同步：{data?.last_synced_at ? new Date(data.last_synced_at).toLocaleString() : "—"}
           </span>
         </div>
       </div>
 
-      {/* KPI cards */}
+      {/* KPI cards — single row, label left / value right */}
       <div className="flex-none grid grid-cols-3 xl:grid-cols-6 gap-2">
         {[
           { label: "BD发样总数", value: s ? fmtNum(s.bd_sample_total) : "—" },
@@ -312,56 +328,55 @@ function ConnectionStatsPage() {
           { label: "剪辑日均素材产出", value: s && s.editor_daily_avg_output != null ? s.editor_daily_avg_output.toFixed(1) : "—" },
         ].map((k) => (
           <Card key={k.label}>
-            <CardContent className="p-2.5">
-              <div className="text-[10.5px] tracking-wide text-muted-foreground whitespace-nowrap">{k.label}</div>
-              <div className={`font-mono text-lg font-semibold mt-0.5 ${k.accent ? "text-primary" : ""}`}>{k.value}</div>
+            <CardContent className="px-3 py-2 flex items-center justify-between gap-2">
+              <div className="text-[10.5px] text-muted-foreground whitespace-nowrap">{k.label}</div>
+              <div className={`font-mono text-base font-semibold whitespace-nowrap ${k.accent ? "text-primary" : ""}`}>{k.value}</div>
             </CardContent>
           </Card>
         ))}
       </div>
 
-      {/* Filters */}
+      {/* Filters — 同事 as its own left column (2 rows: BD / 剪辑), 国家+日期 stacked as a right column */}
       <Card className="flex-none">
-        <CardContent className="p-2.5 flex flex-col gap-2">
-          <div className="flex items-start gap-3">
-            <span className="text-xs text-muted-foreground pt-1.5 flex-none w-9">同事</span>
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <Pill on={data ? data.staff.bd.length > 0 && data.staff.bd.every((n) => selStaff.includes(n)) : false} onClick={() => toggleGroup(data?.staff.bd ?? [])}>BD</Pill>
-                {(data?.staff.bd ?? []).map((n) => (
-                  <Pill key={n} on={selStaff.includes(n)} color={staffColor(n)} onClick={() => toggleOne(n)}>{n}</Pill>
-                ))}
-              </div>
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <Pill on={data ? data.staff.editor.length > 0 && data.staff.editor.every((n) => selStaff.includes(n)) : false} onClick={() => toggleGroup(data?.staff.editor ?? [])}>剪辑</Pill>
-                {(data?.staff.editor ?? []).map((n) => (
-                  <Pill key={n} on={selStaff.includes(n)} color={staffColor(n)} onClick={() => toggleOne(n)}>{n}</Pill>
-                ))}
-              </div>
+        <CardContent className="p-2.5 flex gap-6 flex-wrap">
+          <div className="flex flex-col gap-1 flex-none">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs text-muted-foreground flex-none w-9">同事</span>
+              <Pill on={meta ? meta.staff.bd.length > 0 && meta.staff.bd.every((n) => selStaff.includes(n)) : false} onClick={() => toggleGroup(meta?.staff.bd ?? [])}>BD</Pill>
+              {(meta?.staff.bd ?? []).map((n) => (
+                <Pill key={n} on={selStaff.includes(n)} color={staffColor(n)} onClick={() => toggleOne(n)}>{n}</Pill>
+              ))}
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs text-muted-foreground flex-none w-9" />
+              <Pill on={meta ? meta.staff.editor.length > 0 && meta.staff.editor.every((n) => selStaff.includes(n)) : false} onClick={() => toggleGroup(meta?.staff.editor ?? [])}>剪辑</Pill>
+              {(meta?.staff.editor ?? []).map((n) => (
+                <Pill key={n} on={selStaff.includes(n)} color={staffColor(n)} onClick={() => toggleOne(n)}>{n}</Pill>
+              ))}
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-muted-foreground flex-none w-9">国家</span>
+          <div className="flex flex-col gap-1 flex-1 min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs text-muted-foreground flex-none w-9">国家</span>
               <Pill on={selCountry.length === 0} onClick={() => setSelCountry([])}>全部</Pill>
               {countryOrder.map((c) => (
                 <Pill key={c} on={selCountry.includes(c)} color={countryColor(c)} onClick={() => toggleCountry(c)}>{c}</Pill>
               ))}
             </div>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap pt-1.5 border-t">
-            <span className="text-xs text-muted-foreground">日期</span>
-            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-8 w-36" />
-            <span className="text-xs text-muted-foreground">至</span>
-            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-8 w-36" />
-            <div className="flex gap-0.5 p-0.5 bg-muted rounded-md">
-              {QUICK_DAYS.map((d) => (
-                <button
-                  key={d}
-                  onClick={() => { setTo(todayIso()); setFrom(agoIso(d - 1)); }}
-                  className={`text-[11px] px-2.5 py-1 rounded ${isQuick(d) ? "bg-background shadow-sm font-medium" : "text-muted-foreground"}`}
-                >近{d}天</button>
-              ))}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-muted-foreground flex-none w-9">日期</span>
+              <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-8 w-36" />
+              <span className="text-xs text-muted-foreground">至</span>
+              <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-8 w-36" />
+              <div className="flex gap-0.5 p-0.5 bg-muted rounded-md">
+                {QUICK_DAYS.map((d) => (
+                  <button
+                    key={d}
+                    onClick={() => { setTo(todayIso()); setFrom(agoIso(d - 1)); }}
+                    className={`text-[11px] px-2.5 py-1 rounded ${isQuick(d) ? "bg-background shadow-sm font-medium" : "text-muted-foreground"}`}
+                  >近{d}天</button>
+                ))}
+              </div>
             </div>
           </div>
         </CardContent>
@@ -369,7 +384,7 @@ function ConnectionStatsPage() {
 
       {/* Main grid — fixed rows so panels never resize with data, and 回收明细's bottom
           always lines up with the daily-chart card's bottom (both track the same grid rows). */}
-      <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1.4fr)] xl:grid-rows-[minmax(0,0.78fr)_minmax(0,1fr)] gap-2.5">
+      <div className={`flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1.4fr)] xl:grid-rows-[minmax(0,0.78fr)_minmax(0,1fr)] gap-2.5 transition-opacity ${loading ? "opacity-60" : ""}`}>
         {/* 回收明细表 */}
         <Card className="xl:row-span-2 flex flex-col min-h-0 overflow-hidden">
           <CardHeader className="pb-2 flex-none">
@@ -410,15 +425,10 @@ function ConnectionStatsPage() {
                   {detail && <div style={{ flex: "1.4 1 0" }} className="font-mono text-xs text-muted-foreground/90 truncate">{r.sku}</div>}
                   <div style={{ flex: "0.9 1 0", textAlign: "right" }} className="font-mono">{r.samples == null ? "—" : fmtNum(r.samples)}</div>
                   <div style={{ flex: "0.9 1 0", textAlign: "right" }} className="font-mono">{fmtNum(r.recovered)}</div>
-                  <div style={{ flex: detail ? "1.6 1 0" : "1.8 1 0" }}>
-                    {r.rate == null ? <div className="text-right font-mono text-muted-foreground text-xs">—</div> : (
-                      <div className="flex items-center gap-2">
-                        <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                          <div className="h-full rounded-full" style={{ width: `${Math.min(100, r.rate * 100)}%`, background: r.rate >= 0.5 ? "hsl(var(--primary))" : "oklch(0.72 0.09 " + (40 + r.rate * 260) + ")" }} />
-                        </div>
-                        <span className="font-mono text-xs whitespace-nowrap">{fmtPct(r.rate)}</span>
-                      </div>
-                    )}
+                  <div style={{ flex: detail ? "1.6 1 0" : "1.8 1 0", textAlign: "right" }}>
+                    <span className={`font-mono text-xs whitespace-nowrap ${r.rate != null && r.rate >= 0.5 ? "text-primary font-semibold" : ""}`}>
+                      {fmtPct(r.rate)}
+                    </span>
                   </div>
                 </div>
               ))}
@@ -454,9 +464,9 @@ function ConnectionStatsPage() {
             </div>
             <div className="text-[10.5px] text-muted-foreground">点击切片/图例下钻，联动右侧粉丝分层统计范围</div>
           </CardHeader>
-          <CardContent className="flex-1 min-h-0 flex items-center justify-center gap-4 overflow-hidden pt-0">
-            <div className="relative flex-none" style={{ width: 120, height: 120 }}>
-              <svg viewBox="0 0 150 150" width={120} height={120}>
+          <CardContent className="flex-1 min-h-0 flex items-center gap-3 overflow-hidden pt-0">
+            <div className="relative flex-none" style={{ width: 138, height: 138 }}>
+              <svg viewBox="0 0 150 150" width={138} height={138}>
                 {countrySlices.map((sl, i) => (
                   <circle key={i} cx={75} cy={75} r={sl.r} fill="none" stroke={sl.color} strokeWidth={sl.sw}
                     strokeDasharray={sl.dash} strokeDashoffset={sl.offset} transform="rotate(-90 75 75)"
@@ -468,17 +478,23 @@ function ConnectionStatsPage() {
                 <div className="font-mono text-base font-semibold">{fmtNum(countryPieTotal)}</div>
               </div>
             </div>
-            <div className="flex flex-col gap-0.5 min-w-0 h-full overflow-y-auto py-1">
+            <div
+              className="grid gap-x-2 gap-y-0.5 min-w-0 flex-1 content-center"
+              style={{ gridTemplateColumns: countryPieItems.length > 6 ? "1fr 1fr" : "1fr" }}
+            >
               {countryPieItems.map((it) => (
                 <div key={it.country}
-                  className="flex items-center gap-1.5 text-[11px] px-1.5 py-0.5 rounded cursor-pointer flex-none"
-                  style={{ background: pieCountryDrill === it.country ? "rgba(0,0,0,.06)" : "transparent", fontWeight: pieCountryDrill === it.country ? 600 : 400 }}
+                  className="grid items-center gap-x-1 text-[10.5px] px-1 py-0.5 rounded cursor-pointer min-w-0"
+                  style={{
+                    gridTemplateColumns: "8px 1fr auto",
+                    background: pieCountryDrill === it.country ? "rgba(0,0,0,.06)" : "transparent",
+                    fontWeight: pieCountryDrill === it.country ? 600 : 400,
+                  }}
                   onClick={() => setPieCountryDrill((p) => (p === it.country ? null : it.country))}
                 >
-                  <span className="w-2 h-2 rounded-sm flex-none" style={{ background: countryColor(it.country) }} />
-                  <span className="w-9 flex-none truncate">{it.country}</span>
-                  <span className="w-11 flex-none text-right font-mono font-semibold">{fmtPct(countryPieTotal ? it.count / countryPieTotal : null)}</span>
-                  <span className="flex-1 text-right font-mono text-[10px] text-muted-foreground">{fmtNum(it.count)}</span>
+                  <span className="w-2 h-2 rounded-sm" style={{ background: countryColor(it.country) }} />
+                  <span className="truncate">{it.country}</span>
+                  <span className="text-right font-mono">{fmtPct(countryPieTotal ? it.count / countryPieTotal : null)}</span>
                 </div>
               ))}
               {!countryPieItems.length && <div className="text-xs text-muted-foreground">{loading ? "加载中…" : "暂无数据"}</div>}
@@ -492,9 +508,9 @@ function ConnectionStatsPage() {
             <CardTitle className="text-sm">粉丝量分布（BD{pieCountryDrill ? ` · ${pieCountryDrill}` : " · 全部国家"}）</CardTitle>
             <div className="text-[10.5px] text-muted-foreground">各达人按自己所在国家的门槛定档后合并统计</div>
           </CardHeader>
-          <CardContent className="flex-1 min-h-0 flex items-center justify-center gap-3 overflow-hidden pt-0">
-            <div className="relative flex-none" style={{ width: 108, height: 108 }}>
-              <svg viewBox="0 0 150 150" width={108} height={108}>
+          <CardContent className="flex-1 min-h-0 flex items-center gap-3 overflow-hidden pt-0">
+            <div className="relative flex-none" style={{ width: 138, height: 138 }}>
+              <svg viewBox="0 0 150 150" width={138} height={138}>
                 {tierSlices.map((sl, i) => (
                   <circle key={i} cx={75} cy={75} r={sl.r} fill="none" stroke={sl.color} strokeWidth={sl.sw}
                     strokeDasharray={sl.dash} strokeDashoffset={sl.offset} transform="rotate(-90 75 75)" />
@@ -504,17 +520,17 @@ function ConnectionStatsPage() {
                 <div className="font-mono text-base font-semibold">{fmtNum(tierTotal)}</div>
               </div>
             </div>
-            <div className="flex flex-col gap-1 min-w-0 h-full justify-center overflow-y-auto">
+            <div className="grid gap-x-1.5 gap-y-1 min-w-0 flex-1 text-[10.5px]" style={{ gridTemplateColumns: "8px auto 1fr auto auto" }}>
               {tierSource.map((it) => {
                 const th = data?.fan_tier_pie.thresholds[it.tier];
                 return (
-                  <div key={it.tier} className="flex items-center gap-1.5 text-[10.5px] flex-none">
-                    <span className="w-2 h-2 rounded-sm flex-none" style={{ background: TIER_COLOR[it.tier] }} />
-                    <span className="w-6 flex-none font-semibold">{it.tier}</span>
-                    <span className="w-[104px] flex-none font-mono text-[9.5px] text-muted-foreground whitespace-nowrap">{th ? `其他${th.其他}·MX${th.MX}` : ""}</span>
-                    <span className="flex-1 text-right font-mono">{fmtPct(tierTotal ? it.count / tierTotal : null)}</span>
-                    <span className="w-8 flex-none text-right font-mono text-muted-foreground">{it.count}人</span>
-                  </div>
+                  <React.Fragment key={it.tier}>
+                    <span className="w-2 h-2 rounded-sm self-center" style={{ background: TIER_COLOR[it.tier] }} />
+                    <span className="font-semibold whitespace-nowrap">{it.tier}</span>
+                    <span className="font-mono text-[9.5px] text-muted-foreground truncate">{th ? `其他${th.其他}·MX${th.MX}` : ""}</span>
+                    <span className="text-right font-mono">{fmtPct(tierTotal ? it.count / tierTotal : null)}</span>
+                    <span className="text-right font-mono text-muted-foreground whitespace-nowrap">{it.count}人</span>
+                  </React.Fragment>
                 );
               })}
             </div>
@@ -593,7 +609,7 @@ function ConnectionStatsPage() {
             </div>
             <div className="flex-none flex flex-wrap items-center justify-center gap-1.5 pt-1.5">
               <span className="text-[10.5px] text-muted-foreground mr-1">点击高亮同事</span>
-              {(data?.staff.bd ?? []).map((n) => (
+              {(meta?.staff.bd ?? []).map((n) => (
                 <button
                   key={n}
                   onClick={() => setHighlightStaff((p) => (p === n ? null : n))}

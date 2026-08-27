@@ -39,9 +39,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="flex h-screen bg-muted/30">
       <aside className="w-56 shrink-0 border-r bg-card flex flex-col h-screen sticky top-0">
 
-        <div className="px-5 py-5 border-b">
-          <h1 className="text-base font-semibold text-foreground">AR广告工具</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">广告户授权管理</p>
+        <div className="px-5 py-5 border-b flex items-start justify-between gap-2">
+          <div>
+            <h1 className="text-base font-semibold text-foreground">AR广告工具</h1>
+            <p className="text-xs text-muted-foreground mt-0.5">广告户授权管理</p>
+          </div>
+          <span className="text-[10px] text-muted-foreground font-mono pt-0.5 flex-none">v{APP_VERSION}</span>
         </div>
         <nav className="flex-1 p-3 space-y-1">
           {mainTabs.map((item) => {
@@ -117,11 +120,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-12 border-b bg-card flex items-center justify-end px-6">
-          <span className="text-xs text-muted-foreground font-mono">
-            v{APP_VERSION}
-          </span>
-        </header>
         <main className="flex-1 p-6 overflow-auto">{children}</main>
       </div>
     </div>

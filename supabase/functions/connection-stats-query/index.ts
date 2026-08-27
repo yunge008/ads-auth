@@ -79,26 +79,31 @@ Deno.serve(async (req) => {
       countries?: string[];
       staff_names?: string[];
       detail?: boolean;
+      include_meta?: boolean;
     };
     if (!body.start_date || !body.end_date) throw new Error("start_date / end_date 必填");
     const detail = !!body.detail;
+    // Meta (staff dropdown + full country list) rarely changes and is expensive to scan
+    // (full-table pagination) — the frontend only asks for it once per page visit, not on
+    // every filter change, to keep filter clicks fast.
+    const includeMeta = body.include_meta !== false;
     const db = admin();
 
-    // Staff dropdown lists (active BD/EDITOR), independent of current filter.
-    const { data: staffRows, error: staffErr } = await db
-      .from("staff_sheets")
-      .select("name, role")
-      .eq("active", true)
-      .in("role", ["BD", "EDITOR"]);
-    if (staffErr) throw new Error(staffErr.message);
-    const staffList = {
-      bd: (staffRows ?? []).filter((s) => s.role === "BD").map((s) => s.name as string),
-      editor: (staffRows ?? []).filter((s) => s.role === "EDITOR").map((s) => s.name as string),
+    const fetchStaffList = async () => {
+      const { data: staffRows, error: staffErr } = await db
+        .from("staff_sheets")
+        .select("name, role")
+        .eq("active", true)
+        .in("role", ["BD", "EDITOR"]);
+      if (staffErr) throw new Error(staffErr.message);
+      return {
+        bd: (staffRows ?? []).filter((s) => s.role === "BD").map((s) => s.name as string),
+        editor: (staffRows ?? []).filter((s) => s.role === "EDITOR").map((s) => s.name as string),
+      };
     };
 
-    // Full distinct country list (unfiltered), for the filter UI.
-    const countrySet = new Set<string>();
-    {
+    const fetchCountryList = async () => {
+      const countrySet = new Set<string>();
       const PAGE = 1000;
       let from = 0;
       for (;;) {
@@ -112,12 +117,11 @@ Deno.serve(async (req) => {
         if (rows.length < PAGE) break;
         from += PAGE;
       }
-    }
+      return Array.from(countrySet).sort();
+    };
 
-    // Main fetch (filtered by staff/country if provided), paginated.
-    const regRows: Reg[] = [];
-    let lastSyncedAt: string | null = null;
-    {
+    const fetchMainRows = async () => {
+      const out: (Reg & { synced_at: string })[] = [];
       const PAGE = 1000;
       let from = 0;
       for (;;) {
@@ -131,13 +135,23 @@ Deno.serve(async (req) => {
         const { data, error } = await q.range(from, from + PAGE - 1);
         if (error) throw new Error(error.message);
         const rows = (data ?? []) as (Reg & { synced_at: string })[];
-        for (const r of rows) {
-          if (!lastSyncedAt || r.synced_at > lastSyncedAt) lastSyncedAt = r.synced_at;
-        }
-        regRows.push(...rows);
+        out.push(...rows);
         if (rows.length < PAGE) break;
         from += PAGE;
       }
+      return out;
+    };
+
+    const [mainRows, staffList, countryList] = await Promise.all([
+      fetchMainRows(),
+      includeMeta ? fetchStaffList() : Promise.resolve(null),
+      includeMeta ? fetchCountryList() : Promise.resolve(null),
+    ]);
+
+    const regRows: Reg[] = mainRows;
+    let lastSyncedAt: string | null = null;
+    for (const r of mainRows) {
+      if (!lastSyncedAt || r.synced_at > lastSyncedAt) lastSyncedAt = r.synced_at;
     }
 
     const bdRows = regRows.filter((r) => r.source_type === "BD");
@@ -278,13 +292,24 @@ Deno.serve(async (req) => {
       days.push(d.toISOString().slice(0, 10));
     }
     const staffInScope = Array.from(new Set([...sendEvents.map((s) => s.staff), ...bdRecEvents.map((r) => r.staff)]));
+    const byDate = <T extends { date: string }>(items: T[]) => {
+      const m = new Map<string, T[]>();
+      for (const it of items) { const arr = m.get(it.date) ?? []; arr.push(it); m.set(it.date, arr); }
+      return m;
+    };
+    const sendByDate = byDate(sendEvents);
+    const recByDate = byDate(bdRecEvents);
     const daily_series = days.map((date) => {
-      const sendToday = sendEvents.filter((s) => s.date === date);
-      const recToday = bdRecEvents.filter((r) => r.date === date);
+      const sendToday = sendByDate.get(date) ?? [];
+      const recToday = recByDate.get(date) ?? [];
+      const sampleCount = new Map<string, number>();
+      const recoverCount = new Map<string, number>();
+      for (const s of sendToday) sampleCount.set(s.staff, (sampleCount.get(s.staff) ?? 0) + 1);
+      for (const r of recToday) recoverCount.set(r.staff, (recoverCount.get(r.staff) ?? 0) + 1);
       const by_staff: Record<string, { sample: number; recover: number }> = {};
       for (const st of staffInScope) {
-        const sample = sendToday.filter((s) => s.staff === st).length;
-        const recover = recToday.filter((r) => r.staff === st).length;
+        const sample = sampleCount.get(st) ?? 0;
+        const recover = recoverCount.get(st) ?? 0;
         if (sample || recover) by_staff[st] = { sample, recover };
       }
       const sample = sendToday.length, recover = recToday.length;
@@ -293,7 +318,7 @@ Deno.serve(async (req) => {
 
     return new Response(
       JSON.stringify({
-        countries: Array.from(countrySet).sort(),
+        countries: countryList,
         staff: staffList,
         summary,
         grouped_rows,

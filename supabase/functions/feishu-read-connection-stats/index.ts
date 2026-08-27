@@ -78,7 +78,7 @@ Deno.serve(async (req) => {
         const data = await readRange(token, mainToken, `${sid}!A2:Q`, 250);
         for (let i = 0; i < data.length; i++) {
           const r = data[i] ?? [];
-          const country = cellText(r[2]);
+          const country = cellText(r[2]).toUpperCase();
           const handle = cellText(r[3]);
           if (!COUNTRY_RE.test(country) || !handle) continue;
           const vidRaw = cellText(r[15]);
@@ -125,7 +125,7 @@ Deno.serve(async (req) => {
             row_number: i + 2,
             staff_name: t.name,
             staff_active: !!t.active,
-            country: cellText(r[3]),
+            country: cellText(r[3]).toUpperCase(),
             handle: cellText(r[4]),
             sku: cellText(r[5]) || null,
             fan_count: null,
