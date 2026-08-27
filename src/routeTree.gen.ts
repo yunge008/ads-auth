@@ -15,6 +15,7 @@ import { Route as GmvMaxCreateRouteImport } from './routes/gmv-max-create'
 import { Route as GmvAttributionAdminRouteImport } from './routes/gmv-attribution-admin'
 import { Route as GmvAttributionRouteImport } from './routes/gmv-attribution'
 import { Route as FeishuDataRouteImport } from './routes/feishu-data'
+import { Route as ConnectionStatsRouteImport } from './routes/connection-stats'
 import { Route as CommentsRouteImport } from './routes/comments'
 import { Route as ApiTestRouteImport } from './routes/api-test'
 import { Route as IndexRouteImport } from './routes/index'
@@ -50,6 +51,11 @@ const GmvAttributionRoute = GmvAttributionRouteImport.update({
 const FeishuDataRoute = FeishuDataRouteImport.update({
   id: '/feishu-data',
   path: '/feishu-data',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConnectionStatsRoute = ConnectionStatsRouteImport.update({
+  id: '/connection-stats',
+  path: '/connection-stats',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CommentsRoute = CommentsRouteImport.update({
@@ -89,6 +95,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/api-test': typeof ApiTestRoute
   '/comments': typeof CommentsRoute
+  '/connection-stats': typeof ConnectionStatsRoute
   '/feishu-data': typeof FeishuDataRoute
   '/gmv-attribution': typeof GmvAttributionRoute
   '/gmv-attribution-admin': typeof GmvAttributionAdminRoute
@@ -103,6 +110,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/api-test': typeof ApiTestRoute
   '/comments': typeof CommentsRoute
+  '/connection-stats': typeof ConnectionStatsRoute
   '/feishu-data': typeof FeishuDataRoute
   '/gmv-attribution': typeof GmvAttributionRoute
   '/gmv-attribution-admin': typeof GmvAttributionAdminRoute
@@ -118,6 +126,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/api-test': typeof ApiTestRoute
   '/comments': typeof CommentsRoute
+  '/connection-stats': typeof ConnectionStatsRoute
   '/feishu-data': typeof FeishuDataRoute
   '/gmv-attribution': typeof GmvAttributionRoute
   '/gmv-attribution-admin': typeof GmvAttributionAdminRoute
@@ -134,6 +143,7 @@ export interface FileRouteTypes {
     | '/'
     | '/api-test'
     | '/comments'
+    | '/connection-stats'
     | '/feishu-data'
     | '/gmv-attribution'
     | '/gmv-attribution-admin'
@@ -148,6 +158,7 @@ export interface FileRouteTypes {
     | '/'
     | '/api-test'
     | '/comments'
+    | '/connection-stats'
     | '/feishu-data'
     | '/gmv-attribution'
     | '/gmv-attribution-admin'
@@ -162,6 +173,7 @@ export interface FileRouteTypes {
     | '/'
     | '/api-test'
     | '/comments'
+    | '/connection-stats'
     | '/feishu-data'
     | '/gmv-attribution'
     | '/gmv-attribution-admin'
@@ -177,6 +189,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ApiTestRoute: typeof ApiTestRoute
   CommentsRoute: typeof CommentsRoute
+  ConnectionStatsRoute: typeof ConnectionStatsRoute
   FeishuDataRoute: typeof FeishuDataRoute
   GmvAttributionRoute: typeof GmvAttributionRoute
   GmvAttributionAdminRoute: typeof GmvAttributionAdminRoute
@@ -232,6 +245,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof FeishuDataRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/connection-stats': {
+      id: '/connection-stats'
+      path: '/connection-stats'
+      fullPath: '/connection-stats'
+      preLoaderRoute: typeof ConnectionStatsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/comments': {
       id: '/comments'
       path: '/comments'
@@ -281,6 +301,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ApiTestRoute: ApiTestRoute,
   CommentsRoute: CommentsRoute,
+  ConnectionStatsRoute: ConnectionStatsRoute,
   FeishuDataRoute: FeishuDataRoute,
   GmvAttributionRoute: GmvAttributionRoute,
   GmvAttributionAdminRoute: GmvAttributionAdminRoute,
