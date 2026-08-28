@@ -4,6 +4,7 @@
 // Body: {
 //   start_date, end_date,
 //   countries?: string[], staff_names?: string[],
+//   skus?: string[],   // SKU 搜索：数字整段匹配（"333"命中"333-A"/"AR333"/"333+311"，不命中"3331"/"AR3331"）
 //   group_country?: boolean, group_sku?: boolean,   // 回收明细表分组维度，两者独立勾选、都勾则按 国家/SKU 合并分组
 // }
 //
@@ -69,6 +70,17 @@ function safeDiv(a: number, b: number): number | null {
   return b > 0 ? a / b : null;
 }
 
+// SKU search matches whole numeric tokens only: query "333" matches "333-A", "AR333",
+// "333+311" (contains a maximal digit run equal to "333") but NOT "3331", "3331-A",
+// "AR3331" (their digit run is "3331", not "333") — never a plain substring match.
+function skuDigitTokens(s: string): string[] {
+  return s.match(/\d+/g) ?? [];
+}
+function skuMatchesAny(sku: string, queryTokens: string[]): boolean {
+  const tokens = skuDigitTokens(sku);
+  return queryTokens.some((q) => tokens.includes(q));
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -78,6 +90,7 @@ Deno.serve(async (req) => {
       end_date: string;
       countries?: string[];
       staff_names?: string[];
+      skus?: string[];
       group_country?: boolean;
       group_sku?: boolean;
       include_meta?: boolean;
@@ -150,11 +163,14 @@ Deno.serve(async (req) => {
       includeMeta ? fetchCountryList() : Promise.resolve(null),
     ]);
 
-    const regRows: Reg[] = mainRows;
+    const skuQueryTokens = (body.skus ?? []).map((s) => s.trim()).filter(Boolean);
     let lastSyncedAt: string | null = null;
     for (const r of mainRows) {
       if (!lastSyncedAt || r.synced_at > lastSyncedAt) lastSyncedAt = r.synced_at;
     }
+    const regRows: Reg[] = skuQueryTokens.length
+      ? mainRows.filter((r) => r.sku && skuMatchesAny(r.sku, skuQueryTokens))
+      : mainRows;
 
     const bdRows = regRows.filter((r) => r.source_type === "BD");
     const editorRows = regRows.filter((r) => r.source_type === "EDITOR");

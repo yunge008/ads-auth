@@ -141,6 +141,14 @@ function ConnectionStatsPage() {
   const [selCountry, setSelCountry] = React.useState<string[]>([]);
   const [groupCountry, setGroupCountry] = React.useState(true);
   const [groupSku, setGroupSku] = React.useState(true);
+  const [skuInput, setSkuInput] = React.useState("");
+  const [skuTokens, setSkuTokens] = React.useState<string[]>([]);
+  React.useEffect(() => {
+    const t = setTimeout(() => {
+      setSkuTokens(skuInput.split(/[\s,，]+/).map((s) => s.trim()).filter(Boolean));
+    }, 400);
+    return () => clearTimeout(t);
+  }, [skuInput]);
   const [metric, setMetric] = React.useState<"发样达人" | "回收素材">("发样达人");
   const [pieCountryDrill, setPieCountryDrill] = React.useState<string | null>(null);
   const [highlightStaff, setHighlightStaff] = React.useState<string | null>(null);
@@ -168,6 +176,7 @@ function ConnectionStatsPage() {
         start_date: from, end_date: to,
         countries: selCountry.length ? selCountry : undefined,
         staff_names: selStaff.length ? selStaff : undefined,
+        skus: skuTokens.length ? skuTokens : undefined,
         group_country: groupCountry,
         group_sku: groupSku,
         include_meta: !metaLoadedRef.current,
@@ -183,7 +192,7 @@ function ConnectionStatsPage() {
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [from, to, selCountry, selStaff, groupCountry, groupSku]);
+  }, [from, to, selCountry, selStaff, skuTokens, groupCountry, groupSku]);
 
   React.useEffect(() => { runQuery(); }, [runQuery]);
 
@@ -359,12 +368,17 @@ function ConnectionStatsPage() {
       <Card className="flex-none">
         <CardContent className="p-2.5 grid grid-cols-2 gap-6">
           <div className="flex flex-col gap-1 min-w-0">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-xs font-bold text-foreground flex-none w-9">国家</span>
+            {/* 全部 stays pinned as its own flex item; only the chip list wraps, so a
+                wrapped line starts at the chip list's own left edge (right after 全部),
+                not all the way back at the card's left margin. */}
+            <div className="flex items-start gap-1.5">
+              <span className="text-xs font-bold text-foreground flex-none w-9 pt-1">国家</span>
               <Pill strong on={selCountry.length === 0} onClick={() => setSelCountry([])}>全部</Pill>
-              {countryOrder.map((c) => (
-                <Pill key={c} on={selCountry.includes(c)} color={countryColor(c)} onClick={() => toggleCountry(c)}>{c}</Pill>
-              ))}
+              <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                {countryOrder.map((c) => (
+                  <Pill key={c} on={selCountry.includes(c)} color={countryColor(c)} onClick={() => toggleCountry(c)}>{c}</Pill>
+                ))}
+              </div>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-bold text-foreground flex-none w-9">日期</span>
@@ -396,6 +410,15 @@ function ConnectionStatsPage() {
               {(meta?.staff.editor ?? []).map((n) => (
                 <Pill key={n} on={selStaff.includes(n)} color={staffColor(n)} onClick={() => toggleOne(n)}>{n}</Pill>
               ))}
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-bold text-foreground flex-none w-9">SKU</span>
+              <Input
+                value={skuInput}
+                onChange={(e) => setSkuInput(e.target.value)}
+                placeholder="按数字整段匹配，如 333 命中 333-A/AR333，不命中 3331；多个用逗号分隔"
+                className="h-8 flex-1 min-w-0 text-xs"
+              />
             </div>
           </div>
         </CardContent>
