@@ -4,7 +4,9 @@
 // Body: {
 //   start_date, end_date,
 //   countries?: string[], staff_names?: string[],
-//   skus?: string[],   // SKU 搜索：数字整段匹配（"333"命中"333-A"/"AR333"/"333+311"，不命中"3331"/"AR3331"）
+//   skus?: string[],   // SKU 搜索 token 数组（前端用 "&" 拆分，OR 匹配）：含数字的 token（"333"/"AR333"）
+//     按数字整段精确匹配（命中"333-A"/"AR333"/"333+311"，不命中"3331"/"AR3331"）；纯字母 token（"B"/"K"）
+//     按大小写不敏感子串匹配整个 sku（命中所有含该字母的 sku，如"333-B"）
 //   group_country?: boolean, group_sku?: boolean,   // 回收明细表分组维度，两者独立勾选、都勾则按 国家/SKU 合并分组
 // }
 //
@@ -70,15 +72,26 @@ function safeDiv(a: number, b: number): number | null {
   return b > 0 ? a / b : null;
 }
 
-// SKU search matches whole numeric tokens only: query "333" matches "333-A", "AR333",
-// "333+311" (contains a maximal digit run equal to "333") but NOT "3331", "3331-A",
-// "AR3331" (their digit run is "3331", not "333") — never a plain substring match.
+// SKU search, per query token (tokens are combined with "&" on the frontend, OR'd here):
+// - a token containing digits (e.g. "333", or "AR333" which is treated the same as "333" —
+//   its non-digit letters are ignored) matches by whole numeric-run equality: it matches
+//   "333-A", "AR333", "333+311" (a maximal digit run equal to "333") but NOT "3331",
+//   "3331-A", "AR3331" (their digit run is "3331", not "333") — never a plain substring match.
+// - a token with no digits at all (e.g. "B", "K") matches by case-insensitive substring
+//   against the whole sku, so "B" matches any sku containing a "B" anywhere (e.g. "333-B").
 function skuDigitTokens(s: string): string[] {
   return s.match(/\d+/g) ?? [];
 }
+function skuMatchesQuery(sku: string, query: string): boolean {
+  const queryDigits = query.match(/\d+/g) ?? [];
+  if (queryDigits.length > 0) {
+    const skuDigits = skuDigitTokens(sku);
+    return queryDigits.some((d) => skuDigits.includes(d));
+  }
+  return sku.toUpperCase().includes(query.toUpperCase());
+}
 function skuMatchesAny(sku: string, queryTokens: string[]): boolean {
-  const tokens = skuDigitTokens(sku);
-  return queryTokens.some((q) => tokens.includes(q));
+  return queryTokens.some((q) => skuMatchesQuery(sku, q));
 }
 
 Deno.serve(async (req) => {

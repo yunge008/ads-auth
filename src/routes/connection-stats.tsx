@@ -145,7 +145,7 @@ function ConnectionStatsPage() {
   const [skuTokens, setSkuTokens] = React.useState<string[]>([]);
   React.useEffect(() => {
     const t = setTimeout(() => {
-      setSkuTokens(skuInput.split(/[\s,，]+/).map((s) => s.trim()).filter(Boolean));
+      setSkuTokens(skuInput.split(/[&\s,，]+/).map((s) => s.trim()).filter(Boolean));
     }, 400);
     return () => clearTimeout(t);
   }, [skuInput]);
@@ -416,9 +416,10 @@ function ConnectionStatsPage() {
               <Input
                 value={skuInput}
                 onChange={(e) => setSkuInput(e.target.value)}
-                placeholder="按数字整段匹配，如 333 命中 333-A/AR333，不命中 3331；多个用逗号分隔"
+                placeholder="数字整段匹配（333 命中 333-A/AR333，不命中 3331）；字母子串匹配（B 命中所有含 B 的 SKU）"
                 className="h-8 flex-1 min-w-0 text-xs"
               />
+              <span className="text-xs text-muted-foreground flex-none whitespace-nowrap">用&可合并搜索，如 333&B</span>
             </div>
           </div>
         </CardContent>
