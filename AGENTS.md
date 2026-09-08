@@ -7,7 +7,7 @@
 - 远端：https://github.com/yunge008/ads-auth.git ，Lovable 双向同步 `main` 分支。
 - **开工前必须 `git pull`，完工后立刻 commit + push**。Lovable 会随时往 main 推提交，拖得越久冲突越多。
 - 小步提交，一次 commit 只做一件事。Commit message 前缀标明身份：`[claude]` / `[codex]` / lovable 自动提交不带前缀。
-- 大改动（跨多文件的重构、改 DB schema）走 feature 分支 + PR；小改动可直接 main。
+- **所有代码修改一律直接在 `main` 分支上改**（不管改动大小，包括跨多文件的重构、改 DB schema），不建 feature 分支 / 不开 PR。
 
 ## 分工建议（按文件域划分，避免交叉修改）
 
