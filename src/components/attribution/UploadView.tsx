@@ -447,20 +447,13 @@ export function UploadView({
       </Card>
 
       {viewing && summary ? (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">
-              归因结果：{viewing.kind === "upload" ? viewing.label : `${viewing.month} 全站点合并`}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <ProgressBoard report={summary} mode="admin" onDrill={drill} />
-            {detail ? <DetailTable rows={detail.rows} loading={detailLoading} title={detail.title} /> : null}
-          </CardContent>
-        </Card>
+        <div className="text-sm text-muted-foreground">
+          已生成归因结果：{viewing.kind === "upload" ? viewing.label : `${viewing.month} 全站点合并`} · 请切换到上方「归因结果」标签查看
+        </div>
       ) : viewing && !summary ? (
         <div className="text-sm text-muted-foreground text-center py-6">加载中…</div>
       ) : null}
+
     </div>
   );
 }
