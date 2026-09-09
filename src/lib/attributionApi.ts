@@ -183,6 +183,16 @@ export const exportApi = {
     invokeFn<{ rows: VidSummaryRow[] }>("attribution-upload", { action: "export_vid_summary", month }, { timeout: 120000 }),
 };
 
+export type UnmatchedTrendRow = { country: string; account_name: string; total: number; by_month: Record<string, number> };
+
+export function unmatchedTrend(month: string) {
+  return invokeFn<{ months: string[]; rows: UnmatchedTrendRow[] }>(
+    "attribution-upload",
+    { action: "unmatched_trend", month },
+    { timeout: 120000 },
+  );
+}
+
 // ---------- 格式化 ----------
 
 export const fmtUsd = (n: number | null | undefined) =>

@@ -8,7 +8,8 @@ import { Progress } from "@/components/ui/progress";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { FileUp, Trash2, Eye, RotateCw, Layers } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { FileUp, Trash2, Eye, RotateCw, Layers, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { parseAdExcel, type ParsedFile } from "@/lib/adExcel";
 import {
@@ -23,8 +24,10 @@ import {
 } from "@/lib/attributionApi";
 import { ProgressBoard } from "./ProgressBoard";
 import { DetailTable } from "./DetailTable";
+import { UploadStatusMatrix } from "./UploadStatusMatrix";
 
 const BATCH = 1000;
+const HISTORY_PAGE_SIZE = 20;
 
 /** 逐个币种要求用户填「1 美元 = 多少本币」并落库；用户取消或输入无效返回 false。 */
 async function promptMissingRates(missing: string[]): Promise<boolean> {
@@ -65,6 +68,7 @@ export function UploadView() {
   const [summary, setSummary] = React.useState<AttributionReport | null>(null);
   const [detail, setDetail] = React.useState<{ rows: DetailRow[]; title: string } | null>(null);
   const [detailLoading, setDetailLoading] = React.useState(false);
+  const [historyPage, setHistoryPage] = React.useState(1);
   const fileInput = React.useRef<HTMLInputElement>(null);
 
   const loadHistory = React.useCallback(async () => {
@@ -72,6 +76,7 @@ export function UploadView() {
     try {
       const r = await uploadApi.list();
       setHistory(r.uploads ?? []);
+      setHistoryPage(1);
     } catch (e) {
       toast.error(`加载上传历史失败：${(e as Error).message}`);
     } finally {
@@ -79,6 +84,9 @@ export function UploadView() {
     }
   }, []);
   React.useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  const historyPageCount = Math.max(1, Math.ceil(history.length / HISTORY_PAGE_SIZE));
+  const pagedHistory = history.slice((historyPage - 1) * HISTORY_PAGE_SIZE, historyPage * HISTORY_PAGE_SIZE);
 
   const onPickFiles = async (list: FileList | null) => {
     if (!list?.length) return;
@@ -317,7 +325,7 @@ export function UploadView() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">
-            上传历史 <span className="text-xs font-normal text-muted-foreground ml-1">最近 100 条</span>
+            上传历史 <span className="text-xs font-normal text-muted-foreground ml-1">共 {history.length} 条</span>
           </CardTitle>
           <div className="flex flex-wrap items-end gap-2">
             <Button size="sm" variant="outline" onClick={loadHistory} disabled={historyLoading}>
@@ -332,51 +340,78 @@ export function UploadView() {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="border rounded-md overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>文件</TableHead>
-                  <TableHead>站点</TableHead>
-                  <TableHead>月份</TableHead>
-                  <TableHead className="text-right">行数</TableHead>
-                  <TableHead className="text-right">GMV</TableHead>
-                  <TableHead>状态</TableHead>
-                  <TableHead>上传人/时间</TableHead>
-                  <TableHead className="text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {history.length === 0 ? (
-                  <TableRow><TableCell colSpan={8} className="h-16 text-center text-sm text-muted-foreground">暂无上传</TableCell></TableRow>
-                ) : history.map((u) => (
-                  <TableRow key={u.id}>
-                    <TableCell className="text-xs max-w-56 truncate" title={u.file_name}>{u.file_name}</TableCell>
-                    <TableCell className="text-xs">{u.country}</TableCell>
-                    <TableCell className="text-xs tabular-nums">{u.month}</TableCell>
-                    <TableCell className="text-right tabular-nums">{u.row_count}</TableCell>
-                    <TableCell className="text-right tabular-nums">{fmtUsd(u.total_revenue)}</TableCell>
-                    <TableCell>
-                      <Badge variant={u.status === "READY" ? "default" : u.status === "FAILED" ? "destructive" : "secondary"}>
-                        {u.status === "READY" ? "已归因" : u.status === "FAILED" ? "失败" : "上传中"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-xs">{u.uploaded_by || "—"} · {new Date(u.created_at).toLocaleDateString()}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-1">
-                        <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => viewUpload(u)} disabled={u.status !== "READY"}>
-                          <Eye className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button size="sm" variant="ghost" className="h-7 px-2 text-destructive" onClick={() => removeUpload(u)}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+          <Tabs defaultValue="list">
+            <TabsList>
+              <TabsTrigger value="list">列表</TabsTrigger>
+              <TabsTrigger value="matrix">上传状态矩阵</TabsTrigger>
+            </TabsList>
+            <TabsContent value="list" className="mt-3 space-y-2">
+              <div className="border rounded-md overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>文件</TableHead>
+                      <TableHead>站点</TableHead>
+                      <TableHead>月份</TableHead>
+                      <TableHead className="text-right">行数</TableHead>
+                      <TableHead className="text-right">GMV</TableHead>
+                      <TableHead>状态</TableHead>
+                      <TableHead>上传人/时间</TableHead>
+                      <TableHead className="text-right">操作</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {history.length === 0 ? (
+                      <TableRow><TableCell colSpan={8} className="h-16 text-center text-sm text-muted-foreground">暂无上传</TableCell></TableRow>
+                    ) : pagedHistory.map((u) => (
+                      <TableRow key={u.id}>
+                        <TableCell className="text-xs max-w-56 truncate" title={u.file_name}>{u.file_name}</TableCell>
+                        <TableCell className="text-xs">{u.country}</TableCell>
+                        <TableCell className="text-xs tabular-nums">{u.month}</TableCell>
+                        <TableCell className="text-right tabular-nums">{u.row_count}</TableCell>
+                        <TableCell className="text-right tabular-nums">{fmtUsd(u.total_revenue)}</TableCell>
+                        <TableCell>
+                          <Badge variant={u.status === "READY" ? "default" : u.status === "FAILED" ? "destructive" : "secondary"}>
+                            {u.status === "READY" ? "已归因" : u.status === "FAILED" ? "失败" : "上传中"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-xs">{u.uploaded_by || "—"} · {new Date(u.created_at).toLocaleDateString()}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => viewUpload(u)} disabled={u.status !== "READY"}>
+                              <Eye className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button size="sm" variant="ghost" className="h-7 px-2 text-destructive" onClick={() => removeUpload(u)}>
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              {history.length > HISTORY_PAGE_SIZE && (
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <div>
+                    第 {(historyPage - 1) * HISTORY_PAGE_SIZE + 1}-{Math.min(historyPage * HISTORY_PAGE_SIZE, history.length)} / 共 {history.length} 条
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="outline" className="h-7" disabled={historyPage <= 1} onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}>
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                    </Button>
+                    <span>{historyPage} / {historyPageCount}</span>
+                    <Button size="sm" variant="outline" className="h-7" disabled={historyPage >= historyPageCount} onClick={() => setHistoryPage((p) => Math.min(historyPageCount, p + 1))}>
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </TabsContent>
+            <TabsContent value="matrix" className="mt-3">
+              <UploadStatusMatrix history={history} />
+            </TabsContent>
+          </Tabs>
         </CardContent>
       </Card>
 

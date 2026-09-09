@@ -161,17 +161,12 @@ export async function persistRunArtifacts(db: SupabaseClient, result: AttrRunRes
       aliasByKey.set(`${identityKey(a.country, a.aliasNorm)}\u001fVID_INFERRED`, a);
     }
     const aliasesToPersist = Array.from(aliasByKey.values());
-    const norms = Array.from(new Set(aliasesToPersist.map((a) => a.aliasNorm)));
-    const manualNorms = new Set<string>();
-    for (let i = 0; i < norms.length; i += 500) {
-      const { data, error } = await db
-        .from("creator_alias")
-        .select("alias_norm, country")
-        .eq("source", "MANUAL")
-        .in("alias_norm", norms.slice(i, i + 500));
-      if (error) throw new Error(error.message);
-      for (const r of (data ?? []) as { alias_norm: string; country: string }[]) manualNorms.add(identityKey(r.country, r.alias_norm));
-    }
+    // 全表拉取 MANUAL 别名（人工判定表通常很小）比按 alias_norm 分块 .in() 更稳：
+    // 大文件推断出的别名可能上千个、含中日文/emoji 昵称，chunked GET 请求的 URL 会被撑到超长导致网络层报错。
+    const manualRows = await pageAll<{ alias_norm: string; country: string }>((f, t) =>
+      db.from("creator_alias").select("alias_norm, country").eq("source", "MANUAL").range(f, t),
+    );
+    const manualNorms = new Set(manualRows.map((r) => identityKey(r.country, r.alias_norm)));
     const rows = aliasesToPersist
       .filter((a) => !manualNorms.has(identityKey(a.country, a.aliasNorm)))
       .map((a: NewAlias) => ({

@@ -4,8 +4,11 @@
 //   「GMV目标」  A月份 B姓名 C角色(BD/剪辑) D目标USD E备注 —— 人工维护，系统只读
 //   「站点交接」 A国家 B原BD C新BD D交接日期 E备注 —— 人工维护，系统只读
 //   「达人归因表」A类型 B名称 C归一化键 D国家 E当前BD F最后登记日期 G转移/证据 H交接提示 —— 系统覆盖写
-// Body: { action: 'write-progress'|'write-reviews'|'read-judgments'|'sync-targets'|'sync-handovers'|'write-ownership'|'list-reviews', month? }
+// Body: { action: 'write-progress'|'write-reviews'|'read-judgments'|'submit-judgment'|'sync-targets'|'sync-handovers'|'write-ownership'|'list-reviews', month? }
 //   list-reviews 仅读数据库（前端审查面板用），不访问飞书。
+//   submit-judgment { review_key, manual_bd, manual_note? } → 网页端直接判定：立即写 attribution_review（+ 昵称类型顺带写
+//     creator_alias source=MANUAL），并尽力把同一条判定同步进飞书「归因审查」表对应行（J/K/L，找不到该行则连同判定一起补一行）；
+//     飞书同步失败不影响数据库判定已生效，只在返回里带 mirror_warning。
 import {
   corsHeaders,
   getSpreadsheetToken,
@@ -34,6 +37,82 @@ const TYPE_LABELS: Record<string, string> = {
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+/** 从 ReviewItem.detail 里提炼「候选人」摘要文本，write-reviews 与 submit-judgment 共用。 */
+function candidatesSummary(detail: unknown): string {
+  const d = (detail ?? {}) as Record<string, unknown>;
+  if (Array.isArray(d.candidates)) {
+    return (d.candidates as Array<{ staff?: string; role?: string }>).map((c) => `${c.staff}(${c.role})`).join(" / ");
+  }
+  if (Array.isArray(d.votes)) {
+    return (d.votes as Array<{ bd?: string; count?: number }>).map((v) => `${v.bd}×${v.count}`).join(" / ");
+  }
+  if (Array.isArray(d.grabs)) {
+    const owner = (d.owner as string) ?? "";
+    return [owner, ...(d.grabs as Array<{ bd?: string }>).map((g) => g.bd ?? "")].filter(Boolean).join(" / ");
+  }
+  if (d.nicknameOwner || d.handleOwner) {
+    return [d.nicknameOwner, d.handleOwner].filter(Boolean).join(" / ");
+  }
+  if (d.vidEvidence || d.registryOwner) {
+    const ev = d.vidEvidence as { bd?: string } | undefined;
+    return [ev?.bd, d.registryOwner].filter(Boolean).join(" / ");
+  }
+  if (d.newVote || d.existingBd) {
+    const nv = d.newVote as { bd?: string } | undefined;
+    return [nv?.bd, d.existingBd].filter(Boolean).join(" / ");
+  }
+  return "";
+}
+
+const NICKNAME_REVIEW_TYPES = new Set(["ALIAS_VOTE_CONFLICT", "PROTECTION_GRAB", "KEYTYPE_CONFLICT"]);
+
+/**
+ * 落地一条人工判定：昵称类审查项（ALIAS:{country}{norm} 形式的 review_key）额外写一条
+ * creator_alias(source=MANUAL) 记录，永久生效且不会被自动推断覆盖；随后更新 attribution_review。
+ * 注：PROTECTION_GRAB 的 review_key（GRAB:{keyType}:{matchKey}）不含国家，暂无法反解出 country，
+ * 这种情况下只记录判定到 attribution_review，不写 creator_alias（与此前 Feishu 回填逻辑行为一致）。
+ */
+async function applyJudgment(
+  db: ReturnType<typeof admin>,
+  review: { review_key: string; review_type: string; subject: string },
+  bd: string,
+  note: string,
+  decidedBy: string,
+): Promise<{ warning?: string }> {
+  const ignore = bd === "忽略" || bd === "不处理" || !bd;
+  let warning: string | undefined;
+  if (!ignore) {
+    const { data: staffRows } = await db.from("staff_sheets").select("name").eq("name", bd).limit(1);
+    if (!staffRows?.length) warning = `人工判定「${bd}」不在人员表中（仍已生效，请确认姓名拼写）`;
+  }
+  if (!ignore && NICKNAME_REVIEW_TYPES.has(review.review_type)) {
+    const aliasNorm = normalizeName(review.subject);
+    const scoped = review.review_key.startsWith("ALIAS:") ? review.review_key.slice("ALIAS:".length) : "";
+    const { country } = splitIdentityKey(scoped);
+    if (aliasNorm && country) {
+      const { error } = await db.from("creator_alias").upsert(
+        {
+          alias_norm: aliasNorm,
+          alias_display: review.subject,
+          country,
+          bd_name: bd,
+          source: "MANUAL",
+          decided_by: decidedBy,
+          evidence: { review_key: review.review_key, note },
+        },
+        { onConflict: "country,alias_norm,source" },
+      );
+      if (error) throw new Error(error.message);
+    }
+  }
+  const { error } = await db
+    .from("attribution_review")
+    .update({ manual_bd: ignore ? null : bd, manual_note: note || null, status: "RESOLVED" })
+    .eq("review_key", review.review_key);
+  if (error) throw new Error(error.message);
+  return { warning };
 }
 
 function nowCn(): string {
@@ -78,7 +157,13 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     const account = await verifyPasscode(req, "gmv-attribution-admin");
-    const body = (await req.json()) as { action?: string; month?: string };
+    const body = (await req.json()) as {
+      action?: string;
+      month?: string;
+      review_key?: string;
+      manual_bd?: string;
+      manual_note?: string;
+    };
     const action = (body.action ?? "").trim();
     const db = admin();
 
@@ -163,21 +248,7 @@ Deno.serve(async (req) => {
       }
       const fresh = open.filter((r) => !seen.has(r.review_key));
       const rows: unknown[][] = fresh.map((r) => {
-        const d = (r.detail ?? {}) as Record<string, unknown>;
-        let candidates = "";
-        if (Array.isArray(d.candidates)) {
-          candidates = (d.candidates as Array<{ staff?: string; role?: string }>).map((c) => `${c.staff}(${c.role})`).join(" / ");
-        } else if (Array.isArray(d.votes)) {
-          candidates = (d.votes as Array<{ bd?: string; count?: number }>).map((v) => `${v.bd}×${v.count}`).join(" / ");
-        } else if (Array.isArray(d.grabs)) {
-          const owner = (d.owner as string) ?? "";
-          candidates = [owner, ...(d.grabs as Array<{ bd?: string }>).map((g) => g.bd ?? "")].filter(Boolean).join(" / ");
-        } else if (d.nicknameOwner || d.handleOwner) {
-          candidates = [d.nicknameOwner, d.handleOwner].filter(Boolean).join(" / ");
-        } else if (d.vidEvidence || d.registryOwner) {
-          const ev = d.vidEvidence as { bd?: string } | undefined;
-          candidates = [ev?.bd, d.registryOwner].filter(Boolean).join(" / ");
-        }
+        const candidates = candidatesSummary(r.detail);
         return [
           r.review_key,
           TYPE_LABELS[r.review_type] ?? r.review_type,
@@ -203,18 +274,17 @@ Deno.serve(async (req) => {
     // ---------- 读回人工判定 ----------
     if (action === "read-judgments") {
       const sid = sheetId(SHEET_REVIEWS);
-      const rows = await readRange(token, ss, `${sid}!A2:I`, 400);
-      const { data: staffRows } = await db.from("staff_sheets").select("name");
-      const staffNames = new Set(((staffRows ?? []) as { name: string }[]).map((r) => r.name));
+      // 列布局：A审查ID...I状态 J人工判定BD K人工备注 L采纳标记 —— 必须读到 L，此前只读到 I 导致 J/K 从未被读到过
+      const rows = await readRange(token, ss, `${sid}!A2:L`, 400);
 
       type Judgment = { rowIdx: number; key: string; bd: string; note: string };
       const judgments: Judgment[] = [];
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i] ?? [];
         const key = cellText(r[0]);
-        const bd = cellText(r[6]); // G ??????
+        const bd = cellText(r[9]); // J
         if (!key || !bd) continue;
-        judgments.push({ rowIdx: i + 2, key, bd, note: cellText(r[7]) });
+        judgments.push({ rowIdx: i + 2, key, bd, note: cellText(r[10]) }); // K
       }
       if (!judgments.length) return json({ applied: 0, warnings: [] });
 
@@ -241,37 +311,8 @@ Deno.serve(async (req) => {
           warnings.push(`第 ${j.rowIdx} 行：审查ID ${j.key} 在数据库中不存在，已跳过`);
           continue;
         }
-        const ignore = j.bd === "忽略" || j.bd === "不处理";
-        if (!ignore && !staffNames.has(j.bd)) {
-          warnings.push(`第 ${j.rowIdx} 行：人工判定「${j.bd}」不在人员表中（仍已生效，请确认姓名拼写）`);
-        }
-        // 昵称类判定 → 人工别名（优先级最高，永不被自动覆盖）
-        const nicknameTypes = ["ALIAS_VOTE_CONFLICT", "PROTECTION_GRAB", "KEYTYPE_CONFLICT"];
-        if (!ignore && nicknameTypes.includes(review.review_type)) {
-          const aliasNorm = normalizeName(review.subject);
-          const scoped = review.review_key.startsWith("ALIAS:") ? review.review_key.slice("ALIAS:".length) : "";
-          const { country } = splitIdentityKey(scoped);
-          if (aliasNorm && country) {
-            const { error } = await db.from("creator_alias").upsert(
-              {
-                alias_norm: aliasNorm,
-                alias_display: review.subject,
-                country,
-                bd_name: j.bd,
-                source: "MANUAL",
-                decided_by: `feishu:${account.name}`,
-                evidence: { review_key: j.key, note: j.note },
-              },
-              { onConflict: "country,alias_norm,source" },
-            );
-            if (error) throw new Error(error.message);
-          }
-        }
-        const { error } = await db
-          .from("attribution_review")
-          .update({ manual_bd: ignore ? null : j.bd, manual_note: j.note || null, status: "RESOLVED" })
-          .eq("review_key", j.key);
-        if (error) throw new Error(error.message);
+        const { warning } = await applyJudgment(db, review, j.bd, j.note, `feishu:${account.name}`);
+        if (warning) warnings.push(`第 ${j.rowIdx} 行：${warning}`);
         applied++;
         adopted.push(j.rowIdx);
       }
@@ -284,6 +325,68 @@ Deno.serve(async (req) => {
         }
       }
       return json({ applied, warnings });
+    }
+
+    // ---------- 网页端直接判定：DB 立即生效 + 尽力同步回飞书「归因审查」表对应行 ----------
+    if (action === "submit-judgment") {
+      const reviewKey = (body.review_key ?? "").trim();
+      const manualBd = (body.manual_bd ?? "").trim();
+      const manualNote = (body.manual_note ?? "").trim();
+      if (!reviewKey) throw new Error("review_key 必填");
+
+      const { data: reviewData, error: reviewErr } = await db
+        .from("attribution_review")
+        .select("review_key, review_type, subject, detail, default_resolution, first_seen_at, last_seen_at")
+        .eq("review_key", reviewKey)
+        .maybeSingle();
+      if (reviewErr) throw new Error(reviewErr.message);
+      if (!reviewData) throw new Error("审查项不存在");
+      const review = reviewData as {
+        review_key: string;
+        review_type: string;
+        subject: string;
+        detail: unknown;
+        default_resolution: string | null;
+        first_seen_at: string;
+        last_seen_at: string;
+      };
+
+      // DB 先落地：即使下面同步飞书失败，判定依然生效（下次归因计算立即读到）
+      const { warning } = await applyJudgment(db, review, manualBd, manualNote, account.name);
+
+      let mirrored = false;
+      let mirrorWarning: string | undefined;
+      try {
+        const sid = sheetId(SHEET_REVIEWS);
+        const col = await readRange(token, ss, `${sid}!A2:A`);
+        const idx = col.findIndex((r) => cellText((r ?? [])[0]) === reviewKey);
+        const ignore = !manualBd || manualBd === "忽略" || manualBd === "不处理";
+        const jkl = [ignore ? "忽略" : manualBd, manualNote, "已采纳"];
+        if (idx >= 0) {
+          const rowIdx = idx + 2;
+          await writeValues(token, ss, [{ range: `${sid}!I${rowIdx}:L${rowIdx}`, values: [["已裁决", ...jkl]] }]);
+        } else {
+          // 该审查项还没被「回写新审查项」推送过，连同判定一起补一行，避免飞书那边完全看不到
+          const start = col.length + 2;
+          await writeRowsAt(token, ss, sid, start, "L", [[
+            review.review_key,
+            TYPE_LABELS[review.review_type] ?? review.review_type,
+            review.subject,
+            candidatesSummary(review.detail),
+            review.default_resolution ?? "",
+            JSON.stringify(review.detail ?? {}).slice(0, 480),
+            (review.first_seen_at ?? "").slice(0, 10),
+            (review.last_seen_at ?? "").slice(0, 10),
+            "已裁决",
+            ...jkl,
+          ]]);
+        }
+        mirrored = true;
+      } catch (e) {
+        mirrorWarning = `已写入数据库，但同步到飞书「归因审查」表失败：${(e as Error).message}`;
+      }
+
+      return json({ applied: true, warning, mirrored, mirror_warning: mirrorWarning });
     }
 
     // ---------- 目标同步 ----------

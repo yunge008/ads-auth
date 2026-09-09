@@ -10,6 +10,7 @@
 //   list_exchange_rates {} → { rates }（含禁用行）
 //   save_exchange_rate  { currency, usd_rate, enabled? } → { rate }；usd_rate 语义=1 美元兑多少本币
 //   export_vid_summary  { month } → { rows }：按 (国家,VID,商品ID) 聚合的唯一 VID 汇总（14 列口径），前端生成 xlsx
+//   unmatched_trend     { month } → { months, rows }：以 month 为最近一个月，往前推 12 个月，按 (国家,达人昵称) 聚合 UNMATCHED 桶 GMV（折美元），rows[].by_month 是 月份→GMV
 import { corsHeaders } from "../_shared/feishu.ts";
 import { admin, verifyPasscode } from "../_shared/auth.ts";
 import {
@@ -215,23 +216,30 @@ Deno.serve(async (req) => {
           throw new Error(`站点「${country}」不在 advertiser_countries 中（已知：${Array.from(known).join("、")}）。确认无误可 force=true 强制创建`);
         }
       }
+      // 只挡「同名文件重复上传」，不挡同站点同月的多份分文件（如 JP MAX 202508.1/.2.xlsx 属正常分卷，需按月合并求和）
       if (!body.replace_existing) {
         const { data: dup, error: dupErr } = await db
           .from("ad_uploads")
           .select("file_name, status")
           .eq("country", country)
           .eq("month", month)
+          .eq("file_name", fileName)
           .in("status", ["UPLOADING", "READY"]);
         if (dupErr) throw new Error(dupErr.message);
         if (dup && dup.length) {
           const desc = dup.map((d: { file_name: string; status: string }) => `${d.file_name}（${d.status}）`).join("、");
           throw errWithPayload(
-            `该站点该月已有上传记录（${desc}），请先在列表里删除旧记录，或勾选替换后重试`,
+            `该文件名已上传过（${desc}），请先在列表里删除旧记录，或勾选替换后重试`,
             { duplicate: true },
           );
         }
       } else {
-        const { error: delErr } = await db.from("ad_uploads").delete().eq("country", country).eq("month", month);
+        const { error: delErr } = await db
+          .from("ad_uploads")
+          .delete()
+          .eq("country", country)
+          .eq("month", month)
+          .eq("file_name", fileName);
         if (delErr) throw new Error(delErr.message);
       }
 
@@ -351,11 +359,12 @@ Deno.serve(async (req) => {
     }
 
     if (action === "list") {
+      // 上限放大到 2000：站点数×月份数量级很小，但前端「上传状态矩阵」需要看到全部历史，不能只取最近 100 条
       let q = db
         .from("ad_uploads")
         .select("id, file_name, country, month, uploaded_by, period_start, period_end, row_count, total_cost, total_revenue, status, attributed_at, note, created_at")
         .order("created_at", { ascending: false })
-        .limit(100);
+        .limit(2000);
       const month = str(body.month);
       if (month) q = q.eq("month", month);
       const { data, error } = await q;
@@ -535,6 +544,63 @@ Deno.serve(async (req) => {
         };
       });
       return json({ rows: rowsOut });
+    }
+
+    if (action === "unmatched_trend") {
+      const anchorMonth = str(body.month);
+      if (!/^\d{4}-\d{2}$/.test(anchorMonth)) throw new Error("month 格式应为 YYYY-MM");
+      const months: string[] = [];
+      {
+        const [y, m] = anchorMonth.split("-").map(Number);
+        for (let i = 0; i < 12; i++) {
+          const d = new Date(Date.UTC(y, m - 1 - i, 1));
+          months.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`);
+        }
+      }
+      const { data: ups, error } = await db
+        .from("ad_uploads")
+        .select("id, country, month")
+        .in("month", months)
+        .eq("status", "READY");
+      if (error) throw new Error(error.message);
+      const uploads = (ups ?? []) as { id: string; country: string; month: string }[];
+      const exchangeRates = await loadExchangeRates(db);
+
+      type Agg = { country: string; account_name: string; byMonth: Map<string, number> };
+      const aggMap = new Map<string, Agg>();
+      for (const u of uploads) {
+        const rows = await fetchAllRows(db, u.id);
+        for (const r of rows) {
+          if (r.attr_bucket !== "UNMATCHED") continue;
+          const input = toInput(u.id, u.country, r);
+          const cur = (input.currency || "USD").toUpperCase();
+          const rate = exchangeRates.get(cur) ?? (cur === "USD" ? 1 : 0);
+          if (!rate) continue;
+          const name = input.accountName.trim();
+          if (!name) continue; // 无账号名不纳入
+          const key = `${u.country}|${name}`;
+          let agg = aggMap.get(key);
+          if (!agg) {
+            agg = { country: u.country, account_name: name, byMonth: new Map() };
+            aggMap.set(key, agg);
+          }
+          agg.byMonth.set(u.month, (agg.byMonth.get(u.month) ?? 0) + input.grossRevenue / rate);
+        }
+      }
+      const rowsOut = Array.from(aggMap.values())
+        .map((a) => {
+          const byMonth: Record<string, number> = {};
+          let total = 0;
+          for (const m of months) {
+            const v = a.byMonth.get(m) ?? 0;
+            byMonth[m] = v;
+            total += v;
+          }
+          return { country: a.country, account_name: a.account_name, total, by_month: byMonth };
+        })
+        .filter((r) => r.total > 0)
+        .sort((a, b) => b.total - a.total);
+      return json({ months, rows: rowsOut });
     }
 
     if (action === "delete") {
