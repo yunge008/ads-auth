@@ -20,7 +20,7 @@ type GroupedRow = {
 type CountryPieItem = { country: string; count: number };
 type TierPieItem = { tier: string; count: number };
 type DailyPoint = {
-  date: string; sample: number; recover: number; rate: number | null;
+  date: string; sample: number; recover: number; editor_recover: number; rate: number | null;
   by_staff: Record<string, { sample: number; recover: number }>;
 };
 type QueryResp = {
@@ -57,6 +57,7 @@ function hashIndex(s: string) {
 }
 const C_SEND = "oklch(0.80 0.075 245)";
 const C_REC = "oklch(0.42 0.115 253)";
+const C_EDIT = "oklch(0.62 0.19 25)";
 const C_LINE = "oklch(0.66 0.16 55)";
 const PERSON_LINE = "oklch(0.80 0.11 62)";
 const QUICK_DAYS = [7, 15, 30, 60];
@@ -152,6 +153,9 @@ function ConnectionStatsPage() {
   const [metric, setMetric] = React.useState<"发样达人" | "回收素材">("发样达人");
   const [pieCountryDrill, setPieCountryDrill] = React.useState<string | null>(null);
   const [highlightStaff, setHighlightStaff] = React.useState<string | null>(null);
+  const [showSend, setShowSend] = React.useState(true);
+  const [showBD, setShowBD] = React.useState(true);
+  const [showEditor, setShowEditor] = React.useState(true);
   const [sortKey, setSortKey] = React.useState<string>("recovered");
   const [sortDir, setSortDir] = React.useState<"asc" | "desc">("desc");
   const [hover, setHover] = React.useState<{ i: number; px: number; py: number; flip: boolean } | null>(null);
@@ -271,9 +275,16 @@ function ConnectionStatsPage() {
 
   // ---- 每日发样/回收 ----
   const days = React.useMemo(() => data?.daily_series ?? [], [data]);
+  const showRate = showSend || showBD;
   const chart = React.useMemo(() => {
     if (!days.length) return null;
-    const maxCnt = Math.max(1, ...days.map((d) => Math.max(d.sample, d.recover)));
+    const maxCnt = Math.max(
+      1,
+      ...days.map((d) => Math.max(
+        showSend ? d.sample : 0,
+        (showBD ? d.recover : 0) + (showEditor ? d.editor_recover : 0),
+      )),
+    );
     const rateVals = days.map((d) => d.rate);
     const maxRate = Math.max(0.2, Math.ceil(Math.max(0, ...rateVals.map((v) => v ?? 0)) * 5) / 5);
     const axisCnt = Math.ceil(maxCnt / 0.7 / 4) * 4;
@@ -287,20 +298,39 @@ function ConnectionStatsPage() {
     const xTicks: { x: number; label: string }[] = [];
     days.forEach((d, i) => {
       const gx = padL + i * gw;
-      const hS = (d.sample / axisCnt) * plotH, hM = (d.recover / axisCnt) * plotH;
       const hi = highlightStaff;
-      bars.push({ x: gx, y: y0 - hS, w: bw, h: hS, fill: C_SEND, opacity: hi ? 0.35 : 1 });
-      bars.push({ x: gx + bw, y: y0 - hM, w: bw, h: hM, fill: C_REC, opacity: hi ? 0.25 : 1 });
+      if (showSend) {
+        const hS = (d.sample / axisCnt) * plotH;
+        bars.push({ x: gx, y: y0 - hS, w: bw, h: hS, fill: C_SEND, opacity: hi ? 0.35 : 1 });
+      }
+      let cursor = y0;
+      if (showBD) {
+        const hM = (d.recover / axisCnt) * plotH;
+        bars.push({ x: gx + bw, y: cursor - hM, w: bw, h: hM, fill: C_REC, opacity: hi ? 0.25 : 1 });
+        cursor -= hM;
+      }
+      if (showEditor) {
+        const hE = (d.editor_recover / axisCnt) * plotH;
+        bars.push({ x: gx + bw, y: cursor - hE, w: bw, h: hE, fill: C_EDIT, opacity: hi ? 0.25 : 1 });
+        cursor -= hE;
+      }
       if (hi && d.by_staff[hi]) {
         const pS = d.by_staff[hi].sample, pM = d.by_staff[hi].recover;
-        const a = (pS / axisCnt) * plotH, b = (pM / axisCnt) * plotH;
-        if (a) bars.push({ x: gx, y: y0 - a, w: bw, h: a, fill: C_SEND, opacity: 1 });
-        if (b) bars.push({ x: gx + bw, y: y0 - b, w: bw, h: b, fill: C_REC, opacity: 1 });
+        if (showSend) {
+          const a = (pS / axisCnt) * plotH;
+          if (a) bars.push({ x: gx, y: y0 - a, w: bw, h: a, fill: C_SEND, opacity: 1 });
+        }
+        if (showBD) {
+          const b = (pM / axisCnt) * plotH;
+          if (b) bars.push({ x: gx + bw, y: y0 - b, w: bw, h: b, fill: C_REC, opacity: 1 });
+        }
       }
-      if (d.rate != null) lineNodes.push({ x: gx + bw, y: rateBase - Math.min(d.rate / maxRate, 1) * (rateBase - yTop) });
-      if (hi && d.by_staff[hi]?.sample) {
-        const pr = d.by_staff[hi].recover / d.by_staff[hi].sample;
-        personNodes.push({ x: gx + bw, y: rateBase - Math.min(pr / maxRate, 1) * (rateBase - yTop) });
+      if (showRate) {
+        if (d.rate != null) lineNodes.push({ x: gx + bw, y: rateBase - Math.min(d.rate / maxRate, 1) * (rateBase - yTop) });
+        if (hi && d.by_staff[hi]?.sample) {
+          const pr = d.by_staff[hi].recover / d.by_staff[hi].sample;
+          personNodes.push({ x: gx + bw, y: rateBase - Math.min(pr / maxRate, 1) * (rateBase - yTop) });
+        }
       }
       if (i % every === 0) xTicks.push({ x: gx + bw, label: d.date.slice(5) });
     });
@@ -308,7 +338,7 @@ function ConnectionStatsPage() {
     const yLeft = [0, 1, 2, 3, 4].map((t) => ({ y: y0 - (plotH * t) / 4, label: Math.round((axisCnt * t) / 4) }));
     const yRight = [0, 1, 2].map((t) => ({ y: rateBase - ((rateBase - yTop) * t) / 2, label: Math.round(((maxRate * t) / 2) * 100) + "%" }));
     return { W, H: 400, padL, padR, y0, yTop, plotW, plotH, gw, bw, rateBase, bars, lineNodes, personNodes, xTicks, gridLines, yLeft, yRight };
-  }, [days, highlightStaff]);
+  }, [days, highlightStaff, showSend, showBD, showEditor, showRate]);
 
   const onChartMove = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!chart) return;
@@ -590,11 +620,35 @@ function ConnectionStatsPage() {
         <Card className="xl:col-span-2 flex flex-col min-h-0 overflow-hidden">
           <CardHeader className="pb-1.5 flex-none">
             <div className="flex items-baseline justify-between gap-3 flex-wrap">
-              <CardTitle className="text-sm">发样数量 / 回收素材数量（BD）</CardTitle>
+              <CardTitle className="text-sm">发样数量 / 回收素材数量</CardTitle>
               <div className="flex items-center gap-3 text-[10.5px] text-muted-foreground flex-wrap">
-                <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: C_SEND }} />发样</span>
-                <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: C_REC }} />回收素材</span>
-                <span className="inline-flex items-center gap-1"><span className="w-3 h-0.5 inline-block" style={{ background: C_LINE }} />回收率（右轴）</span>
+                <button
+                  type="button"
+                  onClick={() => setShowSend((v) => !v)}
+                  className="inline-flex items-center gap-1"
+                  style={{ opacity: showSend ? 1 : 0.35 }}
+                >
+                  <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: C_SEND }} />发样
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowBD((v) => !v)}
+                  className="inline-flex items-center gap-1"
+                  style={{ opacity: showBD ? 1 : 0.35 }}
+                >
+                  <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: C_REC }} />BD素材
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowEditor((v) => !v)}
+                  className="inline-flex items-center gap-1"
+                  style={{ opacity: showEditor ? 1 : 0.35 }}
+                >
+                  <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: C_EDIT }} />剪辑素材
+                </button>
+                {showRate && (
+                  <span className="inline-flex items-center gap-1"><span className="w-3 h-0.5 inline-block" style={{ background: C_LINE }} />回收率（右轴）</span>
+                )}
                 <span>选中同事后深色为其占比，浅橙虚线为其回收率</span>
               </div>
             </div>
@@ -608,12 +662,16 @@ function ConnectionStatsPage() {
                       <line key={i} x1={chart.padL} y1={g.y} x2={chart.W - chart.padR} y2={g.y} stroke="rgba(0,0,0,.08)" strokeWidth={1} />
                     ))}
                     {chart.bars.map((b, i) => <rect key={i} x={b.x} y={b.y} width={b.w} height={b.h} fill={b.fill} opacity={b.opacity} />)}
-                    <line x1={chart.padL} y1={chart.rateBase} x2={chart.W - chart.padR} y2={chart.rateBase} stroke={C_LINE} strokeWidth={1} strokeDasharray="3 4" opacity={0.45} />
-                    <polyline points={chart.lineNodes.map((n) => `${n.x.toFixed(1)},${n.y.toFixed(1)}`).join(" ")} fill="none" stroke={C_LINE} strokeWidth={2} strokeLinejoin="round" />
-                    {highlightStaff && (
-                      <polyline points={chart.personNodes.map((n) => `${n.x.toFixed(1)},${n.y.toFixed(1)}`).join(" ")} fill="none" stroke={PERSON_LINE} strokeWidth={2} strokeDasharray="5 4" strokeLinejoin="round" />
+                    {showRate && (
+                      <>
+                        <line x1={chart.padL} y1={chart.rateBase} x2={chart.W - chart.padR} y2={chart.rateBase} stroke={C_LINE} strokeWidth={1} strokeDasharray="3 4" opacity={0.45} />
+                        <polyline points={chart.lineNodes.map((n) => `${n.x.toFixed(1)},${n.y.toFixed(1)}`).join(" ")} fill="none" stroke={C_LINE} strokeWidth={2} strokeLinejoin="round" />
+                        {highlightStaff && (
+                          <polyline points={chart.personNodes.map((n) => `${n.x.toFixed(1)},${n.y.toFixed(1)}`).join(" ")} fill="none" stroke={PERSON_LINE} strokeWidth={2} strokeDasharray="5 4" strokeLinejoin="round" />
+                        )}
+                        {chart.lineNodes.map((n, i) => <circle key={i} cx={n.x} cy={n.y} r={3} fill="#fff" stroke={C_LINE} strokeWidth={2} />)}
+                      </>
                     )}
-                    {chart.lineNodes.map((n, i) => <circle key={i} cx={n.x} cy={n.y} r={3} fill="#fff" stroke={C_LINE} strokeWidth={2} />)}
                     {chart.xTicks.map((t, i) => <line key={i} x1={t.x} y1={356} x2={t.x} y2={361} stroke="rgba(0,0,0,.25)" strokeWidth={1} />)}
                     <line x1={chart.padL} y1={chart.y0} x2={chart.W - chart.padR} y2={chart.y0} stroke="rgba(0,0,0,.2)" strokeWidth={1} />
                     <line x1={chart.padL} y1={chart.yTop} x2={chart.padL} y2={chart.y0} stroke="rgba(0,0,0,.2)" strokeWidth={1} />
@@ -623,7 +681,7 @@ function ConnectionStatsPage() {
                     {chart.yLeft.map((t, i) => (
                       <div key={`l${i}`} className="absolute text-[10.5px] font-mono text-muted-foreground" style={{ top: `${(t.y / chart.H) * 100}%`, right: `${100 - (50 / chart.W) * 100}%`, transform: "translateY(-50%)" }}>{t.label}</div>
                     ))}
-                    {chart.yRight.map((t, i) => (
+                    {showRate && chart.yRight.map((t, i) => (
                       <div key={`r${i}`} className="absolute text-[10.5px] font-mono" style={{ color: C_LINE, top: `${(t.y / chart.H) * 100}%`, left: `${(1070 / chart.W) * 100}%`, transform: "translateY(-50%)" }}>{t.label}</div>
                     ))}
                     {chart.xTicks.map((t, i) => (
@@ -641,12 +699,15 @@ function ConnectionStatsPage() {
                       }}
                     >
                       <div className="font-semibold mb-0.5">{hv.date}</div>
-                      <div className="flex justify-between gap-4"><span className="opacity-70">发样 / 回收</span><span className="font-mono">{hv.sample} / {hv.recover}</span></div>
-                      <div className="flex justify-between gap-4"><span className="opacity-70">回收率</span><span className="font-mono">{fmtPct(hv.rate)}</span></div>
-                      {highlightStaff && (
+                      {showSend && <div className="flex justify-between gap-4"><span className="opacity-70">发样</span><span className="font-mono">{hv.sample}</span></div>}
+                      {showBD && <div className="flex justify-between gap-4"><span className="opacity-70">BD素材</span><span className="font-mono">{hv.recover}</span></div>}
+                      {showEditor && <div className="flex justify-between gap-4"><span className="opacity-70">剪辑素材</span><span className="font-mono">{hv.editor_recover}</span></div>}
+                      {showRate && <div className="flex justify-between gap-4"><span className="opacity-70">回收率</span><span className="font-mono">{fmtPct(hv.rate)}</span></div>}
+                      {highlightStaff && (showSend || showBD) && (
                         <>
-                          <div className="mt-1 pt-1 border-t border-white/20 flex justify-between gap-4"><span className="opacity-70">{highlightStaff} 发样/回收</span><span className="font-mono">{hv.by_staff[highlightStaff]?.sample ?? 0} / {hv.by_staff[highlightStaff]?.recover ?? 0}</span></div>
-                          <div className="flex justify-between gap-4"><span className="opacity-70">{highlightStaff} 回收率</span><span className="font-mono">{hv.by_staff[highlightStaff]?.sample ? fmtPct(hv.by_staff[highlightStaff].recover / hv.by_staff[highlightStaff].sample) : "—"}</span></div>
+                          {showSend && <div className="mt-1 pt-1 border-t border-white/20 flex justify-between gap-4"><span className="opacity-70">{highlightStaff} 发样</span><span className="font-mono">{hv.by_staff[highlightStaff]?.sample ?? 0}</span></div>}
+                          {showBD && <div className={`flex justify-between gap-4 ${showSend ? "" : "mt-1 pt-1 border-t border-white/20"}`}><span className="opacity-70">{highlightStaff} BD素材</span><span className="font-mono">{hv.by_staff[highlightStaff]?.recover ?? 0}</span></div>}
+                          {showRate && <div className="flex justify-between gap-4"><span className="opacity-70">{highlightStaff} 回收率</span><span className="font-mono">{hv.by_staff[highlightStaff]?.sample ? fmtPct(hv.by_staff[highlightStaff].recover / hv.by_staff[highlightStaff].sample) : "—"}</span></div>}
                         </>
                       )}
                     </div>
