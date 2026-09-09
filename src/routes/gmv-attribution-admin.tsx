@@ -11,7 +11,7 @@ import * as XLSX from "xlsx";
 import { ProgressBoard } from "@/components/attribution/ProgressBoard";
 import { DetailTable } from "@/components/attribution/DetailTable";
 import { ReviewPanel } from "@/components/attribution/ReviewPanel";
-import { UploadView } from "@/components/attribution/UploadView";
+import { UploadView, type Viewing } from "@/components/attribution/UploadView";
 import {
   type AttributionReport,
   type DetailRow,
@@ -22,6 +22,7 @@ import {
   syncCreators,
   uploadApi,
 } from "@/lib/attributionApi";
+
 
 const VID_SUMMARY_HEADER = ["站点", "月份", "VID", "达人昵称", "PID", "SKU", "GMV", "消耗", "订单量", "ROI", "PV", "点击", "CTR", "CVR"];
 
