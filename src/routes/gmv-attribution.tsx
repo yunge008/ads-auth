@@ -95,8 +95,9 @@ function GmvAttributionPage() {
               <CardContent className="text-sm tabular-nums">{report.period.start} ~ {report.period.end}</CardContent>
             </Card>
           </div>
-          <StaffTable title="BD" rows={bds} />
-          <StaffTable title="剪辑" rows={editors} />
+          <StaffCountryTable title="BD" rows={bds} mode="user" />
+          <StaffCountryTable title="剪辑" rows={editors} mode="user" />
+
           {!bds.length && !editors.length ? (
             <div className="text-sm text-muted-foreground text-center py-8">暂无归因数据</div>
           ) : null}
