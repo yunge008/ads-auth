@@ -44,11 +44,13 @@ export async function invokeFn<T = unknown>(
     const err = error as unknown as { context?: Response };
     let msg = error.message;
     let status: number | undefined;
+    let payload: Record<string, unknown> | undefined;
     if (err.context && typeof err.context.json === "function") {
       try {
         const j = await err.context.json();
         if (j?.error) msg = j.error;
         status = err.context.status;
+        payload = j;
       } catch { /* ignore */ }
     }
     if (status === 401) {
@@ -58,7 +60,9 @@ export async function invokeFn<T = unknown>(
         window.dispatchEvent(new Event("tt-passcode-invalid"));
       }
     }
-    throw new Error(msg);
+    const outErr = new Error(msg) as Error & { payload?: Record<string, unknown> };
+    if (payload) outErr.payload = payload;
+    throw outErr;
   }
   return data as T;
 }

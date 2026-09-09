@@ -17,6 +17,7 @@ import {
   type DrillFilter,
   type UploadRec,
   currentMonth,
+  exchangeRateApi,
   fmtUsd,
   uploadApi,
 } from "@/lib/attributionApi";
@@ -24,6 +25,21 @@ import { ProgressBoard } from "./ProgressBoard";
 import { DetailTable } from "./DetailTable";
 
 const BATCH = 1000;
+
+/** 逐个币种要求用户填「1 美元 = 多少本币」并落库；用户取消或输入无效返回 false。 */
+async function promptMissingRates(missing: string[]): Promise<boolean> {
+  for (const cur of missing) {
+    const input = window.prompt(`缺少汇率：请输入 1 美元 = 多少 ${cur}？（例如泰铢填 33）`);
+    if (input == null) return false;
+    const rate = Number(input);
+    if (!isFinite(rate) || rate <= 0) {
+      toast.error(`${cur} 汇率输入无效`);
+      return false;
+    }
+    await exchangeRateApi.save({ currency: cur, usd_rate: rate, enabled: true });
+  }
+  return true;
+}
 
 type PendingFile = {
   id: string;
@@ -109,18 +125,30 @@ export function UploadView() {
       for (const f of ready) {
         patchFile(f.id, { status: "uploading", progress: 2 });
         try {
-          const { upload_id } = await uploadApi.create({
-            file_name: f.file.name,
-            country: f.country,
-            month: f.month,
-          });
+          let upload_id: string;
+          try {
+            ({ upload_id } = await uploadApi.create({ file_name: f.file.name, country: f.country, month: f.month }));
+          } catch (e) {
+            const payload = (e as Error & { payload?: { duplicate?: boolean } }).payload;
+            if (!payload?.duplicate || !window.confirm(`${(e as Error).message}\n\n是否替换旧记录？`)) throw e;
+            ({ upload_id } = await uploadApi.create({
+              file_name: f.file.name, country: f.country, month: f.month, replace_existing: true,
+            }));
+          }
           const rows = f.parsed!.rows;
           for (let i = 0; i < rows.length; i += BATCH) {
             await uploadApi.append(upload_id, rows.slice(i, i + BATCH));
             patchFile(f.id, { progress: Math.min(90, Math.round(((i + BATCH) / rows.length) * 85) + 2) });
           }
           patchFile(f.id, { progress: 92 });
-          const fin = await uploadApi.finalize(upload_id);
+          let fin: Awaited<ReturnType<typeof uploadApi.finalize>>;
+          try {
+            fin = await uploadApi.finalize(upload_id);
+          } catch (e) {
+            const payload = (e as Error & { payload?: { missing_currencies?: string[] } }).payload;
+            if (!payload?.missing_currencies?.length || !(await promptMissingRates(payload.missing_currencies))) throw e;
+            fin = await uploadApi.finalize(upload_id);
+          }
           lastSummary = fin.summary;
           lastLabel = `${f.country} ${f.month}（${f.file.name}）`;
           completedMonths.add(f.month);

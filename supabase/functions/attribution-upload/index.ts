@@ -1,11 +1,15 @@
 // Excel 广告表上传 + 归因。文件名约定「站点 MAX yyyymm.xlsx」→ 每文件一个批次。
-// Body: { action: 'create'|'append'|'finalize'|'list'|'get'|'delete', ... }
-//   create   { file_name, country, month:'YYYY-MM', note?, force? } → { upload_id }
+// Body: { action: 'create'|'append'|'finalize'|'list'|'get'|'delete'|'list_exchange_rates'|'save_exchange_rate'|'export_vid_summary', ... }
+//   create   { file_name, country, month:'YYYY-MM', note?, force?, replace_existing? } → { upload_id }
+//            同 (country, month) 已有 UPLOADING/READY 记录时默认报错（payload.duplicate=true）；replace_existing=true 先删旧记录再插入
 //   append   { upload_id, rows: ParsedRow[] } （≤2000 行/批，幂等键 (upload_id,row_no)）
-//   finalize { upload_id } → 归因 + 回填 attr_* + 汇总 → { summary }
+//   finalize { upload_id } → 校验汇率覆盖（缺失时报错 payload.missing_currencies=[...]，不写 attr_*/READY）→ 归因 + 回填 attr_* + 汇总 → { summary }
 //   list     { month? } → { uploads }
-//   get      { upload_id, detail_for? } 或 { month, merged:true } → { summary, uploads?, detail_rows? }
+//   get      { upload_id, detail_for? } 或 { month, merged:true } → { summary, uploads?, last_synced_at?, detail_rows? }
 //   delete   { upload_id }
+//   list_exchange_rates {} → { rates }（含禁用行）
+//   save_exchange_rate  { currency, usd_rate, enabled? } → { rate }；usd_rate 语义=1 美元兑多少本币
+//   export_vid_summary  { month } → { rows }：按 (国家,VID,商品ID) 聚合的唯一 VID 汇总（14 列口径），前端生成 xlsx
 import { corsHeaders } from "../_shared/feishu.ts";
 import { admin, verifyPasscode } from "../_shared/auth.ts";
 import {
@@ -17,6 +21,7 @@ import {
 } from "../_shared/attribution.ts";
 import {
   aggregateResults,
+  findMissingCurrencies,
   loadAttrContext,
   loadExchangeRates,
   loadStaffMeta,
@@ -69,6 +74,13 @@ function num(v: unknown): number {
 }
 function str(v: unknown): string {
   return String(v ?? "").trim();
+}
+
+/** 携带结构化 payload 的错误（前端可读 error.payload 拿到额外字段，如 missing_currencies）。 */
+function errWithPayload(message: string, payload: Record<string, unknown>): Error & { payload: Record<string, unknown> } {
+  const e = new Error(message) as Error & { payload: Record<string, unknown> };
+  e.payload = payload;
+  return e;
 }
 
 function toInput(uploadId: string, country: string, r: StoredRow): AttrInputRow {
@@ -203,6 +215,26 @@ Deno.serve(async (req) => {
           throw new Error(`站点「${country}」不在 advertiser_countries 中（已知：${Array.from(known).join("、")}）。确认无误可 force=true 强制创建`);
         }
       }
+      if (!body.replace_existing) {
+        const { data: dup, error: dupErr } = await db
+          .from("ad_uploads")
+          .select("file_name, status")
+          .eq("country", country)
+          .eq("month", month)
+          .in("status", ["UPLOADING", "READY"]);
+        if (dupErr) throw new Error(dupErr.message);
+        if (dup && dup.length) {
+          const desc = dup.map((d: { file_name: string; status: string }) => `${d.file_name}（${d.status}）`).join("、");
+          throw errWithPayload(
+            `该站点该月已有上传记录（${desc}），请先在列表里删除旧记录，或勾选替换后重试`,
+            { duplicate: true },
+          );
+        }
+      } else {
+        const { error: delErr } = await db.from("ad_uploads").delete().eq("country", country).eq("month", month);
+        if (delErr) throw new Error(delErr.message);
+      }
+
       const { start, end } = monthRange(month);
       const { data, error } = await db
         .from("ad_uploads")
@@ -261,6 +293,16 @@ Deno.serve(async (req) => {
       if (!rows.length) throw new Error("该批次没有数据行");
 
       const inputs = rows.map((r) => toInput(uploadId, upload.country, r));
+
+      const exchangeRatesPre = await loadExchangeRates(db);
+      const missing = findMissingCurrencies(inputs, exchangeRatesPre);
+      if (missing.length) {
+        throw errWithPayload(
+          `缺少汇率配置：${missing.join("、")}，请先在设置页维护汇率后重试`,
+          { missing_currencies: missing },
+        );
+      }
+
       const ctx = await loadAttrContext(db);
       const run = attributeRows(inputs, ctx);
       const persisted = await persistRunArtifacts(db, run);
@@ -284,12 +326,12 @@ Deno.serve(async (req) => {
       }
 
       const pairs = inputs.map((input) => ({ input, result: resultByKey.get(input.key)! }));
-      const [targets, exchangeRates, staffMeta] = await Promise.all([loadTargets(db, upload.month), loadExchangeRates(db), loadStaffMeta(db)]);
+      const [targets, staffMeta] = await Promise.all([loadTargets(db, upload.month), loadStaffMeta(db)]);
       const summary = aggregateResults(pairs, {
         period: { start: upload.period_start ?? "", end: upload.period_end ?? "" },
         month: upload.month,
         targets,
-        exchangeRates,
+        exchangeRates: exchangeRatesPre,
         staffMeta,
       });
 
@@ -328,11 +370,11 @@ Deno.serve(async (req) => {
         if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("merged 视图需要 month（YYYY-MM）");
         const { data: ups, error } = await db
           .from("ad_uploads")
-          .select("id, file_name, country, month, period_start, period_end, status, row_count, total_revenue")
+          .select("id, file_name, country, month, period_start, period_end, status, row_count, total_revenue, attributed_at")
           .eq("month", month)
           .eq("status", "READY");
         if (error) throw new Error(error.message);
-        const uploads = (ups ?? []) as (UploadRec & { row_count: number; total_revenue: number })[];
+        const uploads = (ups ?? []) as (UploadRec & { row_count: number; total_revenue: number; attributed_at: string | null })[];
         if (!uploads.length) throw new Error(`没有 ${month} 已完成归因的上传批次`);
         const allPairs: ReturnType<typeof storedPairs> = [];
         for (const u of uploads) {
@@ -342,9 +384,14 @@ Deno.serve(async (req) => {
         const [targets, exchangeRates, staffMeta] = await Promise.all([loadTargets(db, month), loadExchangeRates(db), loadStaffMeta(db)]);
         const { start, end } = monthRange(month);
         const summary = aggregateResults(allPairs, { period: { start, end }, month, targets, exchangeRates, staffMeta });
+        const lastSyncedAt = uploads.reduce<string | null>(
+          (acc, u) => (u.attributed_at && (!acc || u.attributed_at > acc) ? u.attributed_at : acc),
+          null,
+        );
         return json({
           summary,
           uploads,
+          last_synced_at: lastSyncedAt,
           detail_rows: detailFor ? detailFromPairs(allPairs, detailFor) : undefined,
         });
       }
@@ -367,6 +414,129 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === "list_exchange_rates") {
+      const { data, error } = await db
+        .from("gmv_exchange_rates")
+        .select("currency, usd_rate, enabled, updated_at, updated_by")
+        .order("currency", { ascending: true });
+      if (error) throw new Error(error.message);
+      return json({ rates: data ?? [] });
+    }
+
+    if (action === "save_exchange_rate") {
+      const currency = str(body.currency).toUpperCase();
+      const usdRate = Number(body.usd_rate);
+      if (!currency) throw new Error("currency 必填");
+      if (!isFinite(usdRate) || usdRate <= 0) throw new Error("usd_rate 必须为正数（1 美元 = 多少本币）");
+      const enabled = body.enabled === undefined ? true : !!body.enabled;
+      const { data, error } = await db
+        .from("gmv_exchange_rates")
+        .upsert(
+          { currency, usd_rate: usdRate, enabled, updated_by: account.name, updated_at: new Date().toISOString() },
+          { onConflict: "currency" },
+        )
+        .select("currency, usd_rate, enabled, updated_at, updated_by")
+        .single();
+      if (error) throw new Error(error.message);
+      return json({ rate: data });
+    }
+
+    if (action === "export_vid_summary") {
+      const month = str(body.month);
+      if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("month 格式应为 YYYY-MM");
+      const { data: ups, error } = await db
+        .from("ad_uploads")
+        .select("id, file_name, country, month, period_start, period_end, status")
+        .eq("month", month)
+        .eq("status", "READY");
+      if (error) throw new Error(error.message);
+      const uploads = (ups ?? []) as UploadRec[];
+      if (!uploads.length) throw new Error(`没有 ${month} 已完成归因的上传批次`);
+
+      type Group = {
+        country: string;
+        vid: string;
+        product_id: string;
+        gmvUsd: number;
+        costUsd: number;
+        orders: number;
+        impressions: number;
+        clicks: number;
+        accountNameCounts: Map<string, number>;
+      };
+      const groups = new Map<string, Group>();
+      const exchangeRates = await loadExchangeRates(db);
+
+      for (const u of uploads) {
+        const rows = await fetchAllRows(db, u.id);
+        for (const r of rows) {
+          const input = toInput(u.id, u.country, r);
+          const cur = (input.currency || "USD").toUpperCase();
+          const rate = exchangeRates.get(cur) ?? (cur === "USD" ? 1 : 0);
+          if (!rate) continue; // 理论上不会发生：finalize 已强制要求补齐汇率
+          const pid = r.product_id ?? "";
+          const key = `${input.country}|${input.vid}|${pid}`;
+          let g = groups.get(key);
+          if (!g) {
+            g = { country: input.country, vid: input.vid, product_id: pid, gmvUsd: 0, costUsd: 0, orders: 0, impressions: 0, clicks: 0, accountNameCounts: new Map() };
+            groups.set(key, g);
+          }
+          g.gmvUsd += input.grossRevenue / rate;
+          g.costUsd += input.cost / rate;
+          g.orders += input.orders;
+          g.impressions += r.impressions ?? 0;
+          g.clicks += r.clicks ?? 0;
+          const name = input.accountName.trim() || "（无账号）";
+          g.accountNameCounts.set(name, (g.accountNameCounts.get(name) ?? 0) + 1);
+        }
+      }
+
+      const productIds = Array.from(new Set(Array.from(groups.values()).map((g) => g.product_id).filter(Boolean)));
+      const skuByKey = new Map<string, string>();
+      if (productIds.length) {
+        const CHUNK = 500;
+        for (let i = 0; i < productIds.length; i += CHUNK) {
+          const { data: skuRows, error: skuErr } = await db
+            .from("sku_product_map")
+            .select("country, product_id, merchant_sku")
+            .in("product_id", productIds.slice(i, i + CHUNK));
+          if (skuErr) throw new Error(skuErr.message);
+          for (const r of (skuRows ?? []) as { country: string; product_id: string; merchant_sku: string }[]) {
+            const key = `${r.country}|${r.product_id}`;
+            if (!skuByKey.has(key)) skuByKey.set(key, r.merchant_sku ?? "");
+          }
+        }
+      }
+
+      const rowsOut = Array.from(groups.values()).map((g) => {
+        let bestName = "";
+        let bestCount = -1;
+        for (const [name, cnt] of g.accountNameCounts) {
+          if (cnt > bestCount) { bestName = name; bestCount = cnt; }
+        }
+        if (g.accountNameCounts.size > 1) {
+          console.log(`export_vid_summary: vid=${g.vid} 昵称不一致，取出现最多次的「${bestName}」，候选=${JSON.stringify(Array.from(g.accountNameCounts.entries()))}`);
+        }
+        return {
+          country: g.country,
+          month,
+          vid: g.vid,
+          account_name: bestName,
+          product_id: g.product_id,
+          sku: skuByKey.get(`${g.country}|${g.product_id}`) ?? "",
+          gmv: g.gmvUsd,
+          cost: g.costUsd,
+          orders: g.orders,
+          roi: g.costUsd > 0 ? g.gmvUsd / g.costUsd : null,
+          pv: g.impressions,
+          clicks: g.clicks,
+          ctr: g.impressions > 0 ? g.clicks / g.impressions : null,
+          cvr: g.clicks > 0 ? g.orders / g.clicks : null,
+        };
+      });
+      return json({ rows: rowsOut });
+    }
+
     if (action === "delete") {
       const uploadId = str(body.upload_id);
       if (!uploadId) throw new Error("upload_id 必填");
@@ -377,9 +547,10 @@ Deno.serve(async (req) => {
 
     throw new Error(`未知 action: ${action}`);
   } catch (e) {
-    const status = (e as Error & { status?: number }).status ?? 400;
+    const err = e as Error & { status?: number; payload?: Record<string, unknown> };
+    const status = err.status ?? 400;
     console.error("attribution-upload", e);
-    return new Response(JSON.stringify({ error: (e as Error).message }), {
+    return new Response(JSON.stringify({ error: err.message, ...(err.payload ?? {}) }), {
       status,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

@@ -56,6 +56,31 @@ export type DetailRow = {
 
 export type DrillFilter = { staff?: string; role?: Role; bucket?: BucketKey };
 
+export type ExchangeRateRec = {
+  currency: string;
+  usd_rate: number;
+  enabled: boolean;
+  updated_at: string;
+  updated_by: string | null;
+};
+
+export type VidSummaryRow = {
+  country: string;
+  month: string;
+  vid: string;
+  account_name: string;
+  product_id: string;
+  sku: string;
+  gmv: number;
+  cost: number;
+  orders: number;
+  roi: number | null;
+  pv: number;
+  clicks: number;
+  ctr: number | null;
+  cvr: number | null;
+};
+
 export type UploadRec = {
   id: string;
   file_name: string;
@@ -125,7 +150,7 @@ export function feishuAction<T = Record<string, unknown>>(action: string, extra?
 }
 
 export const uploadApi = {
-  create: (p: { file_name: string; country: string; month: string; note?: string; force?: boolean }) =>
+  create: (p: { file_name: string; country: string; month: string; note?: string; force?: boolean; replace_existing?: boolean }) =>
     invokeFn<{ upload_id: string }>("attribution-upload", { action: "create", ...p }),
   append: (upload_id: string, rows: ParsedRow[]) =>
     invokeFn<{ inserted: number }>("attribution-upload", { action: "append", upload_id, rows }, { timeout: 120000 }),
@@ -137,12 +162,25 @@ export const uploadApi = {
     ),
   list: (month?: string) => invokeFn<{ uploads: UploadRec[] }>("attribution-upload", { action: "list", month }),
   get: (p: { upload_id?: string; month?: string; merged?: boolean; detail_for?: DrillFilter }) =>
-    invokeFn<{ summary: AttributionReport; uploads?: UploadRec[]; upload?: UploadRec; detail_rows?: DetailRow[] }>(
-      "attribution-upload",
-      { action: "get", ...p },
-      { timeout: 120000 },
-    ),
+    invokeFn<{
+      summary: AttributionReport;
+      uploads?: UploadRec[];
+      upload?: UploadRec;
+      detail_rows?: DetailRow[];
+      last_synced_at?: string | null;
+    }>("attribution-upload", { action: "get", ...p }, { timeout: 120000 }),
   remove: (upload_id: string) => invokeFn<{ deleted: boolean }>("attribution-upload", { action: "delete", upload_id }),
+};
+
+export const exchangeRateApi = {
+  list: () => invokeFn<{ rates: ExchangeRateRec[] }>("attribution-upload", { action: "list_exchange_rates" }),
+  save: (p: { currency: string; usd_rate: number; enabled?: boolean }) =>
+    invokeFn<{ rate: ExchangeRateRec }>("attribution-upload", { action: "save_exchange_rate", ...p }),
+};
+
+export const exportApi = {
+  vidSummary: (month: string) =>
+    invokeFn<{ rows: VidSummaryRow[] }>("attribution-upload", { action: "export_vid_summary", month }, { timeout: 120000 }),
 };
 
 // ---------- 格式化 ----------

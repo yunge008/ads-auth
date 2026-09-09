@@ -5,8 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { RotateCw, Users, Target as TargetIcon, ArrowLeftRight, Upload } from "lucide-react";
+import { RotateCw, Users, Target as TargetIcon, ArrowLeftRight, Upload, Download } from "lucide-react";
 import { toast } from "sonner";
+import * as XLSX from "xlsx";
 import { ProgressBoard } from "@/components/attribution/ProgressBoard";
 import { DetailTable } from "@/components/attribution/DetailTable";
 import { ReviewPanel } from "@/components/attribution/ReviewPanel";
@@ -16,10 +17,13 @@ import {
   type DetailRow,
   type DrillFilter,
   currentMonth,
+  exportApi,
   feishuAction,
-  runAttribution,
   syncCreators,
+  uploadApi,
 } from "@/lib/attributionApi";
+
+const VID_SUMMARY_HEADER = ["站点", "月份", "VID", "达人昵称", "PID", "SKU", "GMV", "消耗", "订单量", "ROI", "PV", "点击", "CTR", "CVR"];
 
 export const Route = createFileRoute("/gmv-attribution-admin")({
   head: () => ({ meta: [{ title: "GMV 归因·管理 - TikTok授权工具" }] }),
@@ -40,14 +44,11 @@ function MonthlyView() {
     setLoading(true);
     setDetail(null);
     try {
-      const r = await runAttribution(month, "admin");
-      setReport(r.report);
-      setLastSyncedAt(r.last_synced_at);
-      if (r.persisted && (r.persisted.aliases || r.persisted.reviews)) {
-        toast.info(`本次运行：新别名 ${r.persisted.aliases} 个 · 审查项 ${r.persisted.reviews} 条`);
-      }
+      const r = await uploadApi.get({ month, merged: true });
+      setReport(r.summary);
+      setLastSyncedAt(r.last_synced_at ?? null);
     } catch (e) {
-      toast.error(`归因失败：${(e as Error).message}`);
+      toast.error(`加载失败：${(e as Error).message}`);
     } finally {
       setLoading(false);
     }
@@ -58,12 +59,36 @@ function MonthlyView() {
     setDetail({ rows: [], title });
     setDetailLoading(true);
     try {
-      const r = await runAttribution(month, "admin", f);
+      const r = await uploadApi.get({ month, merged: true, detail_for: f });
       setDetail({ rows: r.detail_rows ?? [], title });
     } catch (e) {
       toast.error(`加载明细失败：${(e as Error).message}`);
     } finally {
       setDetailLoading(false);
+    }
+  };
+
+  const exportVidSummary = async () => {
+    setBusy("export");
+    try {
+      const { rows } = await exportApi.vidSummary(month);
+      if (!rows.length) { toast.warning("没有可导出的数据"); return; }
+      const aoa = [
+        VID_SUMMARY_HEADER,
+        ...rows.map((r) => [
+          r.country, r.month, r.vid, r.account_name, r.product_id, r.sku,
+          r.gmv, r.cost, r.orders, r.roi ?? "", r.pv, r.clicks, r.ctr ?? "", r.cvr ?? "",
+        ]),
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "VID汇总");
+      XLSX.writeFile(wb, `VID汇总-${month}.xlsx`);
+      toast.success(`导出完成：${rows.length} 行`);
+    } catch (e) {
+      toast.error(`导出失败：${(e as Error).message}`);
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -119,13 +144,16 @@ function MonthlyView() {
               <Button size="sm" variant="outline" onClick={() => doSync("progress")} disabled={!!busy || !report}>
                 <Upload className="h-4 w-4 mr-1.5" />回写飞书进度
               </Button>
+              <Button size="sm" variant="outline" onClick={exportVidSummary} disabled={!!busy || !report}>
+                <Download className={`h-4 w-4 mr-1.5 ${busy === "export" ? "animate-spin" : ""}`} />导出唯一VID汇总
+              </Button>
             </div>
           </div>
         </CardContent>
       </Card>
 
       <div className="text-xs text-muted-foreground">
-        数据最近刷新：{lastSyncedAt ? new Date(lastSyncedAt).toLocaleString() : "—"}（GMV Max 自动同步）
+        数据来源：Excel 上传归因（按月合并全部站点） · 最近一次上传归因时间：{lastSyncedAt ? new Date(lastSyncedAt).toLocaleString() : "—"}
       </div>
 
       {loading && !report ? (

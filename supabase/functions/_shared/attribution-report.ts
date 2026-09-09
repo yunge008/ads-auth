@@ -274,6 +274,19 @@ export async function loadTargets(db: SupabaseClient, month: string): Promise<Ta
   return m;
 }
 
+/** 找出一批输入行里出现的、但 exchangeRates 未配置的币种（USD 恒有效）。 */
+export function findMissingCurrencies(
+  inputs: Array<{ currency: string }>,
+  exchangeRates: ExchangeRateMap,
+): string[] {
+  const missing = new Set<string>();
+  for (const input of inputs) {
+    const cur = (input.currency || "USD").toUpperCase();
+    if (!exchangeRates.get(cur)) missing.add(cur);
+  }
+  return Array.from(missing).sort();
+}
+
 export function aggregateResults(
   pairs: Array<{ input: AttrInputRow; result: AttrRowResult }>,
   opts: { period: { start: string; end: string }; month?: string; targets?: TargetMap; exchangeRates?: ExchangeRateMap; staffMeta?: StaffMeta },
@@ -297,8 +310,9 @@ export function aggregateResults(
       nonUsd.set(cur, e);
       continue;
     }
-    const gmvUsd = input.grossRevenue * rate;
-    const costUsd = input.cost * rate;
+    // usd_rate 语义：1 美元 = 多少本币（如 THB 填 33）。折美元 = 本币金额 / 汇率。
+    const gmvUsd = input.grossRevenue / rate;
+    const costUsd = input.cost / rate;
     if (cur !== "USD") {
       const e = nonUsd.get(cur) ?? { currency: cur, gmv: 0, cost: 0, rows: 0 };
       e.gmv += input.grossRevenue;

@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { AccountsTable } from "@/components/settings/AccountsTable";
 import { StaffTable } from "@/components/settings/StaffTable";
 import { AccountsManager } from "@/components/settings/AccountsManager";
+import { ExchangeRateCard } from "@/components/settings/ExchangeRateCard";
 import { useCurrentAccount } from "@/lib/account";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -29,6 +30,7 @@ function SettingsPage() {
           <TabsTrigger value="auth">授权</TabsTrigger>
           <TabsTrigger value="staff">人员表</TabsTrigger>
           {account?.isAdmin && <TabsTrigger value="accounts">账号管理</TabsTrigger>}
+          {account?.isAdmin && <TabsTrigger value="exchange-rates">GMV 归因汇率</TabsTrigger>}
         </TabsList>
         <TabsContent value="auth">
           <AccountsTable />
@@ -39,6 +41,11 @@ function SettingsPage() {
         {account?.isAdmin && (
           <TabsContent value="accounts">
             <AccountsManager />
+          </TabsContent>
+        )}
+        {account?.isAdmin && (
+          <TabsContent value="exchange-rates">
+            <ExchangeRateCard />
           </TabsContent>
         )}
       </Tabs>
