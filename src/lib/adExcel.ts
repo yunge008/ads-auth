@@ -40,14 +40,16 @@ export type ParsedFile = {
     gmvRows: number; // gross_revenue != 0 的行数
     byCurrency: CurrencyTotal[]; // 按行内「货币」列分组，GMV 降序
   };
-  /** 解析诊断：这些情况会让 GMV 静默算错，必须显式暴露给用户。 */
+  /** 解析诊断：这些情况会让 GMV 静默算错，必须显式暴露给用户。（缺「货币」列直接 throw 阻断上传，不在这里） */
   diagnostics: {
-    /** 文件里没有「货币」列 —— 所有行会被当成 USD，非美元站点会把 GMV 放大几十倍 */
-    missingCurrencyColumn: boolean;
     /** 金额单元格原文非空但转不成数字（币种符号、不换行空格、括号负数…），旧逻辑会静默记 0 */
     badNumberCells: number;
     /** 前几个解析失败的原文样本，便于定位 */
     badNumberSamples: string[];
+    /** 「货币」列存在但该行为空的行数 —— 这些行按 USD 计算，非美元站点会算错 */
+    blankCurrencyRows: number;
+    /** 出现了 EXPECTED_CURRENCIES 之外的币种（目前业务上只应有 USD / THB） */
+    unexpectedCurrencies: string[];
     /** 表头里没被识别的列（原文），用于发现 TikTok 改了列名 */
     unmappedHeaders: string[];
   };
@@ -111,7 +113,24 @@ const HEADER_MAP: Record<string, keyof ParsedRow> = {
 
 const REQUIRED: Array<keyof ParsedRow> = [
   "campaign_id", "product_id", "creative_type", "vid", "tt_account_name", "cost", "gross_revenue",
+  // 「货币」必须有：缺了会让每一行默认按 USD 计算，非美元站点的 GMV 直接放大几十倍且全程无提示
+  "currency",
 ];
+
+/** 缺失列在报错信息里的中文名（否则只报内部字段名，用户看不懂要去 Excel 里补哪一列）。 */
+const REQUIRED_LABELS: Partial<Record<keyof ParsedRow, string>> = {
+  campaign_id: "广告计划ID / Campaign ID",
+  product_id: "商品ID / Product ID",
+  creative_type: "创意作品类型 / Creative type",
+  vid: "视频ID / Video ID",
+  tt_account_name: "TikTok账号 / TikTok account",
+  cost: "成本 / Cost",
+  gross_revenue: "总收入 / Gross revenue",
+  currency: "货币 / Currency",
+};
+
+/** 业务上目前只应出现这两种结算币种；其余值仅告警，不阻断（新站点可能引入新币种）。 */
+export const EXPECTED_CURRENCIES = ["USD", "THB"];
 
 function normCreativeType(raw: string): string {
   const s = raw.trim().toLowerCase();
@@ -194,7 +213,11 @@ export async function parseAdExcel(file: File): Promise<ParsedFile> {
   });
   const missing = REQUIRED.filter((k) => !colIdx.has(k));
   if (missing.length) {
-    throw new Error(`${file.name}: 表头不符合 TikTok 广告导出格式，缺少列：${missing.join("、")}`);
+    const labels = missing.map((k) => REQUIRED_LABELS[k] ?? k).join("、");
+    const extra = missing.includes("currency")
+      ? "\n「货币 / Currency」列缺失会让所有行默认按 USD 计算，非美元站点 GMV 会被放大几十倍，因此这里直接阻断上传。请重新导出带货币列的报表。"
+      : "";
+    throw new Error(`${file.name}: 表头不符合 TikTok 广告导出格式，缺少列：${labels}${extra}`);
   }
 
   const cell = (row: unknown[], key: keyof ParsedRow): unknown => {
@@ -208,12 +231,11 @@ export async function parseAdExcel(file: File): Promise<ParsedFile> {
     .map((h) => String(h ?? "").trim())
     .filter((h) => h && !HEADER_MAP[normHeader(h)])
     .slice(0, 12);
-  const missingCurrencyColumn = !colIdx.has("currency");
-
   const rows: ParsedRow[] = [];
   const totals = { gmv: 0, cost: 0, rows: 0, productCardRows: 0, gmvRows: 0 };
   const curMap = new Map<string, CurrencyTotal>();
   let badNumberCells = 0;
+  let blankCurrencyRows = 0;
   const badNumberSamples: string[] = [];
   const noteBad = (raw: unknown) => {
     badNumberCells++;
@@ -249,15 +271,16 @@ export async function parseAdExcel(file: File): Promise<ParsedFile> {
       roi: toNumOrNull(cell(r, "roi")),
       impressions: toNumOrNull(cell(r, "impressions")),
       clicks: toNumOrNull(cell(r, "clicks")),
-      currency: cellStr(r, "currency") || "USD",
+      currency: cellStr(r, "currency").toUpperCase() || "USD",
     };
+    if (!cellStr(r, "currency")) blankCurrencyRows++;
     rows.push(row);
     totals.gmv += row.gross_revenue;
     totals.cost += row.cost;
     totals.rows++;
     if (row.gross_revenue !== 0) totals.gmvRows++;
     if (creativeType === "product_card") totals.productCardRows++;
-    const cur = row.currency.toUpperCase();
+    const cur = row.currency;
     const ct = curMap.get(cur) ?? { currency: cur, gmv: 0, cost: 0, rows: 0 };
     ct.gmv += row.gross_revenue;
     ct.cost += row.cost;
@@ -273,6 +296,12 @@ export async function parseAdExcel(file: File): Promise<ParsedFile> {
     headerLang: cnHits >= enHits ? "cn" : "en",
     rows,
     totals: { ...totals, byCurrency: Array.from(curMap.values()).sort((a, b) => b.gmv - a.gmv) },
-    diagnostics: { missingCurrencyColumn, badNumberCells, badNumberSamples, unmappedHeaders },
+    diagnostics: {
+      badNumberCells,
+      badNumberSamples,
+      blankCurrencyRows,
+      unexpectedCurrencies: Array.from(curMap.keys()).filter((c) => !EXPECTED_CURRENCIES.includes(c)).sort(),
+      unmappedHeaders,
+    },
   };
 }

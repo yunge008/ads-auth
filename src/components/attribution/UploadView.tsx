@@ -4,12 +4,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { FileUp, Trash2, Eye, RotateCw, Layers, ChevronLeft, ChevronRight, Eraser } from "lucide-react";
+import { FileUp, Trash2, Eye, RotateCw, Layers, ChevronLeft, ChevronRight, Eraser, CheckSquare } from "lucide-react";
 import { toast } from "sonner";
 import { MultiSelect } from "@/components/MultiSelect";
 import { parseAdExcel, type ParsedFile } from "@/lib/adExcel";
@@ -72,6 +73,8 @@ export function UploadView({
   const [summary, setSummary] = React.useState<AttributionReport | null>(null);
   const [historyPage, setHistoryPage] = React.useState(1);
   const [clearing, setClearing] = React.useState(false);
+  const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = React.useState(false);
   const fileInput = React.useRef<HTMLInputElement>(null);
 
   const onResultRef = React.useRef(onResult);
@@ -115,6 +118,20 @@ export function UploadView({
   const pagedHistory = filteredHistory.slice((historyPage - 1) * HISTORY_PAGE_SIZE, historyPage * HISTORY_PAGE_SIZE);
   React.useEffect(() => { setHistoryPage(1); }, [mergeMonth, selectedCountries]);
 
+  // 选中集合始终只保留仍在当前筛选结果里的批次，避免「删除选中」误删被筛掉的记录
+  const visibleIds = React.useMemo(() => new Set(filteredHistory.map((u) => u.id)), [filteredHistory]);
+  const selectedIds = React.useMemo(() => Array.from(selected).filter((id) => visibleIds.has(id)), [selected, visibleIds]);
+  const allFilteredSelected = filteredHistory.length > 0 && selectedIds.length === filteredHistory.length;
+  const toggleOne = (id: string, on: boolean) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id); else next.delete(id);
+      return next;
+    });
+  /** 全选=当前筛选下的全部批次（跨页），不是只选当前这一页。 */
+  const toggleAllFiltered = (on: boolean) =>
+    setSelected(on ? new Set(filteredHistory.map((u) => u.id)) : new Set());
+
 
   const onPickFiles = async (list: FileList | null) => {
     if (!list?.length) return;
@@ -151,8 +168,11 @@ export function UploadView({
       const d = f.parsed?.diagnostics;
       if (!d) continue;
       const n = f.file.name;
-      if (d.missingCurrencyColumn) {
-        out.push(`${n}：没找到「货币 / Currency」列，所有行会被当作 USD。若该站点结算币种不是美元，归因后的 GMV 会被放大几十倍，请确认导出时带上货币列。`);
+      if (d.blankCurrencyRows) {
+        out.push(`${n}：有 ${d.blankCurrencyRows} 行的「货币」单元格是空的，这些行会按 USD 计算。若实际是泰铢，GMV 会被放大约 32.5 倍。`);
+      }
+      if (d.unexpectedCurrencies.length) {
+        out.push(`${n}：出现了预期外的币种 ${d.unexpectedCurrencies.join("、")}（目前业务上只应有 USD / THB）。请先在「设置 → GMV 归因汇率」维护这些币种的汇率，否则这部分数据不会计入归因。`);
       }
       if (d.badNumberCells) {
         out.push(`${n}：有 ${d.badNumberCells} 个金额单元格解析不出数字（样本：${d.badNumberSamples.join(" / ")}），这些行的成本/GMV 记为 0。`);
@@ -298,6 +318,56 @@ export function UploadView({
     await loadHistory();
   };
 
+  const removeSelected = async () => {
+    if (!selectedIds.length) return;
+    const preview = filteredHistory
+      .filter((u) => selectedIds.includes(u.id))
+      .slice(0, 10)
+      .map((u) => `· ${u.country} ${u.month} ${u.file_name}`)
+      .join("\n");
+    if (!window.confirm(
+      `确认删除选中的 ${selectedIds.length} 个上传批次？连同批次内的所有数据行一并删除，不可恢复：\n\n${preview}${selectedIds.length > 10 ? "\n…" : ""}`,
+    )) return;
+    setDeleting(true);
+    try {
+      const { deleted } = await uploadApi.removeMany(selectedIds);
+      toast.success(`已删除 ${deleted} 个批次`);
+      if (viewing?.kind === "upload" && selectedIds.includes(viewing.id)) {
+        setViewing(null);
+        setSummary(null);
+      }
+      setSelected(new Set());
+      await loadHistory();
+    } catch (e) {
+      toast.error(`删除失败：${(e as Error).message}`);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  /** 跨页、跨筛选清空全部上传批次。二次确认 + 输入校验，避免误点。 */
+  const removeAll = async () => {
+    if (!history.length) return;
+    if (!window.confirm(`确认清空全部 ${history.length} 个上传批次（含被筛选隐藏的）？连同所有数据行一并删除，不可恢复。`)) return;
+    if (window.prompt(`这一步会删掉全部 ${history.length} 个批次的所有数据。确认请输入「全部删除」：`) !== "全部删除") {
+      toast.info("已取消");
+      return;
+    }
+    setDeleting(true);
+    try {
+      const { deleted } = await uploadApi.removeAll();
+      toast.success(`已清空 ${deleted} 个批次`);
+      setViewing(null);
+      setSummary(null);
+      setSelected(new Set());
+      await loadHistory();
+    } catch (e) {
+      toast.error(`清空失败：${(e as Error).message}`);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const removeUpload = async (u: UploadRec) => {
     if (!window.confirm(`确认删除上传批次「${u.file_name}」（${u.row_count} 行）？`)) return;
     try {
@@ -423,6 +493,35 @@ export function UploadView({
               <Eraser className={`h-4 w-4 mr-1.5 ${clearing ? "animate-pulse" : ""}`} />
               一键清除卡住记录{staleUploads.length ? `（${staleUploads.length}）` : ""}
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => toggleAllFiltered(!allFilteredSelected)}
+              disabled={historyLoading || !filteredHistory.length}
+              title="全选/取消全选当前筛选下的全部批次（跨页）"
+            >
+              <CheckSquare className="h-4 w-4 mr-1.5" />
+              {allFilteredSelected ? "取消全选" : `全选当前筛选（${filteredHistory.length}）`}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-destructive"
+              onClick={removeSelected}
+              disabled={deleting || !selectedIds.length}
+            >
+              <Trash2 className={`h-4 w-4 mr-1.5 ${deleting ? "animate-pulse" : ""}`} />
+              删除选中（{selectedIds.length}）
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={removeAll}
+              disabled={deleting || historyLoading || !history.length}
+              title="删除全部上传批次，含被筛选隐藏的"
+            >
+              <Trash2 className="h-4 w-4 mr-1.5" />全部删除（{history.length}）
+            </Button>
             <div className="flex flex-wrap items-end gap-1.5">
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-muted-foreground">筛选月份</span>
@@ -456,6 +555,14 @@ export function UploadView({
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead className="w-10">
+                        <Checkbox
+                          checked={allFilteredSelected}
+                          onCheckedChange={(v) => toggleAllFiltered(v === true)}
+                          disabled={!filteredHistory.length}
+                          aria-label="全选当前筛选"
+                        />
+                      </TableHead>
                       <TableHead>文件</TableHead>
                       <TableHead>站点</TableHead>
                       <TableHead>月份</TableHead>
@@ -468,9 +575,16 @@ export function UploadView({
                   </TableHeader>
                   <TableBody>
                     {filteredHistory.length === 0 ? (
-                      <TableRow><TableCell colSpan={8} className="h-16 text-center text-sm text-muted-foreground">暂无上传</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={9} className="h-16 text-center text-sm text-muted-foreground">暂无上传</TableCell></TableRow>
                     ) : pagedHistory.map((u) => (
-                      <TableRow key={u.id}>
+                      <TableRow key={u.id} data-state={selected.has(u.id) ? "selected" : undefined}>
+                        <TableCell>
+                          <Checkbox
+                            checked={selected.has(u.id)}
+                            onCheckedChange={(v) => toggleOne(u.id, v === true)}
+                            aria-label={`选择 ${u.file_name}`}
+                          />
+                        </TableCell>
                         <TableCell className="text-xs max-w-56 truncate" title={u.file_name}>{u.file_name}</TableCell>
                         <TableCell className="text-xs">{u.country}</TableCell>
                         <TableCell className="text-xs tabular-nums">{u.month}</TableCell>
@@ -501,6 +615,7 @@ export function UploadView({
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   <div>
                     第 {(historyPage - 1) * HISTORY_PAGE_SIZE + 1}-{Math.min(historyPage * HISTORY_PAGE_SIZE, filteredHistory.length)} / 共 {filteredHistory.length} 条
+                    {selectedIds.length ? ` · 已选 ${selectedIds.length} 条（跨页）` : ""}
                   </div>
                   <div className="flex items-center gap-2">
                     <Button size="sm" variant="outline" className="h-7" disabled={historyPage <= 1} onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}>

@@ -6,10 +6,10 @@
 //   3. 昵称路径（仅 BD）：人工别名 > 建联表归属（保护期解析）> VID 推断别名；再叠加站点交接分段
 //   4. 都不中 → UNMATCHED（无建联达人）
 //
-// 站点匹配（2026-09-09 按项目负责人要求暂时放宽）：昵称类查表 key 本是「站点\u001f归一化名」双匹配。
-// 飞书建联表 C 列、剪辑表 D 列填的都是站点代码（PH / TH / VN / US / MX-AR…），与上传文件名解析出的站点
-// 同源，正常情况下能对上；放宽只是为了兜住「同一达人换站点投放」「建联表站点填错/留空」这类情况。
-// 查表统一走 lookupIdentity：先按「站点+名字」精确匹配（命中即用，口径不变），落空再按全局键（站点=''）兜底。
+// 站点匹配：昵称类查表 key = 「站点\u001f归一化名」，站点按字母精确匹配，**不做任何跨站点兜底**。
+// 飞书建联表 C 列、剪辑表 D 列填的都是站点代码（PH / TH / VN / US / MX-AR…），与上传文件名解析出的站点同源。
+// 名字对得上但站点对不上的行，一律归 UNMATCHED；这类行由 attribution-upload 的 `site_mismatch` action
+// 单独列表出来供人工确认，不在归因里静默改判。
 
 export type Role = "BD" | "EDITOR";
 export type MatchType = "VID" | "ALIAS_MANUAL" | "REGISTRY" | "ALIAS_VID";
@@ -34,12 +34,12 @@ export function identityKey(country: string | null | undefined, normalizedName: 
 }
 
 /**
- * 昵称类查表统一入口：先「站点 + 归一化名」精确匹配，落空再按全局键（站点=''）兜底。
- * 全局键由 loadAttrContext 预先写入（同名跨站点冲突时取确定性的一条）。
+ * 昵称类查表统一入口：「站点 + 归一化名」精确匹配，站点不同即视为不同的人，不做跨站点兜底。
+ * （站点写法本身由 identityKey 归一：NFKC + trim + 折叠空白 + 大写。）
  */
 export function lookupIdentity<T>(map: Map<string, T>, country: string, normalizedName: string): T | undefined {
   if (!normalizedName) return undefined;
-  return map.get(identityKey(country, normalizedName)) ?? map.get(identityKey("", normalizedName));
+  return map.get(identityKey(country, normalizedName));
 }
 
 export function splitIdentityKey(key: string): { country: string; normalizedName: string } {

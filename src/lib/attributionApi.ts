@@ -170,7 +170,11 @@ export const uploadApi = {
       detail_rows?: DetailRow[];
       last_synced_at?: string | null;
     }>("attribution-upload", { action: "get", ...p }, { timeout: 120000 }),
-  remove: (upload_id: string) => invokeFn<{ deleted: boolean }>("attribution-upload", { action: "delete", upload_id }),
+  remove: (upload_id: string) => invokeFn<{ deleted: number }>("attribution-upload", { action: "delete", upload_id }),
+  removeMany: (upload_ids: string[]) =>
+    invokeFn<{ deleted: number }>("attribution-upload", { action: "delete", upload_ids }, { timeout: 120000 }),
+  removeAll: () =>
+    invokeFn<{ deleted: number }>("attribution-upload", { action: "delete", all: true }, { timeout: 120000 }),
 };
 
 export const exchangeRateApi = {
@@ -185,6 +189,23 @@ export const exportApi = {
 };
 
 export type UnmatchedTrendRow = { country: string; account_name: string; total: number; by_month: Record<string, number> };
+
+/** 站点精确匹配后仍未归因、但名字在建联/别名表里登记过（登记在别的站点）的一行。 */
+export type SiteMismatchRow = {
+  upload_country: string;
+  account_name: string;
+  rows: number;
+  gmv_usd: number;
+  registered: Array<{ bd: string; country: string; source: string }>;
+};
+
+export function siteMismatch(month: string) {
+  return invokeFn<{ month: string; rows: SiteMismatchRow[] }>(
+    "attribution-upload",
+    { action: "site_mismatch", month },
+    { timeout: 120000 },
+  );
+}
 
 export function unmatchedTrend(month: string) {
   return invokeFn<{ months: string[]; rows: UnmatchedTrendRow[] }>(

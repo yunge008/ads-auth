@@ -12,6 +12,7 @@ import { ProgressBoard } from "@/components/attribution/ProgressBoard";
 import { DetailTable } from "@/components/attribution/DetailTable";
 import { ReviewPanel } from "@/components/attribution/ReviewPanel";
 import { UploadView, type Viewing } from "@/components/attribution/UploadView";
+import { SiteMismatchTable } from "@/components/attribution/SiteMismatchTable";
 import {
   type AttributionReport,
   type DetailRow,
@@ -163,6 +164,7 @@ function MonthlyView() {
         <>
           <ProgressBoard report={report} mode="admin" onDrill={drill} />
           {detail ? <DetailTable rows={detail.rows} loading={detailLoading} title={detail.title} /> : null}
+          <SiteMismatchTable month={month} />
         </>
       ) : (
         <div className="text-sm text-muted-foreground text-center py-16">选择月份后点击「生成报表」</div>
