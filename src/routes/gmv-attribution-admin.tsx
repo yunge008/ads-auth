@@ -16,7 +16,7 @@ import {
   type AttributionReport,
   type DetailRow,
   type DrillFilter,
-  currentMonth,
+  lastMonth,
   exportApi,
   feishuAction,
   syncCreators,
@@ -32,7 +32,7 @@ export const Route = createFileRoute("/gmv-attribution-admin")({
 });
 
 function MonthlyView() {
-  const [month, setMonth] = React.useState(currentMonth());
+  const [month, setMonth] = React.useState(lastMonth());
   const [report, setReport] = React.useState<AttributionReport | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);

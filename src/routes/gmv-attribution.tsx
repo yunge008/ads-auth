@@ -9,7 +9,7 @@ import { RotateCw } from "lucide-react";
 import { toast } from "sonner";
 import { UnmatchedTrendTable } from "@/components/attribution/UnmatchedTrendTable";
 import { StaffCountryTable } from "@/components/attribution/StaffCountryTable";
-import { type AttributionReport, currentMonth, fmtUsd, uploadApi } from "@/lib/attributionApi";
+import { type AttributionReport, fmtUsd, lastMonth, uploadApi } from "@/lib/attributionApi";
 
 export const Route = createFileRoute("/gmv-attribution")({
   head: () => ({ meta: [{ title: "GMV 归因 - TikTok授权工具" }] }),
@@ -30,7 +30,7 @@ function UnmatchedSection({ month }: { report: AttributionReport; month: string 
 }
 
 function GmvAttributionPage() {
-  const [month, setMonth] = React.useState(currentMonth());
+  const [month, setMonth] = React.useState(lastMonth());
   const [report, setReport] = React.useState<AttributionReport | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
