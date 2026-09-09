@@ -2,6 +2,8 @@
 
 格式：`日期 | 工具 | 改了什么 | 涉及文件`
 
+2026-09-09 | lovable | 修复 attribution-upload 查询超时：unmatched_trend 从逐页拉取近 12 个月约 58 万条明细改为数据库内按国家×达人×月份聚合；新增仅 service_role 可调用且带 120 秒预算的 attribution_unmatched_trend RPC，以及 UNMATCHED 覆盖索引；版本号改为 0909.021 | supabase/functions/attribution-upload/index.ts, supabase/migrations/20260909172925_2e561aca-50af-4178-ae25-2d90fcb309d0.sql, supabase/migrations/20260909173053_f73d6206-d1d9-40d3-91bb-9e68cd8aee7f.sql, supabase/migrations/20260909173207_*.sql, src/lib/version.ts, docs/{ARCHITECTURE,PLAN,WORKLOG}.md
+
 2026-06-10 | claude | 建立协同文档体系（AGENTS.md / CLAUDE.md / docs/） | AGENTS.md, CLAUDE.md, docs/*
 2026-06-10 | lovable | 校准 PLAN：3 条历史任务标完成（默认 tab/日期、GMV Max cron job、索引） | docs/PLAN.md
 2026-06-10 | lovable | 新增每日 08:00 自动授权 cron：authorize-cron 路由 + authorize_cron_state 表 + 飞书机器人通知；3 个 Edge Function 加 x-cron-key bypass | src/routes/api/public/hooks/authorize-cron.ts, supabase/migrations/*_authorize_cron_state.sql, supabase/functions/{feishu-read,authorize-batch,feishu-writeback}/index.ts, docs/ARCHITECTURE.md
