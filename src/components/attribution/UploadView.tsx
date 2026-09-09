@@ -144,6 +144,29 @@ export function UploadView({
   const patchFile = (id: string, patch: Partial<PendingFile>) =>
     setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, ...patch } : f)));
 
+  // 会让 GMV 静默算错的三种情况，解析阶段就摊开说清楚，别等归因完了再猜
+  const parseWarnings = React.useMemo(() => {
+    const out: string[] = [];
+    for (const f of files) {
+      const d = f.parsed?.diagnostics;
+      if (!d) continue;
+      const n = f.file.name;
+      if (d.missingCurrencyColumn) {
+        out.push(`${n}：没找到「货币 / Currency」列，所有行会被当作 USD。若该站点结算币种不是美元，归因后的 GMV 会被放大几十倍，请确认导出时带上货币列。`);
+      }
+      if (d.badNumberCells) {
+        out.push(`${n}：有 ${d.badNumberCells} 个金额单元格解析不出数字（样本：${d.badNumberSamples.join(" / ")}），这些行的成本/GMV 记为 0。`);
+      }
+      if (f.parsed && f.parsed.totals.byCurrency.length > 1) {
+        out.push(`${n}：文件里存在多个币种（${f.parsed.totals.byCurrency.map((c) => `${c.currency} ${c.rows} 行`).join("、")}），请确认每个币种都已在设置页维护汇率。`);
+      }
+      if (f.parsed && f.parsed.totals.rows > 0 && f.parsed.totals.gmvRows === 0) {
+        out.push(`${n}：${f.parsed.totals.rows} 行里没有任何一行 GMV 非 0，「总收入 / Gross revenue」列很可能取错或为空。未识别的表头：${d.unmappedHeaders.join("、") || "无"}。`);
+      }
+    }
+    return out;
+  }, [files]);
+
   const uploadAll = async () => {
     const ready = files.filter((f) => f.status === "parsed" && f.parsed);
     if (!ready.length) return;
@@ -298,7 +321,7 @@ export function UploadView({
           <CardTitle className="text-base">上传广告表</CardTitle>
           <p className="text-xs text-muted-foreground">
             支持多选，文件名需为「站点 MAX yyyymm.xlsx」（如 墨西哥 MAX 202607.xlsx）；中英文表头均可。同月多站点上传后可在下方按月合并查看。
-            <br />下表「行数」「商品卡行数」是 Excel 原始行计数；「GMV（原币种）」是本地解析出的总收入合计、仍是文件自身币种，上传归因后才折算美元。
+            <br />下表「行数」「商品卡行数」「有GMV行数」是 Excel 原始行计数；「GMV（原币种）」按文件里「货币」列分组汇总、仍是文件自身币种，上传归因后才按汇率折美元。
           </p>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -332,6 +355,7 @@ export function UploadView({
                     <TableHead>月份</TableHead>
                     <TableHead className="text-right">行数</TableHead>
                     <TableHead className="text-right">GMV（原币种）</TableHead>
+                    <TableHead className="text-right">有GMV行数</TableHead>
                     <TableHead className="text-right">商品卡行数</TableHead>
                     <TableHead>状态</TableHead>
                   </TableRow>
@@ -347,7 +371,18 @@ export function UploadView({
                         <Input type="month" value={f.month} onChange={(e) => patchFile(f.id, { month: e.target.value })} className="h-7 w-36" disabled={f.status !== "parsed"} />
                       </TableCell>
                       <TableCell className="text-right tabular-nums">{f.parsed?.totals.rows ?? "—"}</TableCell>
-                      <TableCell className="text-right tabular-nums">{f.parsed ? fmtUsd(f.parsed.totals.gmv) : "—"}</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {f.parsed
+                          ? f.parsed.totals.byCurrency.map((c) => (
+                              <div key={c.currency} className="whitespace-nowrap">
+                                <span className="text-muted-foreground mr-1">{c.currency}</span>{fmtUsd(c.gmv)}
+                              </div>
+                            ))
+                          : "—"}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {f.parsed ? `${f.parsed.totals.gmvRows} / ${f.parsed.totals.rows}` : "—"}
+                      </TableCell>
                       <TableCell className="text-right tabular-nums">{f.parsed?.totals.productCardRows ?? "—"}</TableCell>
                       <TableCell className="text-xs">
                         {f.status === "parsed" ? <Badge variant="secondary">待上传</Badge>
@@ -359,6 +394,11 @@ export function UploadView({
                   ))}
                 </TableBody>
               </Table>
+            </div>
+          ) : null}
+          {parseWarnings.length ? (
+            <div className="text-xs rounded-md border border-amber-400/60 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 space-y-1">
+              {parseWarnings.map((w, i) => <div key={i}>⚠ {w}</div>)}
             </div>
           ) : null}
         </CardContent>

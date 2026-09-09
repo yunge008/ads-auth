@@ -72,10 +72,21 @@ export function ProgressBoard({
         )}
       </div>
 
-      {mode === "admin" && report.non_usd.length ? (
-        <div className="text-xs rounded-md border border-amber-400/60 bg-amber-50 dark:bg-amber-950/30 px-3 py-2">
-          ⚠ 存在非 USD 数据未计入：
-          {report.non_usd.map((n) => ` ${n.currency} ${fmtUsd(n.gmv)}（${n.rows} 行）`).join("；")}
+      {mode === "admin" && report.non_usd.some((n) => n.usd_rate == null) ? (
+        <div className="text-xs rounded-md border border-destructive/60 bg-destructive/10 px-3 py-2">
+          ⚠ 以下币种缺汇率，这些行<b>未计入</b>上面任何数字：
+          {report.non_usd.filter((n) => n.usd_rate == null).map((n) => ` ${n.currency} ${fmtUsd(n.gmv)}（${n.rows} 行）`).join("；")}
+          　请在「设置 → GMV 归因汇率」补齐后重新上传该批次。
+        </div>
+      ) : null}
+
+      {mode === "admin" && report.non_usd.some((n) => n.usd_rate != null) ? (
+        <div className="text-xs rounded-md border bg-muted/40 px-3 py-2">
+          非美元币种折算明细（核对量级用）：
+          {report.non_usd
+            .filter((n) => n.usd_rate != null)
+            .map((n) => ` ${n.currency} ${fmtUsd(n.gmv)} ÷ ${n.usd_rate} = $${fmtUsd(n.gmv_usd)}（${n.rows} 行）`)
+            .join("；")}
         </div>
       ) : null}
 

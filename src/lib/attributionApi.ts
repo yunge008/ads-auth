@@ -28,7 +28,8 @@ export type AttributionReport = {
   staff: StaffAgg[];
   product_card: BucketAgg;
   unmatched: BucketAgg & { top: Array<{ account_name: string; gmv: number; rows: number }> };
-  non_usd: Array<{ currency: string; gmv: number; cost: number; rows: number }>;
+  // usd_rate=null → 缺汇率、未计入任何汇总；有值 → 已折美元计入，gmv_usd 是折算结果
+  non_usd: Array<{ currency: string; gmv: number; cost: number; rows: number; usd_rate: number | null; gmv_usd: number }>;
   totals: { gmv: number; cost: number; orders: number; rows: number };
 };
 

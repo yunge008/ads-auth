@@ -23,13 +23,34 @@ export type ParsedRow = {
   currency: string;
 };
 
+/** 单币种小计（gmv/cost 都是该币种原值，未折美元）。 */
+export type CurrencyTotal = { currency: string; gmv: number; cost: number; rows: number };
+
 export type ParsedFile = {
   fileName: string;
   country: string | null; // 文件名解析
   month: string | null; // 'YYYY-MM'，文件名解析
   headerLang: "cn" | "en";
   rows: ParsedRow[];
-  totals: { gmv: number; cost: number; rows: number; productCardRows: number };
+  totals: {
+    gmv: number; // 各行 gross_revenue 直接相加；多币种时这个数没有意义，看 byCurrency
+    cost: number;
+    rows: number;
+    productCardRows: number;
+    gmvRows: number; // gross_revenue != 0 的行数
+    byCurrency: CurrencyTotal[]; // 按行内「货币」列分组，GMV 降序
+  };
+  /** 解析诊断：这些情况会让 GMV 静默算错，必须显式暴露给用户。 */
+  diagnostics: {
+    /** 文件里没有「货币」列 —— 所有行会被当成 USD，非美元站点会把 GMV 放大几十倍 */
+    missingCurrencyColumn: boolean;
+    /** 金额单元格原文非空但转不成数字（币种符号、不换行空格、括号负数…），旧逻辑会静默记 0 */
+    badNumberCells: number;
+    /** 前几个解析失败的原文样本，便于定位 */
+    badNumberSamples: string[];
+    /** 表头里没被识别的列（原文），用于发现 TikTok 改了列名 */
+    unmappedHeaders: string[];
+  };
 };
 
 const FILE_RE = /^(.+?)\s*MAX\s*(\d{6})(?:\D[^.]*)?\.xlsx?$/i;
@@ -100,16 +121,40 @@ function normCreativeType(raw: string): string {
   return raw.trim();
 }
 
+/**
+ * 金额/计数解析。返回 NaN 表示「原文非空但不是数字」，由调用方决定是记 0 还是计入诊断——
+ * 旧实现把这种情况直接吞成 0，一列 GMV 全部解析失败时表面上看不出任何异常。
+ * 处理：千分位、常见币种符号、普通/不换行/窄空格、全角数字、百分号、括号负数。
+ */
+function parseNumeric(v: unknown): number {
+  if (typeof v === "number") return isFinite(v) ? v : NaN;
+  let s = String(v ?? "")
+    .normalize("NFKC") // 全角数字/符号 → 半角
+    .replace(/[\s\u00a0\u202f\u2007]/g, "") // 空格、不换行空格、窄空格
+    .replace(/,/g, "");
+  if (!s || s === "-" || s === "—" || s.toUpperCase() === "N/A" || s.toUpperCase() === "NA") return NaN;
+  let neg = false;
+  const paren = s.match(/^\((.*)\)$/); // (123.45) = -123.45
+  if (paren) {
+    neg = true;
+    s = paren[1];
+  }
+  s = s.replace(/[^\d.\-+eE]/g, ""); // 去掉 $ ₱ ฿ ¥ % 等
+  if (!s || !/\d/.test(s)) return NaN;
+  const n = Number(s);
+  if (!isFinite(n)) return NaN;
+  return neg ? -n : n;
+}
+
+/** 数值列：解析失败记 0（与历史行为一致），失败与否由调用方通过 parseNumeric 另行统计。 */
 function toNum(v: unknown): number {
-  if (typeof v === "number") return isFinite(v) ? v : 0;
-  const n = Number(String(v ?? "").replace(/,/g, "").trim());
+  const n = parseNumeric(v);
   return isFinite(n) ? n : 0;
 }
 
+/** 可空数值列（ROI / 曝光 / 点击）：空或解析失败都记 null。 */
 function toNumOrNull(v: unknown): number | null {
-  const s = String(v ?? "").trim();
-  if (!s || s === "-" || s.toUpperCase() === "N/A") return null;
-  const n = Number(s.replace(/,/g, ""));
+  const n = parseNumeric(v);
   return isFinite(n) ? n : null;
 }
 
@@ -158,8 +203,22 @@ export async function parseAdExcel(file: File): Promise<ParsedFile> {
   };
   const cellStr = (row: unknown[], key: keyof ParsedRow): string => String(cell(row, key) ?? "").trim();
 
+  // 表头里没被 HEADER_MAP 认出来的列：TikTok 改列名时这里会暴露出来
+  const unmappedHeaders = headerRow
+    .map((h) => String(h ?? "").trim())
+    .filter((h) => h && !HEADER_MAP[normHeader(h)])
+    .slice(0, 12);
+  const missingCurrencyColumn = !colIdx.has("currency");
+
   const rows: ParsedRow[] = [];
-  const totals = { gmv: 0, cost: 0, rows: 0, productCardRows: 0 };
+  const totals = { gmv: 0, cost: 0, rows: 0, productCardRows: 0, gmvRows: 0 };
+  const curMap = new Map<string, CurrencyTotal>();
+  let badNumberCells = 0;
+  const badNumberSamples: string[] = [];
+  const noteBad = (raw: unknown) => {
+    badNumberCells++;
+    if (badNumberSamples.length < 5) badNumberSamples.push(String(raw));
+  };
   for (let i = 1; i < grid.length; i++) {
     const r = grid[i] as unknown[];
     if (!r || r.every((c) => c == null || String(c).trim() === "")) continue;
@@ -167,6 +226,11 @@ export async function parseAdExcel(file: File): Promise<ParsedFile> {
     const vid = /^\d{15,20}$/.test(vidRaw) ? vidRaw : "";
     const acctRaw = cellStr(r, "tt_account_name");
     const creativeType = normCreativeType(cellStr(r, "creative_type"));
+    // 金额两列单独走一遍，统计「原文非空但解析不出数字」的单元格
+    for (const k of ["cost", "gross_revenue"] as const) {
+      const raw = cell(r, k);
+      if (String(raw ?? "").trim() !== "" && !isFinite(parseNumeric(raw))) noteBad(raw);
+    }
     const row: ParsedRow = {
       row_no: i + 1,
       campaign_name: cellStr(r, "campaign_name"),
@@ -191,7 +255,14 @@ export async function parseAdExcel(file: File): Promise<ParsedFile> {
     totals.gmv += row.gross_revenue;
     totals.cost += row.cost;
     totals.rows++;
+    if (row.gross_revenue !== 0) totals.gmvRows++;
     if (creativeType === "product_card") totals.productCardRows++;
+    const cur = row.currency.toUpperCase();
+    const ct = curMap.get(cur) ?? { currency: cur, gmv: 0, cost: 0, rows: 0 };
+    ct.gmv += row.gross_revenue;
+    ct.cost += row.cost;
+    ct.rows++;
+    curMap.set(cur, ct);
   }
 
   const fromName = parseFileName(file.name);
@@ -201,6 +272,7 @@ export async function parseAdExcel(file: File): Promise<ParsedFile> {
     month: fromName?.month ?? null,
     headerLang: cnHits >= enHits ? "cn" : "en",
     rows,
-    totals,
+    totals: { ...totals, byCurrency: Array.from(curMap.values()).sort((a, b) => b.gmv - a.gmv) },
+    diagnostics: { missingCurrencyColumn, badNumberCells, badNumberSamples, unmappedHeaders },
   };
 }

@@ -286,7 +286,11 @@ export type AttributionReport = {
   staff: StaffAgg[];
   product_card: BucketAgg;
   unmatched: BucketAgg & { top: Array<{ account_name: string; gmv: number; rows: number }> };
-  non_usd: Array<{ currency: string; gmv: number; cost: number; rows: number }>;
+  /**
+   * 每个非美元币种一行。`usd_rate` 为 null = 缺汇率、这些行未计入任何汇总；
+   * 有值 = 已按 本币/usd_rate 折美元并计入，`gmv_usd` 是折算后的金额，供人工核对量级。
+   */
+  non_usd: Array<{ currency: string; gmv: number; cost: number; rows: number; usd_rate: number | null; gmv_usd: number }>;
   totals: { gmv: number; cost: number; orders: number; rows: number };
 };
 
@@ -338,14 +342,14 @@ export function aggregateResults(
   const productCard: BucketAgg = { gmv: 0, cost: 0, orders: 0, rows: 0 };
   const unmatched: BucketAgg = { gmv: 0, cost: 0, orders: 0, rows: 0 };
   const unmatchedTop = new Map<string, { account_name: string; gmv: number; rows: number }>();
-  const nonUsd = new Map<string, { currency: string; gmv: number; cost: number; rows: number }>();
+  const nonUsd = new Map<string, { currency: string; gmv: number; cost: number; rows: number; usd_rate: number | null; gmv_usd: number }>();
   const totals = { gmv: 0, cost: 0, orders: 0, rows: 0 };
 
   for (const { input, result } of pairs) {
     const cur = (input.currency || "USD").toUpperCase();
     const rate = opts.exchangeRates?.get(cur) ?? (cur === "USD" ? 1 : 0);
     if (!rate) {
-      const e = nonUsd.get(cur) ?? { currency: cur, gmv: 0, cost: 0, rows: 0 };
+      const e = nonUsd.get(cur) ?? { currency: cur, gmv: 0, cost: 0, rows: 0, usd_rate: null, gmv_usd: 0 };
       e.gmv += input.grossRevenue;
       e.cost += input.cost;
       e.rows++;
@@ -356,9 +360,10 @@ export function aggregateResults(
     const gmvUsd = input.grossRevenue / rate;
     const costUsd = input.cost / rate;
     if (cur !== "USD") {
-      const e = nonUsd.get(cur) ?? { currency: cur, gmv: 0, cost: 0, rows: 0 };
+      const e = nonUsd.get(cur) ?? { currency: cur, gmv: 0, cost: 0, rows: 0, usd_rate: rate, gmv_usd: 0 };
       e.gmv += input.grossRevenue;
       e.cost += input.cost;
+      e.gmv_usd += gmvUsd;
       e.rows++;
       nonUsd.set(cur, e);
     }

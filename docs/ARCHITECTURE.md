@@ -60,6 +60,8 @@
 - 飞书 values v2 单响应 ~5000 cells，`readRange` 已做 500 行分块
 - `gmv_max_vid_daily` 行数线性增长，性能优化路线见 `.lovable/plan.md`（索引→rollup→分区）
 - 删除-重插写入模式：sync 先按 (country, advertiser_id, stat_date) 删旧再 upsert，改动需保持幂等
-- 2026-09-09 归因口径调整（暂时性）：①**站点匹配已放宽**——昵称/用户名查表原本强制「站点 + 名字」双匹配，但 `creator_ownership.country` 来自飞书建联表 C 列 BD 手填原文（「美国」「菲律宾」…），与上传文件名解析出的站点代码（US / PH / MX-AR…）对不上，会让整条昵称路径全部落空、GMV 大面积掉进 UNMATCHED；现由 `loadAttrContext` 额外写入 country='' 的全局兜底键，`lookupIdentity` 精确匹配落空时按名字全局匹配。②`KPI_MIN_SITE_USD` 由 2000 改为 **0**（关闭阈值），`counted_gmv` = 全部 GMV，前端在阈值 ≤0 时不再显示阈值提示。两项都是临时口径，要恢复只需把 `KPI_MIN_SITE_USD` 改回 2000、并移除 `addGlobalFallback` 调用。
+- 2026-09-09 归因口径调整（暂时性）：①**站点匹配已放宽**——昵称/用户名查表原本强制「站点 + 名字」双匹配；现由 `loadAttrContext` 额外写入 country='' 的全局兜底键，`lookupIdentity` 精确匹配落空时按名字全局匹配。**更正**：飞书建联表 C 列 / 剪辑表 D 列填的都是站点代码（PH / TH / VN / US / MX-AR），与上传文件名同源、本来就能对上，「站点写法不一致导致大面积 UNMATCHED」这个判断是错的；放宽只兜「同一达人换站点」「建联表站点填错或留空」。②`KPI_MIN_SITE_USD` 由 2000 改为 **0**（关闭阈值），`counted_gmv` = 全部 GMV，前端在阈值 ≤0 时不再显示阈值提示。两项都是临时口径，要恢复只需把 `KPI_MIN_SITE_USD` 改回 2000、并移除 `addGlobalFallback` 调用。
+
+- 2026-09-09 Excel 取数口径与诊断：`src/lib/adExcel.ts` 的数字解析由 `parseNumeric` 统一处理（千分位 / 币种符号 / 不换行空格 / 全角数字 / 括号负数），并统计「原文非空但解析不出数字」的金额单元格数——旧实现把这类单元格静默记 0，整列取错时表面看不出异常。`ParsedFile.totals` 新增 `gmvRows`（GMV 非 0 的行数）与 `byCurrency`（按行内「货币」列分组的原币种小计），`ParsedFile.diagnostics` 暴露「缺货币列 / 解析失败单元格 / 未识别表头」，上传页解析后直接告警。**缺「货币」列是最危险的一种**：`ParsedRow.currency` 会默认 USD，`findMissingCurrencies` 因此不会报错，非美元站点的 GMV 会被当成美元放大几十倍。`AttributionReport.non_usd` 每项加 `usd_rate` / `gmv_usd`：`usd_rate=null` 才是「缺汇率未计入」，有值表示已折算计入（旧 UI 一律显示成「未计入」，是误报）。
 
 - 2026-07-11 review implementation: `20260711000000_gmv_attribution_review.sql` adds country-scoped creator identity, configurable USD rates, goal-group fields, and immutable attribution batches/detail snapshots.
