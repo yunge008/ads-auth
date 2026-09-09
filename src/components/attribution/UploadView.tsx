@@ -263,7 +263,7 @@ export function UploadView({
       if (viewing?.kind === "upload" && viewing.id === u.id) {
         setViewing(null);
         setSummary(null);
-        setDetail(null);
+
       }
       await loadHistory();
     } catch (e) {
