@@ -67,6 +67,7 @@ export function UploadView({
   const [history, setHistory] = React.useState<UploadRec[]>([]);
   const [historyLoading, setHistoryLoading] = React.useState(false);
   const [mergeMonth, setMergeMonth] = React.useState(lastMonth());
+  const [selectedCountries, setSelectedCountries] = React.useState<string[]>([]);
   const [viewing, setViewing] = React.useState<Viewing | null>(null);
   const [summary, setSummary] = React.useState<AttributionReport | null>(null);
   const [historyPage, setHistoryPage] = React.useState(1);
