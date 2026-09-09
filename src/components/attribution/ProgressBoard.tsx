@@ -74,26 +74,8 @@ export function ProgressBoard({
         </div>
       ) : null}
 
-      {bds.length ? (
-        <div className="space-y-2">
-          <h3 className="text-sm font-medium text-muted-foreground">BD（{bds.length}）</h3>
-          <div className="grid gap-2 lg:grid-cols-2">
-            {bds.map((s) => (
-              <StaffRow key={`${s.staff_name}|${s.role}`} s={s} mode={mode} onDrill={onDrill} />
-            ))}
-          </div>
-        </div>
-      ) : null}
-      {editors.length ? (
-        <div className="space-y-2">
-          <h3 className="text-sm font-medium text-muted-foreground">剪辑（{editors.length}）</h3>
-          <div className="grid gap-2 lg:grid-cols-2">
-            {editors.map((s) => (
-              <StaffRow key={`${s.staff_name}|${s.role}`} s={s} mode={mode} onDrill={onDrill} />
-            ))}
-          </div>
-        </div>
-      ) : null}
+      <StaffCountryTable title="BD" rows={bds} mode={mode} onDrill={onDrill} />
+      <StaffCountryTable title="剪辑" rows={editors} mode={mode} onDrill={onDrill} />
       {!report.staff.length ? (
         <div className="text-sm text-muted-foreground text-center py-8">暂无归因数据（先同步达人登记，再生成报表）</div>
       ) : null}
@@ -101,19 +83,39 @@ export function ProgressBoard({
       {mode === "admin" && report.unmatched.top.length ? (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">无建联达人 TOP（按 GMV，供补建联参考）</CardTitle>
+            <CardTitle className="text-sm">
+              无建联达人（按 GMV 降序，共 {report.unmatched.top.length} 个，供补建联参考）
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="flex flex-wrap gap-1.5">
-              {report.unmatched.top.slice(0, 30).map((t) => (
-                <span key={t.account_name} className="text-xs rounded px-1.5 py-0.5 border tabular-nums bg-muted/40">
-                  {t.account_name} ${fmtUsd(t.gmv)}
-                </span>
-              ))}
-            </div>
+            {report.month ? (
+              <UnmatchedTrendTable month={report.month} />
+            ) : (
+              <div className="border rounded-md overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>达人昵称</TableHead>
+                      <TableHead className="text-right">当月 GMV</TableHead>
+                      <TableHead className="text-right">行数</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {report.unmatched.top.map((t) => (
+                      <TableRow key={t.account_name}>
+                        <TableCell className="text-xs">{t.account_name}</TableCell>
+                        <TableCell className="text-right tabular-nums text-xs">${fmtUsd(t.gmv)}</TableCell>
+                        <TableCell className="text-right tabular-nums text-xs">{t.rows}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
           </CardContent>
         </Card>
       ) : null}
+
     </div>
   );
 }
