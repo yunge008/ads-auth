@@ -317,7 +317,7 @@ Deno.serve(async (req) => {
       thresholds: { 大: { 其他: "≥100K", MX: "≥300K" }, 中: { 其他: "50–100K", MX: "100–300K" }, 中小: { 其他: "10–50K", MX: "30–100K" }, 小: { 其他: "3–10K", MX: "5–30K" }, 特小: { 其他: "<3K", MX: "<5K" } },
     };
 
-    // ---- 每日发样/回收（BD only）----
+    // ---- 每日发样/回收（发样、BD 回收按人员统计；剪辑回收只统计总量，不做人员维度）----
     const days: string[] = [];
     for (let d = new Date(`${start}T00:00:00Z`); d <= new Date(`${end}T00:00:00Z`); d = new Date(d.getTime() + 86400000)) {
       days.push(d.toISOString().slice(0, 10));
@@ -330,9 +330,11 @@ Deno.serve(async (req) => {
     };
     const sendByDate = byDate(sendEvents);
     const recByDate = byDate(bdRecEvents);
+    const edRecByDate = byDate(edRecEvents);
     const daily_series = days.map((date) => {
       const sendToday = sendByDate.get(date) ?? [];
       const recToday = recByDate.get(date) ?? [];
+      const edRecToday = edRecByDate.get(date) ?? [];
       const sampleCount = new Map<string, number>();
       const recoverCount = new Map<string, number>();
       for (const s of sendToday) sampleCount.set(s.staff, (sampleCount.get(s.staff) ?? 0) + 1);
@@ -343,8 +345,8 @@ Deno.serve(async (req) => {
         const recover = recoverCount.get(st) ?? 0;
         if (sample || recover) by_staff[st] = { sample, recover };
       }
-      const sample = sendToday.length, recover = recToday.length;
-      return { date, sample, recover, rate: safeDiv(recover, sample), by_staff };
+      const sample = sendToday.length, recover = recToday.length, editor_recover = edRecToday.length;
+      return { date, sample, recover, editor_recover, rate: safeDiv(recover, sample), by_staff };
     });
 
     return new Response(
