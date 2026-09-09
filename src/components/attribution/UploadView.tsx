@@ -54,9 +54,13 @@ type PendingFile = {
   error?: string;
 };
 
-type Viewing = { kind: "upload"; id: string; label: string } | { kind: "merged"; month: string };
+export type Viewing = { kind: "upload"; id: string; label: string } | { kind: "merged"; month: string };
 
-export function UploadView() {
+export function UploadView({
+  onResult,
+}: {
+  onResult?: (r: { viewing: Viewing; summary: AttributionReport } | null) => void;
+}) {
   const [files, setFiles] = React.useState<PendingFile[]>([]);
   const [uploading, setUploading] = React.useState(false);
   const [history, setHistory] = React.useState<UploadRec[]>([]);
@@ -64,11 +68,16 @@ export function UploadView() {
   const [mergeMonth, setMergeMonth] = React.useState(currentMonth());
   const [viewing, setViewing] = React.useState<Viewing | null>(null);
   const [summary, setSummary] = React.useState<AttributionReport | null>(null);
-  const [detail, setDetail] = React.useState<{ rows: DetailRow[]; title: string } | null>(null);
-  const [detailLoading, setDetailLoading] = React.useState(false);
   const [historyPage, setHistoryPage] = React.useState(1);
   const [clearing, setClearing] = React.useState(false);
   const fileInput = React.useRef<HTMLInputElement>(null);
+
+  const onResultRef = React.useRef(onResult);
+  onResultRef.current = onResult;
+  React.useEffect(() => {
+    onResultRef.current?.(viewing && summary ? { viewing, summary } : null);
+  }, [viewing, summary]);
+
 
   const loadHistory = React.useCallback(async () => {
     setHistoryLoading(true);
