@@ -382,12 +382,21 @@ export function UploadView({
               <Eraser className={`h-4 w-4 mr-1.5 ${clearing ? "animate-pulse" : ""}`} />
               一键清除卡住记录{staleUploads.length ? `（${staleUploads.length}）` : ""}
             </Button>
-            <div className="flex items-end gap-1.5">
+            <div className="flex flex-wrap items-end gap-1.5">
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-muted-foreground">筛选月份</span>
                 <Input type="month" value={mergeMonth} onChange={(e) => setMergeMonth(e.target.value)} className="h-8 w-40" />
               </div>
-              <Button size="sm" variant="ghost" onClick={() => setMergeMonth("")}>显示全部</Button>
+              <MultiSelect
+                label="站点"
+                placeholder="全部站点"
+                options={countryOptions}
+                value={selectedCountries}
+                onChange={setSelectedCountries}
+                counts={countryCounts}
+                className="min-w-[150px]"
+              />
+              <Button size="sm" variant="ghost" onClick={() => { setMergeMonth(""); setSelectedCountries([]); }}>显示全部</Button>
               <Button size="sm" variant="outline" onClick={viewMerged} disabled={!/^\d{4}-\d{2}$/.test(mergeMonth)}>
                 <Layers className="h-4 w-4 mr-1.5" />按月合并查看
               </Button>
