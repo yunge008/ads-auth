@@ -95,13 +95,25 @@ export function UploadView({
   }, []);
   React.useEffect(() => { loadHistory(); }, [loadHistory]);
 
-  const filteredHistory = React.useMemo(
-    () => (/^\d{4}-\d{2}$/.test(mergeMonth) ? history.filter((u) => u.month === mergeMonth) : history),
-    [history, mergeMonth],
-  );
+  const countryOptions = React.useMemo(() => {
+    const set = new Set<string>();
+    history.forEach((u) => { if (u.country) set.add(u.country); });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-CN"));
+  }, [history]);
+  const countryCounts = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+    history.forEach((u) => { if (u.country) counts[u.country] = (counts[u.country] || 0) + 1; });
+    return counts;
+  }, [history]);
+  const filteredHistory = React.useMemo(() => {
+    let list = history;
+    if (/^\d{4}-\d{2}$/.test(mergeMonth)) list = list.filter((u) => u.month === mergeMonth);
+    if (selectedCountries.length) list = list.filter((u) => selectedCountries.includes(u.country));
+    return list;
+  }, [history, mergeMonth, selectedCountries]);
   const historyPageCount = Math.max(1, Math.ceil(filteredHistory.length / HISTORY_PAGE_SIZE));
   const pagedHistory = filteredHistory.slice((historyPage - 1) * HISTORY_PAGE_SIZE, historyPage * HISTORY_PAGE_SIZE);
-  React.useEffect(() => { setHistoryPage(1); }, [mergeMonth]);
+  React.useEffect(() => { setHistoryPage(1); }, [mergeMonth, selectedCountries]);
 
 
   const onPickFiles = async (list: FileList | null) => {
