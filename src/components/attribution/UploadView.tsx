@@ -177,14 +177,13 @@ export function UploadView({
         }
       }
       if (lastSummary) {
-        setDetail(null);
         const [month] = Array.from(completedMonths);
         if (completedMonths.size === 1 && month) {
           try {
             const merged = await uploadApi.get({ month, merged: true });
             setViewing({ kind: "merged", month });
             setSummary(merged.summary);
-            toast.success(`已展示 ${month} 全站点合并归因结果`);
+            toast.success(`已展示 ${month} 全站点合并归因结果，请查看「归因结果」标签`);
           } catch (e) {
             setSummary(lastSummary);
             toast.warning(`单文件归因已完成，但合并展示加载失败：${(e as Error).message}`);
@@ -201,7 +200,6 @@ export function UploadView({
 
   const viewUpload = async (u: UploadRec) => {
     setViewing({ kind: "upload", id: u.id, label: `${u.country} ${u.month}（${u.file_name}）` });
-    setDetail(null);
     setSummary(null);
     try {
       const r = await uploadApi.get({ upload_id: u.id });
@@ -214,7 +212,6 @@ export function UploadView({
   const viewMerged = async () => {
     if (!/^\d{4}-\d{2}$/.test(mergeMonth)) return;
     setViewing({ kind: "merged", month: mergeMonth });
-    setDetail(null);
     setSummary(null);
     try {
       const r = await uploadApi.get({ month: mergeMonth, merged: true });
@@ -225,22 +222,6 @@ export function UploadView({
     }
   };
 
-  const drill = async (f: DrillFilter) => {
-    if (!viewing) return;
-    setDetailLoading(true);
-    const title = f.bucket ? (f.bucket === "PRODUCT_CARD" ? "商品卡明细" : "无建联明细") : `${f.staff} 明细`;
-    setDetail({ rows: [], title });
-    try {
-      const r = viewing.kind === "upload"
-        ? await uploadApi.get({ upload_id: viewing.id, detail_for: f })
-        : await uploadApi.get({ month: viewing.month, merged: true, detail_for: f });
-      setDetail({ rows: r.detail_rows ?? [], title });
-    } catch (e) {
-      toast.error(`加载明细失败：${(e as Error).message}`);
-    } finally {
-      setDetailLoading(false);
-    }
-  };
 
   // 卡死判定：状态非「已归因」且创建时间超过 STALE_MINUTES 分钟
   const staleUploads = React.useMemo(
