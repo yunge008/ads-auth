@@ -1,4 +1,5 @@
 // 上传状态矩阵：行=月份（新→旧），列=站点，格子=该站点该月的上传/归因状态。
+// COUNTRY_ORDER 里的站点是固定列，即使一条上传记录都没有也保留列（格子留空），方便一眼看出哪个站点整月没传。
 import * as React from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { UploadRec } from "@/lib/attributionApi";
@@ -10,7 +11,7 @@ const STATUS_LABEL: Record<CellStatus, string> = {
   PARTIAL: "部分归因",
   UPLOADING: "上传中",
   FAILED: "失败",
-  EMPTY: "无数据",
+  EMPTY: "", // 无上传记录的格子留空
 };
 
 const STATUS_CLASS: Record<CellStatus, string> = {
@@ -54,12 +55,11 @@ export function UploadStatusMatrix({ history }: { history: UploadRec[] }) {
       arr.push(u);
       map.set(key, arr);
     }
-    const known = COUNTRY_ORDER.filter((c) => countrySet.has(c));
     const others = Array.from(countrySet)
       .filter((c) => !COUNTRY_ORDER.includes(c))
       .sort();
     return {
-      countries: [...known, ...others],
+      countries: [...COUNTRY_ORDER, ...others],
       months: Array.from(monthSet).sort((a, b) => b.localeCompare(a)),
       byKey: map,
     };
@@ -93,9 +93,8 @@ export function UploadStatusMatrix({ history }: { history: UploadRec[] }) {
                 {countries.map((c) => {
                   const rows = byKey.get(`${c}|${m}`) ?? [];
                   const status = cellStatus(rows);
-                  const title = rows.length
-                    ? rows.map((r) => `${r.file_name}：${r.status}${r.row_count ? `（${r.row_count}行）` : ""}`).join("\n")
-                    : "无数据";
+                  if (status === "EMPTY") return <TableCell key={c} className="text-center p-1" title="无上传记录" />;
+                  const title = rows.map((r) => `${r.file_name}：${r.status}${r.row_count ? `（${r.row_count}行）` : ""}`).join("\n");
                   return (
                     <TableCell key={c} className="text-center p-1">
                       <span

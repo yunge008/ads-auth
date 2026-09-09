@@ -20,8 +20,11 @@ import {
   vidToPostedAt,
 } from "./attribution.ts";
 
-/** 用户视图 KPI 阈值：同事×站点归因 GMV 低于该值不展示、不计入 KPI。 */
-export const KPI_MIN_SITE_USD = 2000;
+/**
+ * 用户视图 KPI 阈值：同事×站点归因 GMV 低于该值不展示、不计入 KPI。
+ * 0 = 关闭阈值，全部格子都计入（2026-09-09 按项目负责人要求暂时关闭，前端在阈值 <=0 时不显示相关提示）。
+ */
+export const KPI_MIN_SITE_USD = 0;
 
 // ---------- 分页工具 ----------
 
@@ -54,6 +57,27 @@ export async function loadStaffMeta(db: SupabaseClient): Promise<StaffMeta> {
   const m: StaffMeta = new Map();
   for (const r of rows) m.set(`${r.name}|${r.role}`, { role: r.role as Role, active: !!r.active });
   return m;
+}
+
+/**
+ * 站点无关兜底：把每个归一化名在所有站点里「最优」的一条，额外写到全局键（站点=''）上，
+ * 供 `lookupIdentity` 在「站点 + 名字」精确匹配落空时使用。
+ * rank 字符串小者优先；已存在的真实空站点记录不被覆盖。
+ */
+function addGlobalFallback<T>(
+  map: Map<string, T>,
+  candidates: Array<{ name: string; rank: string; value: T }>,
+): void {
+  const best = new Map<string, { rank: string; value: T }>();
+  for (const c of candidates) {
+    if (!c.name) continue;
+    const cur = best.get(c.name);
+    if (!cur || c.rank < cur.rank) best.set(c.name, { rank: c.rank, value: c.value });
+  }
+  for (const [name, b] of best) {
+    const key = identityKey("", name);
+    if (!map.has(key)) map.set(key, b.value);
+  }
 }
 
 export async function loadAttrContext(db: SupabaseClient): Promise<AttrContext> {
@@ -102,8 +126,14 @@ export async function loadAttrContext(db: SupabaseClient): Promise<AttrContext> 
 
   // 2) 建联表归属：NICKNAME 优先，HANDLE 补缺
   const ownership = new Map<string, { bd: string; keyType: "NICKNAME" | "HANDLE"; country: string }>();
-  const ownRows = await pageAll<{ key_type: string; match_key: string; owner_bd: string; country: string }>((f, t) =>
-    db.from("creator_ownership").select("key_type, match_key, owner_bd, country").range(f, t),
+  const ownRows = await pageAll<{
+    key_type: string;
+    match_key: string;
+    owner_bd: string;
+    country: string;
+    first_register_date: string | null;
+  }>((f, t) =>
+    db.from("creator_ownership").select("key_type, match_key, owner_bd, country, first_register_date").range(f, t),
   );
   for (const r of ownRows) {
     if (r.key_type !== "NICKNAME") continue;
@@ -114,6 +144,15 @@ export async function loadAttrContext(db: SupabaseClient): Promise<AttrContext> 
     if (r.key_type !== "HANDLE" || ownership.has(scoped)) continue;
     ownership.set(scoped, { bd: r.owner_bd, keyType: "HANDLE", country: r.country ?? "" });
   }
+  // 站点无关兜底：昵称优先于用户名，其次最早建联日期（谁先建联谁拥有），最后按 BD 名保证确定性
+  addGlobalFallback(
+    ownership,
+    ownRows.map((r) => ({
+      name: r.match_key,
+      rank: `${r.key_type === "NICKNAME" ? "0" : "1"}|${r.first_register_date ?? "9999-99-99"}|${r.owner_bd}`,
+      value: { bd: r.owner_bd, keyType: (r.key_type === "HANDLE" ? "HANDLE" : "NICKNAME") as "NICKNAME" | "HANDLE", country: r.country ?? "" },
+    })),
+  );
 
   // 3) 别名
   const manualAlias = new Map<string, { bd: string; country: string }>();
@@ -126,6 +165,14 @@ export async function loadAttrContext(db: SupabaseClient): Promise<AttrContext> 
     const scoped = identityKey(r.country, r.alias_norm);
     if (r.source === "MANUAL") manualAlias.set(scoped, rec);
     else vidAlias.set(scoped, rec);
+  }
+  for (const [source, map] of [["MANUAL", manualAlias], ["VID_INFERRED", vidAlias]] as const) {
+    addGlobalFallback(
+      map,
+      aliasRows
+        .filter((r) => (source === "MANUAL" ? r.source === "MANUAL" : r.source !== "MANUAL"))
+        .map((r) => ({ name: r.alias_norm, rank: r.bd_name, value: { bd: r.bd_name, country: r.country ?? "" } })),
+    );
   }
 
   // 4) 站点交接（按日期升序）
@@ -382,7 +429,7 @@ export function aggregateResults(
   // KPI 阈值：同事×站点 < 阈值的格子不计入 counted_gmv
   for (const agg of staffMap.values()) {
     for (const cell of agg.by_country) {
-      cell.counted = cell.gmv >= KPI_MIN_SITE_USD;
+      cell.counted = KPI_MIN_SITE_USD <= 0 || cell.gmv >= KPI_MIN_SITE_USD;
       if (cell.counted) agg.counted_gmv += cell.gmv;
     }
     agg.by_country.sort((a, b) => b.gmv - a.gmv);

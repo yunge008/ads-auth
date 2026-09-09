@@ -10,7 +10,7 @@
 //   list_exchange_rates {} → { rates }（含禁用行）
 //   save_exchange_rate  { currency, usd_rate, enabled? } → { rate }；usd_rate 语义=1 美元兑多少本币
 //   export_vid_summary  { month } → { rows }：按 (国家,VID,商品ID) 聚合的唯一 VID 汇总（14 列口径），前端生成 xlsx
-//   unmatched_trend     { month } → { months, rows }：以 month 为最近一个月，往前推 12 个月，按 (国家,达人昵称) 聚合 UNMATCHED 桶 GMV（折美元），rows[].by_month 是 月份→GMV
+//   unmatched_trend     { month } → { months, rows }：以 month 为最近一个月，往前推 12 个月，按 (国家,达人昵称) 聚合 UNMATCHED 桶 GMV（折美元），rows[].by_month 是 月份→GMV；桶过滤下推到 DB、只取 3 列（覆盖 12 个月×全部站点，读全列会超时）
 import { corsHeaders } from "../_shared/feishu.ts";
 import { admin, verifyPasscode } from "../_shared/auth.ts";
 import {
@@ -142,6 +142,33 @@ async function fetchAllRows(db: ReturnType<typeof admin>, uploadId: string): Pro
       .range(from, from + PAGE - 1);
     if (error) throw new Error(error.message);
     const rows = (data ?? []) as StoredRow[];
+    out.push(...rows);
+    if (rows.length < PAGE) break;
+    from += PAGE;
+  }
+  return out;
+}
+
+type UnmatchedRow = { tt_account_name: string; gross_revenue: number; currency: string | null };
+
+/**
+ * 只取某批次 UNMATCHED 桶的 3 个字段。
+ * `unmatched_trend` 要扫 12 个月 × 全部站点的批次，走 fetchAllRows（22 列 + 全部桶）会超时，
+ * 这里把桶过滤下推到数据库、列裁到最小。
+ */
+async function fetchUnmatchedRows(db: ReturnType<typeof admin>, uploadId: string): Promise<UnmatchedRow[]> {
+  const out: UnmatchedRow[] = [];
+  let from = 0;
+  for (;;) {
+    const { data, error } = await db
+      .from("ad_upload_rows")
+      .select("tt_account_name, gross_revenue, currency")
+      .eq("upload_id", uploadId)
+      .eq("attr_bucket", "UNMATCHED")
+      .order("row_no", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(error.message);
+    const rows = (data ?? []) as UnmatchedRow[];
     out.push(...rows);
     if (rows.length < PAGE) break;
     from += PAGE;
@@ -569,14 +596,12 @@ Deno.serve(async (req) => {
       type Agg = { country: string; account_name: string; byMonth: Map<string, number> };
       const aggMap = new Map<string, Agg>();
       for (const u of uploads) {
-        const rows = await fetchAllRows(db, u.id);
+        const rows = await fetchUnmatchedRows(db, u.id);
         for (const r of rows) {
-          if (r.attr_bucket !== "UNMATCHED") continue;
-          const input = toInput(u.id, u.country, r);
-          const cur = (input.currency || "USD").toUpperCase();
+          const cur = (r.currency || "USD").toUpperCase();
           const rate = exchangeRates.get(cur) ?? (cur === "USD" ? 1 : 0);
           if (!rate) continue;
-          const name = input.accountName.trim();
+          const name = (r.tt_account_name ?? "").trim();
           if (!name) continue; // 无账号名不纳入
           const key = `${u.country}|${name}`;
           let agg = aggMap.get(key);
@@ -584,7 +609,7 @@ Deno.serve(async (req) => {
             agg = { country: u.country, account_name: name, byMonth: new Map() };
             aggMap.set(key, agg);
           }
-          agg.byMonth.set(u.month, (agg.byMonth.get(u.month) ?? 0) + input.grossRevenue / rate);
+          agg.byMonth.set(u.month, (agg.byMonth.get(u.month) ?? 0) + num(r.gross_revenue) / rate);
         }
       }
       const rowsOut = Array.from(aggMap.values())

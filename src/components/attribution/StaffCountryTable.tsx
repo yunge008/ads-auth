@@ -1,4 +1,5 @@
 // 同事 × 站点 归因表：每个国家一列，数据落在对应单元格；无数据显示「—」，0 显示 0。
+// counted=false 只有在 KPI 阈值启用时才可能出现（阈值为 0 时全部计入，不再置灰）。
 import * as React from "react";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";

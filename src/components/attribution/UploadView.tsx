@@ -298,6 +298,7 @@ export function UploadView({
           <CardTitle className="text-base">上传广告表</CardTitle>
           <p className="text-xs text-muted-foreground">
             支持多选，文件名需为「站点 MAX yyyymm.xlsx」（如 墨西哥 MAX 202607.xlsx）；中英文表头均可。同月多站点上传后可在下方按月合并查看。
+            <br />下表「行数」「商品卡行数」是 Excel 原始行计数；「GMV（原币种）」是本地解析出的总收入合计、仍是文件自身币种，上传归因后才折算美元。
           </p>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -330,8 +331,8 @@ export function UploadView({
                     <TableHead>站点</TableHead>
                     <TableHead>月份</TableHead>
                     <TableHead className="text-right">行数</TableHead>
-                    <TableHead className="text-right">GMV</TableHead>
-                    <TableHead className="text-right">商品卡行</TableHead>
+                    <TableHead className="text-right">GMV（原币种）</TableHead>
+                    <TableHead className="text-right">商品卡行数</TableHead>
                     <TableHead>状态</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -419,7 +420,7 @@ export function UploadView({
                       <TableHead>站点</TableHead>
                       <TableHead>月份</TableHead>
                       <TableHead className="text-right">行数</TableHead>
-                      <TableHead className="text-right">GMV</TableHead>
+                      <TableHead className="text-right">GMV（USD）</TableHead>
                       <TableHead>状态</TableHead>
                       <TableHead>上传人/时间</TableHead>
                       <TableHead className="text-right">操作</TableHead>
@@ -479,14 +480,6 @@ export function UploadView({
           </Tabs>
         </CardContent>
       </Card>
-
-      {viewing && summary ? (
-        <div className="text-sm text-muted-foreground">
-          已生成归因结果：{viewing.kind === "upload" ? viewing.label : `${viewing.month} 全站点合并`} · 请切换到上方「归因结果」标签查看
-        </div>
-      ) : viewing && !summary ? (
-        <div className="text-sm text-muted-foreground text-center py-6">加载中…</div>
-      ) : null}
 
     </div>
   );

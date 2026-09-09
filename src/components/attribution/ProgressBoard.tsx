@@ -51,7 +51,11 @@ export function ProgressBoard({
               </CardHeader>
               <CardContent className="text-sm tabular-nums">
                 {report.period.start} ~ {report.period.end}
-                <div className="text-xs text-muted-foreground mt-0.5">KPI 阈值：同事×站点 ≥ ${fmtUsd(report.kpi_threshold)}</div>
+                {report.kpi_threshold > 0 ? (
+                  <div className="text-xs text-muted-foreground mt-0.5">KPI 阈值：同事×站点 ≥ ${fmtUsd(report.kpi_threshold)}</div>
+                ) : (
+                  <div className="text-xs text-muted-foreground mt-0.5">全量口径：不做站点匹配与 KPI 阈值过滤</div>
+                )}
               </CardContent>
             </Card>
           </>
@@ -61,7 +65,8 @@ export function ProgressBoard({
               <CardTitle className="text-xs font-normal text-muted-foreground">说明</CardTitle>
             </CardHeader>
             <CardContent className="text-xs text-muted-foreground">
-              {report.period.start} ~ {report.period.end} · 仅在职同事 · 单站点归因 GMV 低于 ${fmtUsd(report.kpi_threshold)} 不计入
+              {report.period.start} ~ {report.period.end} · 仅在职同事
+              {report.kpi_threshold > 0 ? ` · 单站点归因 GMV 低于 $${fmtUsd(report.kpi_threshold)} 不计入` : " · 全量展示，不做 KPI 阈值过滤"}
             </CardContent>
           </Card>
         )}

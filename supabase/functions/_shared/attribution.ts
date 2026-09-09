@@ -5,6 +5,10 @@
 //   2. VID 强匹配（staff_vid_map ∪ 授权记录归档，BD/EDITOR）→ 该同事；双登记冲突进审查表
 //   3. 昵称路径（仅 BD）：人工别名 > 建联表归属（保护期解析）> VID 推断别名；再叠加站点交接分段
 //   4. 都不中 → UNMATCHED（无建联达人）
+//
+// 站点匹配：昵称类查表 key 是「站点\u001f归一化名」，但飞书建联表 C 列国家是 BD 手填原文（「美国」「菲律宾」…），
+// 与上传文件名里的站点代码（US / PH…）对不上，会让整条昵称路径全部落空。因此查表统一走 lookupIdentity：
+// 先按「站点+名字」精确匹配，落空再按全局键（站点='' ）兜底，即「站点不匹配也认名字」。
 
 export type Role = "BD" | "EDITOR";
 export type MatchType = "VID" | "ALIAS_MANUAL" | "REGISTRY" | "ALIAS_VID";
@@ -26,6 +30,15 @@ export function normalizeName(s: string | null | undefined): string {
 export function identityKey(country: string | null | undefined, normalizedName: string): string {
   const site = (country ?? "").normalize("NFKC").trim().replace(/\s+/g, " ").toUpperCase();
   return `${site}\u001f${normalizedName}`;
+}
+
+/**
+ * 昵称类查表统一入口：先「站点 + 归一化名」精确匹配，落空再按全局键（站点=''）兜底。
+ * 全局键由 loadAttrContext 预先写入（同名跨站点冲突时取确定性的一条）。
+ */
+export function lookupIdentity<T>(map: Map<string, T>, country: string, normalizedName: string): T | undefined {
+  if (!normalizedName) return undefined;
+  return map.get(identityKey(country, normalizedName)) ?? map.get(identityKey("", normalizedName));
 }
 
 export function splitIdentityKey(key: string): { country: string; normalizedName: string } {
@@ -408,8 +421,8 @@ export function attributeRows(rows: AttrInputRow[], ctx: AttrContext): AttrRunRe
   const newAliases: NewAlias[] = [];
   const newAliasMap = new Map<string, AliasRecord>();
   for (const [scoped, byBd] of votes) {
-    if (ctx.manualAlias.has(scoped)) continue;
     const { country: aliasCountry, normalizedName: norm } = splitIdentityKey(scoped);
+    if (lookupIdentity(ctx.manualAlias, aliasCountry, norm)) continue;
     const bds = Array.from(byBd.keys());
     const display = displayByNorm.get(scoped) ?? norm;
     if (bds.length > 1) {
@@ -427,7 +440,7 @@ export function attributeRows(rows: AttrInputRow[], ctx: AttrContext): AttrRunRe
     }
     const bd = bds[0];
     const vids = Array.from(byBd.get(bd) ?? []);
-    const own = ctx.ownership.get(scoped);
+    const own = lookupIdentity(ctx.ownership, aliasCountry, norm);
     if (own && own.bd !== bd) {
       reviewByKey.set(`ALIAS:${scoped}`, {
         reviewKey: `ALIAS:${scoped}`,
@@ -439,7 +452,7 @@ export function attributeRows(rows: AttrInputRow[], ctx: AttrContext): AttrRunRe
       continue;
     }
     if (own) continue; // 建联表已覆盖同一 BD，无需别名
-    const existing = ctx.vidAlias.get(scoped);
+    const existing = lookupIdentity(ctx.vidAlias, aliasCountry, norm);
     if (existing && existing.bd !== bd) {
       reviewByKey.set(`ALIAS:${scoped}`, {
         reviewKey: `ALIAS:${scoped}`,
@@ -464,13 +477,12 @@ export function attributeRows(rows: AttrInputRow[], ctx: AttrContext): AttrRunRe
       results.push({ key: row.key, bucket: "UNMATCHED", country: row.country });
       continue;
     }
-    const scoped = identityKey(row.country, norm);
     let bd = "";
     let matchType: MatchType | undefined;
     let recCountry = "";
-    const manual = ctx.manualAlias.get(scoped);
-    const own = ctx.ownership.get(scoped);
-    const alias = ctx.vidAlias.get(scoped) ?? newAliasMap.get(scoped);
+    const manual = lookupIdentity(ctx.manualAlias, row.country, norm);
+    const own = lookupIdentity(ctx.ownership, row.country, norm);
+    const alias = lookupIdentity(ctx.vidAlias, row.country, norm) ?? lookupIdentity(newAliasMap, row.country, norm);
     if (manual) {
       bd = manual.bd;
       matchType = "ALIAS_MANUAL";
