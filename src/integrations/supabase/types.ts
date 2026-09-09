@@ -1213,6 +1213,10 @@ export type Database = {
           month: string
         }[]
       }
+      attribution_unmatched_trend_json: {
+        Args: { _months: string[] }
+        Returns: Json
+      }
       get_gmv_cron_secret: { Args: never; Returns: string }
       gmv_attr_monthly_agg: {
         Args: {
