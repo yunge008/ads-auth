@@ -51,8 +51,9 @@ export function UnmatchedTrendTable({ month }: { month: string }) {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="sticky left-0 bg-background">站点</TableHead>
-                <TableHead className="sticky left-14 bg-background">达人名称</TableHead>
+                <TableHead className="sticky left-0 bg-background whitespace-nowrap">站点</TableHead>
+                <TableHead className="sticky left-14 bg-background whitespace-nowrap">达人昵称</TableHead>
+                <TableHead className="text-right whitespace-nowrap">当月 GMV</TableHead>
                 {months.map((m) => <TableHead key={m} className="text-right whitespace-nowrap">{m}</TableHead>)}
               </TableRow>
             </TableHeader>
@@ -61,9 +62,12 @@ export function UnmatchedTrendTable({ month }: { month: string }) {
                 <TableRow key={`${r.country}|${r.account_name}`}>
                   <TableCell className="sticky left-0 bg-background text-xs">{r.country}</TableCell>
                   <TableCell className="sticky left-14 bg-background text-xs max-w-40 truncate" title={r.account_name}>{r.account_name}</TableCell>
+                  <TableCell className="text-right tabular-nums text-xs font-semibold">
+                    {r.by_month[month] == null ? "—" : `$${fmtUsd(r.by_month[month])}`}
+                  </TableCell>
                   {months.map((m) => (
                     <TableCell key={m} className="text-right tabular-nums text-xs">
-                      {r.by_month[m] ? `$${fmtUsd(r.by_month[m])}` : "—"}
+                      {r.by_month[m] == null ? "—" : `$${fmtUsd(r.by_month[m])}`}
                     </TableCell>
                   ))}
                 </TableRow>
@@ -71,6 +75,7 @@ export function UnmatchedTrendTable({ month }: { month: string }) {
             </TableBody>
           </Table>
         </div>
+
       )}
     </div>
   );
