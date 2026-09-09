@@ -93,8 +93,14 @@ export function UploadView({
   }, []);
   React.useEffect(() => { loadHistory(); }, [loadHistory]);
 
-  const historyPageCount = Math.max(1, Math.ceil(history.length / HISTORY_PAGE_SIZE));
-  const pagedHistory = history.slice((historyPage - 1) * HISTORY_PAGE_SIZE, historyPage * HISTORY_PAGE_SIZE);
+  const filteredHistory = React.useMemo(
+    () => (/^\d{4}-\d{2}$/.test(mergeMonth) ? history.filter((u) => u.month === mergeMonth) : history),
+    [history, mergeMonth],
+  );
+  const historyPageCount = Math.max(1, Math.ceil(filteredHistory.length / HISTORY_PAGE_SIZE));
+  const pagedHistory = filteredHistory.slice((historyPage - 1) * HISTORY_PAGE_SIZE, historyPage * HISTORY_PAGE_SIZE);
+  React.useEffect(() => { setHistoryPage(1); }, [mergeMonth]);
+
 
   const onPickFiles = async (list: FileList | null) => {
     if (!list?.length) return;
