@@ -204,3 +204,12 @@ export const fmtPct = (n: number | null | undefined) => (n == null ? "—" : `${
 export function currentMonth(): string {
   return new Date().toISOString().slice(0, 7);
 }
+
+// 上个月（默认查询月份：当月数据通常尚未上传归因）
+export function lastMonth(): string {
+  const d = new Date();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() - 1);
+  return d.toISOString().slice(0, 7);
+}
+
