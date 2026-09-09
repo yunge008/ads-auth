@@ -22,8 +22,8 @@ import {
   fmtUsd,
   uploadApi,
 } from "@/lib/attributionApi";
-import { ProgressBoard } from "./ProgressBoard";
-import { DetailTable } from "./DetailTable";
+import { UploadStatusMatrix as _UploadStatusMatrixKeep } from "./UploadStatusMatrix";
+
 import { UploadStatusMatrix } from "./UploadStatusMatrix";
 
 const BATCH = 1000;
