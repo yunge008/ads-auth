@@ -14,17 +14,14 @@ import { toast } from "sonner";
 import { parseAdExcel, type ParsedFile } from "@/lib/adExcel";
 import {
   type AttributionReport,
-  type DetailRow,
-  type DrillFilter,
   type UploadRec,
   currentMonth,
   exchangeRateApi,
   fmtUsd,
   uploadApi,
 } from "@/lib/attributionApi";
-import { ProgressBoard } from "./ProgressBoard";
-import { DetailTable } from "./DetailTable";
 import { UploadStatusMatrix } from "./UploadStatusMatrix";
+
 
 const BATCH = 1000;
 const HISTORY_PAGE_SIZE = 20;
@@ -57,9 +54,13 @@ type PendingFile = {
   error?: string;
 };
 
-type Viewing = { kind: "upload"; id: string; label: string } | { kind: "merged"; month: string };
+export type Viewing = { kind: "upload"; id: string; label: string } | { kind: "merged"; month: string };
 
-export function UploadView() {
+export function UploadView({
+  onResult,
+}: {
+  onResult?: (r: { viewing: Viewing; summary: AttributionReport } | null) => void;
+}) {
   const [files, setFiles] = React.useState<PendingFile[]>([]);
   const [uploading, setUploading] = React.useState(false);
   const [history, setHistory] = React.useState<UploadRec[]>([]);
@@ -67,11 +68,16 @@ export function UploadView() {
   const [mergeMonth, setMergeMonth] = React.useState(currentMonth());
   const [viewing, setViewing] = React.useState<Viewing | null>(null);
   const [summary, setSummary] = React.useState<AttributionReport | null>(null);
-  const [detail, setDetail] = React.useState<{ rows: DetailRow[]; title: string } | null>(null);
-  const [detailLoading, setDetailLoading] = React.useState(false);
   const [historyPage, setHistoryPage] = React.useState(1);
   const [clearing, setClearing] = React.useState(false);
   const fileInput = React.useRef<HTMLInputElement>(null);
+
+  const onResultRef = React.useRef(onResult);
+  onResultRef.current = onResult;
+  React.useEffect(() => {
+    onResultRef.current?.(viewing && summary ? { viewing, summary } : null);
+  }, [viewing, summary]);
+
 
   const loadHistory = React.useCallback(async () => {
     setHistoryLoading(true);
@@ -171,14 +177,13 @@ export function UploadView() {
         }
       }
       if (lastSummary) {
-        setDetail(null);
         const [month] = Array.from(completedMonths);
         if (completedMonths.size === 1 && month) {
           try {
             const merged = await uploadApi.get({ month, merged: true });
             setViewing({ kind: "merged", month });
             setSummary(merged.summary);
-            toast.success(`已展示 ${month} 全站点合并归因结果`);
+            toast.success(`已展示 ${month} 全站点合并归因结果，请查看「归因结果」标签`);
           } catch (e) {
             setSummary(lastSummary);
             toast.warning(`单文件归因已完成，但合并展示加载失败：${(e as Error).message}`);
@@ -195,7 +200,6 @@ export function UploadView() {
 
   const viewUpload = async (u: UploadRec) => {
     setViewing({ kind: "upload", id: u.id, label: `${u.country} ${u.month}（${u.file_name}）` });
-    setDetail(null);
     setSummary(null);
     try {
       const r = await uploadApi.get({ upload_id: u.id });
@@ -208,7 +212,6 @@ export function UploadView() {
   const viewMerged = async () => {
     if (!/^\d{4}-\d{2}$/.test(mergeMonth)) return;
     setViewing({ kind: "merged", month: mergeMonth });
-    setDetail(null);
     setSummary(null);
     try {
       const r = await uploadApi.get({ month: mergeMonth, merged: true });
@@ -219,22 +222,6 @@ export function UploadView() {
     }
   };
 
-  const drill = async (f: DrillFilter) => {
-    if (!viewing) return;
-    setDetailLoading(true);
-    const title = f.bucket ? (f.bucket === "PRODUCT_CARD" ? "商品卡明细" : "无建联明细") : `${f.staff} 明细`;
-    setDetail({ rows: [], title });
-    try {
-      const r = viewing.kind === "upload"
-        ? await uploadApi.get({ upload_id: viewing.id, detail_for: f })
-        : await uploadApi.get({ month: viewing.month, merged: true, detail_for: f });
-      setDetail({ rows: r.detail_rows ?? [], title });
-    } catch (e) {
-      toast.error(`加载明细失败：${(e as Error).message}`);
-    } finally {
-      setDetailLoading(false);
-    }
-  };
 
   // 卡死判定：状态非「已归因」且创建时间超过 STALE_MINUTES 分钟
   const staleUploads = React.useMemo(
@@ -276,7 +263,7 @@ export function UploadView() {
       if (viewing?.kind === "upload" && viewing.id === u.id) {
         setViewing(null);
         setSummary(null);
-        setDetail(null);
+
       }
       await loadHistory();
     } catch (e) {
@@ -460,20 +447,13 @@ export function UploadView() {
       </Card>
 
       {viewing && summary ? (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">
-              归因结果：{viewing.kind === "upload" ? viewing.label : `${viewing.month} 全站点合并`}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <ProgressBoard report={summary} mode="admin" onDrill={drill} />
-            {detail ? <DetailTable rows={detail.rows} loading={detailLoading} title={detail.title} /> : null}
-          </CardContent>
-        </Card>
+        <div className="text-sm text-muted-foreground">
+          已生成归因结果：{viewing.kind === "upload" ? viewing.label : `${viewing.month} 全站点合并`} · 请切换到上方「归因结果」标签查看
+        </div>
       ) : viewing && !summary ? (
         <div className="text-sm text-muted-foreground text-center py-6">加载中…</div>
       ) : null}
+
     </div>
   );
 }
