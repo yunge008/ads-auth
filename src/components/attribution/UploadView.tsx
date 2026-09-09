@@ -11,6 +11,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FileUp, Trash2, Eye, RotateCw, Layers, ChevronLeft, ChevronRight, Eraser } from "lucide-react";
 import { toast } from "sonner";
+import { MultiSelect } from "@/components/MultiSelect";
 import { parseAdExcel, type ParsedFile } from "@/lib/adExcel";
 import {
   type AttributionReport,
