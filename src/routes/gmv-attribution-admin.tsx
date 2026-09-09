@@ -170,6 +170,72 @@ function MonthlyView() {
   );
 }
 
+function UploadResultView() {
+  const [result, setResult] = React.useState<{ viewing: Viewing; summary: AttributionReport } | null>(null);
+  const [detail, setDetail] = React.useState<{ rows: DetailRow[]; title: string } | null>(null);
+  const [detailLoading, setDetailLoading] = React.useState(false);
+  const [tab, setTab] = React.useState("monthly");
+
+  const onResult = React.useCallback((r: { viewing: Viewing; summary: AttributionReport } | null) => {
+    setResult(r);
+    setDetail(null);
+    if (r) setTab("result");
+  }, []);
+
+  const drill = async (f: DrillFilter) => {
+    if (!result) return;
+    const title = f.bucket ? (f.bucket === "PRODUCT_CARD" ? "商品卡明细" : "无建联明细") : `${f.staff} 明细`;
+    setDetail({ rows: [], title });
+    setDetailLoading(true);
+    try {
+      const v = result.viewing;
+      const r = v.kind === "upload"
+        ? await uploadApi.get({ upload_id: v.id, detail_for: f })
+        : await uploadApi.get({ month: v.month, merged: true, detail_for: f });
+      setDetail({ rows: r.detail_rows ?? [], title });
+    } catch (e) {
+      toast.error(`加载明细失败：${(e as Error).message}`);
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  return (
+    <Tabs value={tab} onValueChange={setTab}>
+      <TabsList>
+        <TabsTrigger value="monthly">月度进度</TabsTrigger>
+        <TabsTrigger value="upload">Excel 上传</TabsTrigger>
+        <TabsTrigger value="review">审查与回写</TabsTrigger>
+        <TabsTrigger value="result">归因结果</TabsTrigger>
+      </TabsList>
+      <TabsContent value="monthly" className="mt-4">
+        <MonthlyView />
+      </TabsContent>
+      <TabsContent value="upload" className="mt-4">
+        <UploadView onResult={onResult} />
+      </TabsContent>
+      <TabsContent value="review" className="mt-4">
+        <ReviewPanel />
+      </TabsContent>
+      <TabsContent value="result" className="mt-4 space-y-4">
+        {result ? (
+          <>
+            <div className="text-sm font-medium">
+              归因结果：{result.viewing.kind === "upload" ? result.viewing.label : `${result.viewing.month} 全站点合并`}
+            </div>
+            <ProgressBoard report={result.summary} mode="admin" onDrill={drill} />
+            {detail ? <DetailTable rows={detail.rows} loading={detailLoading} title={detail.title} /> : null}
+          </>
+        ) : (
+          <div className="text-sm text-muted-foreground text-center py-16">
+            在「Excel 上传」中上传文件或点击历史记录查看，结果会显示在这里
+          </div>
+        )}
+      </TabsContent>
+    </Tabs>
+  );
+}
+
 function GmvAttributionAdminPage() {
   return (
     <div className="space-y-4">
@@ -179,22 +245,8 @@ function GmvAttributionAdminPage() {
           全量口径（含离职）：商品卡 / 剪辑VID / BD-VID / BD-昵称 / BD-模糊 / 无建联 · 一行数据只归一个人
         </p>
       </div>
-      <Tabs defaultValue="monthly">
-        <TabsList>
-          <TabsTrigger value="monthly">月度进度</TabsTrigger>
-          <TabsTrigger value="upload">Excel 上传</TabsTrigger>
-          <TabsTrigger value="review">审查与回写</TabsTrigger>
-        </TabsList>
-        <TabsContent value="monthly" className="mt-4">
-          <MonthlyView />
-        </TabsContent>
-        <TabsContent value="upload" className="mt-4">
-          <UploadView />
-        </TabsContent>
-        <TabsContent value="review" className="mt-4">
-          <ReviewPanel />
-        </TabsContent>
-      </Tabs>
+      <UploadResultView />
     </div>
   );
 }
+
