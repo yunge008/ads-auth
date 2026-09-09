@@ -14,17 +14,14 @@ import { toast } from "sonner";
 import { parseAdExcel, type ParsedFile } from "@/lib/adExcel";
 import {
   type AttributionReport,
-  type DetailRow,
-  type DrillFilter,
   type UploadRec,
   currentMonth,
   exchangeRateApi,
   fmtUsd,
   uploadApi,
 } from "@/lib/attributionApi";
-import { UploadStatusMatrix as _UploadStatusMatrixKeep } from "./UploadStatusMatrix";
-
 import { UploadStatusMatrix } from "./UploadStatusMatrix";
+
 
 const BATCH = 1000;
 const HISTORY_PAGE_SIZE = 20;
