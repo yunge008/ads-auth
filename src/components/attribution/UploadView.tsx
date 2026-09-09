@@ -9,7 +9,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { FileUp, Trash2, Eye, RotateCw, Layers, ChevronLeft, ChevronRight } from "lucide-react";
+import { FileUp, Trash2, Eye, RotateCw, Layers, ChevronLeft, ChevronRight, Eraser } from "lucide-react";
 import { toast } from "sonner";
 import { parseAdExcel, type ParsedFile } from "@/lib/adExcel";
 import {
@@ -28,6 +28,7 @@ import { UploadStatusMatrix } from "./UploadStatusMatrix";
 
 const BATCH = 1000;
 const HISTORY_PAGE_SIZE = 20;
+const STALE_MINUTES = 15;
 
 /** 逐个币种要求用户填「1 美元 = 多少本币」并落库；用户取消或输入无效返回 false。 */
 async function promptMissingRates(missing: string[]): Promise<boolean> {
@@ -69,6 +70,7 @@ export function UploadView() {
   const [detail, setDetail] = React.useState<{ rows: DetailRow[]; title: string } | null>(null);
   const [detailLoading, setDetailLoading] = React.useState(false);
   const [historyPage, setHistoryPage] = React.useState(1);
+  const [clearing, setClearing] = React.useState(false);
   const fileInput = React.useRef<HTMLInputElement>(null);
 
   const loadHistory = React.useCallback(async () => {
@@ -232,6 +234,38 @@ export function UploadView() {
     } finally {
       setDetailLoading(false);
     }
+  };
+
+  // 卡死判定：状态非「已归因」且创建时间超过 STALE_MINUTES 分钟
+  const staleUploads = React.useMemo(
+    () =>
+      history.filter(
+        (u) => u.status !== "READY" && Date.now() - new Date(u.created_at).getTime() > STALE_MINUTES * 60_000,
+      ),
+    [history],
+  );
+
+  const clearStale = async () => {
+    if (!staleUploads.length) return;
+    const list = staleUploads.slice(0, 10).map((u) => `· ${u.country} ${u.month} ${u.file_name}`).join("\n");
+    if (!window.confirm(
+      `将清除 ${staleUploads.length} 条卡住/失败的上传记录（超过 ${STALE_MINUTES} 分钟仍未完成），清除后可重新上传：\n\n${list}${staleUploads.length > 10 ? "\n…" : ""}`,
+    )) return;
+    setClearing(true);
+    let ok = 0;
+    let fail = 0;
+    for (const u of staleUploads) {
+      try {
+        await uploadApi.remove(u.id);
+        ok++;
+      } catch {
+        fail++;
+      }
+    }
+    setClearing(false);
+    if (ok) toast.success(`已清除 ${ok} 条卡住的上传记录`);
+    if (fail) toast.error(`${fail} 条清除失败，请重试`);
+    await loadHistory();
   };
 
   const removeUpload = async (u: UploadRec) => {
