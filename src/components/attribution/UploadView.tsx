@@ -15,7 +15,7 @@ import { parseAdExcel, type ParsedFile } from "@/lib/adExcel";
 import {
   type AttributionReport,
   type UploadRec,
-  currentMonth,
+  lastMonth,
   exchangeRateApi,
   fmtUsd,
   uploadApi,
@@ -65,7 +65,7 @@ export function UploadView({
   const [uploading, setUploading] = React.useState(false);
   const [history, setHistory] = React.useState<UploadRec[]>([]);
   const [historyLoading, setHistoryLoading] = React.useState(false);
-  const [mergeMonth, setMergeMonth] = React.useState(currentMonth());
+  const [mergeMonth, setMergeMonth] = React.useState(lastMonth());
   const [viewing, setViewing] = React.useState<Viewing | null>(null);
   const [summary, setSummary] = React.useState<AttributionReport | null>(null);
   const [historyPage, setHistoryPage] = React.useState(1);
