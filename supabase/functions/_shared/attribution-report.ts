@@ -398,9 +398,8 @@ export function aggregateResults(
   }
 
   const staff = Array.from(staffMap.values()).sort((a, b) => b.gmv - a.gmv);
-  const top = Array.from(unmatchedTop.values())
-    .sort((a, b) => b.gmv - a.gmv)
-    .slice(0, 50);
+  const top = Array.from(unmatchedTop.values()).sort((a, b) => b.gmv - a.gmv);
+
 
   return {
     period: opts.period,
