@@ -21,6 +21,17 @@ const STATUS_CLASS: Record<CellStatus, string> = {
   EMPTY: "text-muted-foreground",
 };
 
+// 固定站点列顺序：业务要求始终按此顺序显示。
+const COUNTRY_ORDER = [
+  "PH", "TH", "VN", "MY", "SG", "PHL", "PH2",
+  "MX-AR", "MX-NE", "MX-SJ", "US", "JP",
+];
+
+function countryRank(c: string): number {
+  const idx = COUNTRY_ORDER.indexOf(c);
+  return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
+}
+
 function cellStatus(rows: UploadRec[]): CellStatus {
   if (!rows.length) return "EMPTY";
   const readyCount = rows.filter((r) => r.status === "READY").length;
@@ -43,8 +54,12 @@ export function UploadStatusMatrix({ history }: { history: UploadRec[] }) {
       arr.push(u);
       map.set(key, arr);
     }
+    const known = COUNTRY_ORDER.filter((c) => countrySet.has(c));
+    const others = Array.from(countrySet)
+      .filter((c) => !COUNTRY_ORDER.includes(c))
+      .sort();
     return {
-      countries: Array.from(countrySet).sort(),
+      countries: [...known, ...others],
       months: Array.from(monthSet).sort((a, b) => b.localeCompare(a)),
       byKey: map,
     };

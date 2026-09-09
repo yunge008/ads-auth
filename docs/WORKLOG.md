@@ -61,3 +61,4 @@
 2026-09-09 | lovable | 按用户要求重新部署 Edge Function attribution-upload；版本号改为 0909.006 | supabase/functions/attribution-upload/index.ts, src/lib/version.ts, docs/{PLAN,WORKLOG}.md
 2026-09-09 | lovable | 按用户要求重新部署 Edge Function attribution-upload、attribution-feishu；版本号改为 0909.008 | supabase/functions/{attribution-upload,attribution-feishu}/index.ts, src/lib/version.ts, docs/{PLAN,WORKLOG}.md
 2026-09-09 | lovable | 上传历史加入站点多选下拉框：月份与站点可组合筛选历史列表；解释「按月合并查看」与眼睛图标含义 | src/components/attribution/UploadView.tsx, src/lib/version.ts
+2026-09-09 | lovable | 上传状态矩阵固定站点列顺序：PH / TH / VN / MY / SG / PHL / PH2 / MX-AR / MX-NE / MX-SJ / US / JP，未知站点排在末尾 | src/components/attribution/UploadStatusMatrix.tsx, src/lib/version.ts
