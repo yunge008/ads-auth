@@ -365,6 +365,16 @@ export function UploadView() {
             <Button size="sm" variant="outline" onClick={loadHistory} disabled={historyLoading}>
               <RotateCw className={`h-4 w-4 mr-1.5 ${historyLoading ? "animate-spin" : ""}`} />刷新
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-destructive"
+              onClick={clearStale}
+              disabled={clearing || historyLoading || !staleUploads.length}
+            >
+              <Eraser className={`h-4 w-4 mr-1.5 ${clearing ? "animate-pulse" : ""}`} />
+              一键清除卡住记录{staleUploads.length ? `（${staleUploads.length}）` : ""}
+            </Button>
             <div className="flex items-end gap-1.5">
               <Input type="month" value={mergeMonth} onChange={(e) => setMergeMonth(e.target.value)} className="h-8 w-40" />
               <Button size="sm" variant="outline" onClick={viewMerged}>
