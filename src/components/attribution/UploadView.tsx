@@ -352,7 +352,7 @@ export function UploadView({
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">
-            上传历史 <span className="text-xs font-normal text-muted-foreground ml-1">共 {history.length} 条</span>
+            上传历史 <span className="text-xs font-normal text-muted-foreground ml-1">共 {filteredHistory.length} 条</span>
           </CardTitle>
           <div className="flex flex-wrap items-end gap-2">
             <Button size="sm" variant="outline" onClick={loadHistory} disabled={historyLoading}>
@@ -403,7 +403,7 @@ export function UploadView({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {history.length === 0 ? (
+                    {filteredHistory.length === 0 ? (
                       <TableRow><TableCell colSpan={8} className="h-16 text-center text-sm text-muted-foreground">暂无上传</TableCell></TableRow>
                     ) : pagedHistory.map((u) => (
                       <TableRow key={u.id}>
@@ -436,7 +436,7 @@ export function UploadView({
               {history.length > HISTORY_PAGE_SIZE && (
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   <div>
-                    第 {(historyPage - 1) * HISTORY_PAGE_SIZE + 1}-{Math.min(historyPage * HISTORY_PAGE_SIZE, history.length)} / 共 {history.length} 条
+                    第 {(historyPage - 1) * HISTORY_PAGE_SIZE + 1}-{Math.min(historyPage * HISTORY_PAGE_SIZE, filteredHistory.length)} / 共 {filteredHistory.length} 条
                   </div>
                   <div className="flex items-center gap-2">
                     <Button size="sm" variant="outline" className="h-7" disabled={historyPage <= 1} onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}>
