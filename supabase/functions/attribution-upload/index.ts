@@ -607,12 +607,12 @@ Deno.serve(async (req) => {
         }
       }
       type TrendRow = { country: string; account_name: string; month: string; gmv_usd: number };
-      const { data, error } = await db.rpc("attribution_unmatched_trend", { _months: months });
+      const { data, error } = await db.rpc("attribution_unmatched_trend_json", { _months: months });
       if (error) throw new Error(error.message);
 
       type Agg = { country: string; account_name: string; byMonth: Map<string, number> };
       const aggMap = new Map<string, Agg>();
-      for (const r of (data ?? []) as TrendRow[]) {
+      for (const r of (Array.isArray(data) ? data : []) as TrendRow[]) {
         const key = `${r.country}|${r.account_name}`;
         let agg = aggMap.get(key);
         if (!agg) {
