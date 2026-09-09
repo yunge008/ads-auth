@@ -15,7 +15,7 @@ import { parseAdExcel, type ParsedFile } from "@/lib/adExcel";
 import {
   type AttributionReport,
   type UploadRec,
-  currentMonth,
+  lastMonth,
   exchangeRateApi,
   fmtUsd,
   uploadApi,
@@ -65,7 +65,7 @@ export function UploadView({
   const [uploading, setUploading] = React.useState(false);
   const [history, setHistory] = React.useState<UploadRec[]>([]);
   const [historyLoading, setHistoryLoading] = React.useState(false);
-  const [mergeMonth, setMergeMonth] = React.useState(currentMonth());
+  const [mergeMonth, setMergeMonth] = React.useState(lastMonth());
   const [viewing, setViewing] = React.useState<Viewing | null>(null);
   const [summary, setSummary] = React.useState<AttributionReport | null>(null);
   const [historyPage, setHistoryPage] = React.useState(1);
@@ -93,8 +93,14 @@ export function UploadView({
   }, []);
   React.useEffect(() => { loadHistory(); }, [loadHistory]);
 
-  const historyPageCount = Math.max(1, Math.ceil(history.length / HISTORY_PAGE_SIZE));
-  const pagedHistory = history.slice((historyPage - 1) * HISTORY_PAGE_SIZE, historyPage * HISTORY_PAGE_SIZE);
+  const filteredHistory = React.useMemo(
+    () => (/^\d{4}-\d{2}$/.test(mergeMonth) ? history.filter((u) => u.month === mergeMonth) : history),
+    [history, mergeMonth],
+  );
+  const historyPageCount = Math.max(1, Math.ceil(filteredHistory.length / HISTORY_PAGE_SIZE));
+  const pagedHistory = filteredHistory.slice((historyPage - 1) * HISTORY_PAGE_SIZE, historyPage * HISTORY_PAGE_SIZE);
+  React.useEffect(() => { setHistoryPage(1); }, [mergeMonth]);
+
 
   const onPickFiles = async (list: FileList | null) => {
     if (!list?.length) return;
@@ -346,7 +352,7 @@ export function UploadView({
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">
-            上传历史 <span className="text-xs font-normal text-muted-foreground ml-1">共 {history.length} 条</span>
+            上传历史 <span className="text-xs font-normal text-muted-foreground ml-1">共 {filteredHistory.length} 条</span>
           </CardTitle>
           <div className="flex flex-wrap items-end gap-2">
             <Button size="sm" variant="outline" onClick={loadHistory} disabled={historyLoading}>
@@ -363,11 +369,16 @@ export function UploadView({
               一键清除卡住记录{staleUploads.length ? `（${staleUploads.length}）` : ""}
             </Button>
             <div className="flex items-end gap-1.5">
-              <Input type="month" value={mergeMonth} onChange={(e) => setMergeMonth(e.target.value)} className="h-8 w-40" />
-              <Button size="sm" variant="outline" onClick={viewMerged}>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-muted-foreground">筛选月份</span>
+                <Input type="month" value={mergeMonth} onChange={(e) => setMergeMonth(e.target.value)} className="h-8 w-40" />
+              </div>
+              <Button size="sm" variant="ghost" onClick={() => setMergeMonth("")}>显示全部</Button>
+              <Button size="sm" variant="outline" onClick={viewMerged} disabled={!/^\d{4}-\d{2}$/.test(mergeMonth)}>
                 <Layers className="h-4 w-4 mr-1.5" />按月合并查看
               </Button>
             </div>
+
           </div>
         </CardHeader>
         <CardContent>
@@ -392,7 +403,7 @@ export function UploadView({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {history.length === 0 ? (
+                    {filteredHistory.length === 0 ? (
                       <TableRow><TableCell colSpan={8} className="h-16 text-center text-sm text-muted-foreground">暂无上传</TableCell></TableRow>
                     ) : pagedHistory.map((u) => (
                       <TableRow key={u.id}>
@@ -425,7 +436,7 @@ export function UploadView({
               {history.length > HISTORY_PAGE_SIZE && (
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   <div>
-                    第 {(historyPage - 1) * HISTORY_PAGE_SIZE + 1}-{Math.min(historyPage * HISTORY_PAGE_SIZE, history.length)} / 共 {history.length} 条
+                    第 {(historyPage - 1) * HISTORY_PAGE_SIZE + 1}-{Math.min(historyPage * HISTORY_PAGE_SIZE, filteredHistory.length)} / 共 {filteredHistory.length} 条
                   </div>
                   <div className="flex items-center gap-2">
                     <Button size="sm" variant="outline" className="h-7" disabled={historyPage <= 1} onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}>
