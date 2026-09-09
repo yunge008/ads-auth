@@ -606,33 +606,20 @@ Deno.serve(async (req) => {
           months.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`);
         }
       }
-      const { data: ups, error } = await db
-        .from("ad_uploads")
-        .select("id, country, month")
-        .in("month", months)
-        .eq("status", "READY");
+      type TrendRow = { country: string; account_name: string; month: string; gmv_usd: number };
+      const { data, error } = await db.rpc("attribution_unmatched_trend_json", { _months: months });
       if (error) throw new Error(error.message);
-      const uploads = (ups ?? []) as { id: string; country: string; month: string }[];
-      const exchangeRates = await loadExchangeRates(db);
 
       type Agg = { country: string; account_name: string; byMonth: Map<string, number> };
       const aggMap = new Map<string, Agg>();
-      for (const u of uploads) {
-        const rows = await fetchUnmatchedRows(db, u.id);
-        for (const r of rows) {
-          const cur = (r.currency || "USD").toUpperCase();
-          const rate = exchangeRates.get(cur) ?? (cur === "USD" ? 1 : 0);
-          if (!rate) continue;
-          const name = (r.tt_account_name ?? "").trim();
-          if (!name) continue; // 无账号名不纳入
-          const key = `${u.country}|${name}`;
-          let agg = aggMap.get(key);
-          if (!agg) {
-            agg = { country: u.country, account_name: name, byMonth: new Map() };
-            aggMap.set(key, agg);
-          }
-          agg.byMonth.set(u.month, (agg.byMonth.get(u.month) ?? 0) + num(r.gross_revenue) / rate);
+      for (const r of (Array.isArray(data) ? data : []) as TrendRow[]) {
+        const key = `${r.country}|${r.account_name}`;
+        let agg = aggMap.get(key);
+        if (!agg) {
+          agg = { country: r.country, account_name: r.account_name, byMonth: new Map() };
+          aggMap.set(key, agg);
         }
+        agg.byMonth.set(r.month, num(r.gmv_usd));
       }
       const rowsOut = Array.from(aggMap.values())
         .map((a) => {

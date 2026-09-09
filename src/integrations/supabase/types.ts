@@ -1204,6 +1204,19 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      attribution_unmatched_trend: {
+        Args: { _months: string[] }
+        Returns: {
+          account_name: string
+          country: string
+          gmv_usd: number
+          month: string
+        }[]
+      }
+      attribution_unmatched_trend_json: {
+        Args: { _months: string[] }
+        Returns: Json
+      }
       get_gmv_cron_secret: { Args: never; Returns: string }
       gmv_attr_monthly_agg: {
         Args: {
