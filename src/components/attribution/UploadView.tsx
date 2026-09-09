@@ -11,6 +11,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FileUp, Trash2, Eye, RotateCw, Layers, ChevronLeft, ChevronRight, Eraser } from "lucide-react";
 import { toast } from "sonner";
+import { MultiSelect } from "@/components/MultiSelect";
 import { parseAdExcel, type ParsedFile } from "@/lib/adExcel";
 import {
   type AttributionReport,
@@ -66,6 +67,7 @@ export function UploadView({
   const [history, setHistory] = React.useState<UploadRec[]>([]);
   const [historyLoading, setHistoryLoading] = React.useState(false);
   const [mergeMonth, setMergeMonth] = React.useState(lastMonth());
+  const [selectedCountries, setSelectedCountries] = React.useState<string[]>([]);
   const [viewing, setViewing] = React.useState<Viewing | null>(null);
   const [summary, setSummary] = React.useState<AttributionReport | null>(null);
   const [historyPage, setHistoryPage] = React.useState(1);
@@ -93,13 +95,25 @@ export function UploadView({
   }, []);
   React.useEffect(() => { loadHistory(); }, [loadHistory]);
 
-  const filteredHistory = React.useMemo(
-    () => (/^\d{4}-\d{2}$/.test(mergeMonth) ? history.filter((u) => u.month === mergeMonth) : history),
-    [history, mergeMonth],
-  );
+  const countryOptions = React.useMemo(() => {
+    const set = new Set<string>();
+    history.forEach((u) => { if (u.country) set.add(u.country); });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-CN"));
+  }, [history]);
+  const countryCounts = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+    history.forEach((u) => { if (u.country) counts[u.country] = (counts[u.country] || 0) + 1; });
+    return counts;
+  }, [history]);
+  const filteredHistory = React.useMemo(() => {
+    let list = history;
+    if (/^\d{4}-\d{2}$/.test(mergeMonth)) list = list.filter((u) => u.month === mergeMonth);
+    if (selectedCountries.length) list = list.filter((u) => selectedCountries.includes(u.country));
+    return list;
+  }, [history, mergeMonth, selectedCountries]);
   const historyPageCount = Math.max(1, Math.ceil(filteredHistory.length / HISTORY_PAGE_SIZE));
   const pagedHistory = filteredHistory.slice((historyPage - 1) * HISTORY_PAGE_SIZE, historyPage * HISTORY_PAGE_SIZE);
-  React.useEffect(() => { setHistoryPage(1); }, [mergeMonth]);
+  React.useEffect(() => { setHistoryPage(1); }, [mergeMonth, selectedCountries]);
 
 
   const onPickFiles = async (list: FileList | null) => {
@@ -368,12 +382,21 @@ export function UploadView({
               <Eraser className={`h-4 w-4 mr-1.5 ${clearing ? "animate-pulse" : ""}`} />
               一键清除卡住记录{staleUploads.length ? `（${staleUploads.length}）` : ""}
             </Button>
-            <div className="flex items-end gap-1.5">
+            <div className="flex flex-wrap items-end gap-1.5">
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-muted-foreground">筛选月份</span>
                 <Input type="month" value={mergeMonth} onChange={(e) => setMergeMonth(e.target.value)} className="h-8 w-40" />
               </div>
-              <Button size="sm" variant="ghost" onClick={() => setMergeMonth("")}>显示全部</Button>
+              <MultiSelect
+                label="站点"
+                placeholder="全部站点"
+                options={countryOptions}
+                value={selectedCountries}
+                onChange={setSelectedCountries}
+                counts={countryCounts}
+                className="min-w-[150px]"
+              />
+              <Button size="sm" variant="ghost" onClick={() => { setMergeMonth(""); setSelectedCountries([]); }}>显示全部</Button>
               <Button size="sm" variant="outline" onClick={viewMerged} disabled={!/^\d{4}-\d{2}$/.test(mergeMonth)}>
                 <Layers className="h-4 w-4 mr-1.5" />按月合并查看
               </Button>
