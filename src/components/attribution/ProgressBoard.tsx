@@ -1,78 +1,15 @@
-// 归因进度板：每人 GMV vs 目标进度条 + 站点明细 + （管理视图）商品卡/无建联桶与口径拆分。
+// 归因进度板：同事×站点表格 + （管理视图）商品卡/无建联桶与口径拆分。
 import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { StaffCountryTable } from "./StaffCountryTable";
+import { UnmatchedTrendTable } from "./UnmatchedTrendTable";
 import {
   type AttributionReport,
   type DrillFilter,
-  type StaffAgg,
-  MATCH_LABELS,
-  fmtPct,
   fmtUsd,
 } from "@/lib/attributionApi";
 
-function StaffRow({
-  s,
-  mode,
-  onDrill,
-}: {
-  s: StaffAgg;
-  mode: "admin" | "user";
-  onDrill?: (f: DrillFilter) => void;
-}) {
-  const pct = s.progress != null ? Math.min(100, Math.round(s.progress * 100)) : null;
-  return (
-    <div className="border rounded-md p-3 space-y-2">
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className={`font-medium ${onDrill ? "hover:underline" : "cursor-default"}`}
-            onClick={() => onDrill?.({ staff: s.staff_name, role: s.role })}
-          >
-            {s.staff_name}
-          </button>
-          <Badge variant={s.role === "BD" ? "default" : "secondary"}>{s.role === "BD" ? "BD" : "剪辑"}</Badge>
-          {mode === "admin" && !s.active ? <Badge variant="outline">已离职</Badge> : null}
-        </div>
-        <div className="text-sm tabular-nums">
-          <span className="font-semibold">${fmtUsd(mode === "user" ? s.gmv : s.counted_gmv)}</span>
-          {s.target_usd ? <span className="text-muted-foreground"> / 目标 ${fmtUsd(s.target_usd)}</span> : null}
-          {s.progress != null ? <span className="ml-2 text-muted-foreground">{fmtPct(s.progress)}</span> : null}
-          {mode === "admin" && s.gmv !== s.counted_gmv ? (
-            <span className="ml-2 text-xs text-muted-foreground">（全量 ${fmtUsd(s.gmv)}）</span>
-          ) : null}
-        </div>
-      </div>
-      {pct != null ? <Progress value={pct} /> : null}
-      <div className="flex flex-wrap gap-1.5">
-        {s.by_country.map((c) => (
-          <span
-            key={c.country}
-            title={c.counted ? undefined : "低于 KPI 阈值，不计入进度"}
-            className={`text-xs rounded px-1.5 py-0.5 border tabular-nums ${
-              c.counted ? "bg-muted/60" : "opacity-50 line-through"
-            }`}
-          >
-            {c.country} ${fmtUsd(c.gmv)}
-          </span>
-        ))}
-      </div>
-      {mode === "admin" ? (
-        <div className="flex flex-wrap gap-2 text-xs text-muted-foreground tabular-nums">
-          {(Object.keys(MATCH_LABELS) as Array<keyof typeof MATCH_LABELS>)
-            .filter((k) => (s.by_match[k] ?? 0) > 0)
-            .map((k) => (
-              <span key={k}>
-                {MATCH_LABELS[k]} ${fmtUsd(s.by_match[k] ?? 0)}
-              </span>
-            ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 export function ProgressBoard({
   report,
