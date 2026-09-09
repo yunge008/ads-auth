@@ -1,0 +1,2 @@
+CREATE INDEX IF NOT EXISTS ad_upload_rows_upload_rowno_idx ON public.ad_upload_rows(upload_id, row_no);
+CREATE INDEX IF NOT EXISTS ad_upload_rows_upload_bucket_rowno_idx ON public.ad_upload_rows(upload_id, attr_bucket, row_no);
