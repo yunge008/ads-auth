@@ -12,7 +12,7 @@
 //   list_exchange_rates {} → { rates }（含禁用行）
 //   save_exchange_rate  { currency, usd_rate, enabled? } → { rate }；usd_rate 语义=1 美元兑多少本币
 //   export_vid_summary  { month } → { rows }：按 (国家,VID,商品ID) 聚合的唯一 VID 汇总（14 列口径），前端生成 xlsx
-//   unmatched_trend     { month } → { months, rows }：以 month 为最近一个月，往前推 12 个月，按 (国家,达人昵称) 聚合 UNMATCHED 桶 GMV（折美元），rows[].by_month 是 月份→GMV；桶过滤下推到 DB、只取 3 列（覆盖 12 个月×全部站点，读全列会超时）
+//   unmatched_trend     { month } → { months, rows }：以 month 为最近一个月，往前推 12 个月，逐月在 DB 内按 (国家,达人昵称) 聚合 UNMATCHED 桶 GMV（折美元），再合并 rows[].by_month；避免 12 个月单条 SQL 撞 statement timeout
 import { corsHeaders } from "../_shared/feishu.ts";
 import { admin, verifyPasscode } from "../_shared/auth.ts";
 import {
@@ -607,19 +607,21 @@ Deno.serve(async (req) => {
         }
       }
       type TrendRow = { country: string; account_name: string; month: string; gmv_usd: number };
-      const { data, error } = await db.rpc("attribution_unmatched_trend_json", { _months: months });
-      if (error) throw new Error(error.message);
-
       type Agg = { country: string; account_name: string; byMonth: Map<string, number> };
       const aggMap = new Map<string, Agg>();
-      for (const r of (Array.isArray(data) ? data : []) as TrendRow[]) {
-        const key = `${r.country}|${r.account_name}`;
-        let agg = aggMap.get(key);
-        if (!agg) {
-          agg = { country: r.country, account_name: r.account_name, byMonth: new Map() };
-          aggMap.set(key, agg);
+      // 12 个月一次性聚合在大月份会逼近数据库的语句超时；逐月执行可稳定利用 upload_id 部分索引。
+      for (const trendMonth of months) {
+        const { data, error } = await db.rpc("attribution_unmatched_trend_json", { _months: [trendMonth] });
+        if (error) throw new Error(`${trendMonth}: ${error.message}`);
+        for (const r of (Array.isArray(data) ? data : []) as TrendRow[]) {
+          const key = `${r.country}|${r.account_name}`;
+          let agg = aggMap.get(key);
+          if (!agg) {
+            agg = { country: r.country, account_name: r.account_name, byMonth: new Map() };
+            aggMap.set(key, agg);
+          }
+          agg.byMonth.set(r.month, num(r.gmv_usd));
         }
-        agg.byMonth.set(r.month, num(r.gmv_usd));
       }
       const rowsOut = Array.from(aggMap.values())
         .map((a) => {
