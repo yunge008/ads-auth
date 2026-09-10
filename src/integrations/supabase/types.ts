@@ -1419,6 +1419,16 @@ export type Database = {
           raw_rows: number
         }[]
       }
+      attribution_finalize_upload: {
+        Args: { _upload_id: string }
+        Returns: {
+          agg_rows: number
+          missing_currencies: string[]
+          raw_rows: number
+          total_cost_usd: number
+          total_revenue_usd: number
+        }[]
+      }
       attribution_runs_prune: {
         Args: { _keep?: number; _month: string }
         Returns: number
