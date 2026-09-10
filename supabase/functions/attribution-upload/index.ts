@@ -642,9 +642,10 @@ Deno.serve(async (req) => {
     if (action === "delete") {
       // ad_upload_rows.upload_id 是 ON DELETE CASCADE，删批次会连行一起删
       if (body.all === true) {
-        const { count, error } = await db.from("ad_uploads").delete({ count: "exact" }).not("id", "is", null);
+        // 全量清空走 TRUNCATE RPC：级联 DELETE 几十万行会触发 statement timeout
+        const { data, error } = await db.rpc("attribution_uploads_delete_all");
         if (error) throw new Error(error.message);
-        return json({ deleted: count ?? 0 });
+        return json({ deleted: typeof data === "number" ? data : 0 });
       }
       const ids = Array.isArray(body.upload_ids)
         ? (body.upload_ids as unknown[]).map(str).filter(Boolean)
