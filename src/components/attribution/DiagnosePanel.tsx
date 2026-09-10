@@ -41,6 +41,7 @@ export function DiagnosePanel({ month }: { month: string }) {
         </div>
         <p className="text-xs text-muted-foreground">
           按归因瀑布逐层统计：商品卡 → VID 强匹配 → 昵称（站点必须一致）→ 无建联。哪一层命中为 0，问题就在哪一层。
+          统计用的是当下的飞书登记数据，和报表口径完全一致。
         </p>
       </CardHeader>
       {data ? (
@@ -92,7 +93,8 @@ export function DiagnosePanel({ month }: { month: string }) {
                 <TableRow>
                   <TableHead>批次</TableHead>
                   <TableHead>站点</TableHead>
-                  <TableHead className="text-right">扫描行数</TableHead>
+                  <TableHead className="text-right">原始行数</TableHead>
+                  <TableHead className="text-right">归并组数</TableHead>
                   <TableHead className="text-right">商品卡</TableHead>
                   <TableHead className="text-right">带VID行 / VID命中</TableHead>
                   <TableHead className="text-right">昵称·同站点命中</TableHead>
@@ -106,10 +108,10 @@ export function DiagnosePanel({ month }: { month: string }) {
                   <TableRow key={i}>
                     <TableCell className="text-xs max-w-56 truncate" title={u.file_name}>
                       {u.file_name}
-                      {u.sampled ? <Badge variant="secondary" className="ml-1">抽样</Badge> : null}
                     </TableCell>
                     <TableCell className="text-xs">{u.country}</TableCell>
                     <TableCell className="text-right tabular-nums">{n(u.rows)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{n(u.agg_rows)}</TableCell>
                     <TableCell className="text-right tabular-nums">{n(u.product_card)}</TableCell>
                     <TableCell className="text-right tabular-nums">
                       {n(u.vid_rows)} / <span className={u.vid_hit ? "" : "text-destructive"}>{n(u.vid_hit)}</span>
@@ -125,6 +127,7 @@ export function DiagnosePanel({ month }: { month: string }) {
                 <TableRow className="font-medium">
                   <TableCell colSpan={2}>合计</TableCell>
                   <TableCell className="text-right tabular-nums">{n(data.totals.rows)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{n(data.totals.agg_rows)}</TableCell>
                   <TableCell className="text-right tabular-nums">{n(data.totals.product_card)}</TableCell>
                   <TableCell className="text-right tabular-nums">{n(data.totals.vid_rows)} / {n(data.totals.vid_hit)}</TableCell>
                   <TableCell className="text-right tabular-nums">{n(data.totals.name_hit_same_site)}</TableCell>

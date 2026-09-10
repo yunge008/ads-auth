@@ -33,16 +33,26 @@ export async function listSheets(token: string, spreadsheetToken: string) {
   return json.data?.sheets as Array<{ sheet_id: string; title: string }>;
 }
 
+/**
+ * 单元格取值方式。默认 ToString = **所有单元格一律按文本返回**。
+ * 这不是可选项：飞书默认会把「看起来是数字」的单元格按 JSON number 返回，而 JS number 只有 2^53 精度，
+ * 19 位的 TikTok VID（≈7.1e18）、商品 ID、授权码这类纯数字 ID 会被静默改写成末尾补 0 的错值，
+ * 字符串形态照样是「19 位数字」、正则照样通过，但值已经错了，归因时永远匹配不上。
+ * 所有读取一律走 ToString，数字/日期列由 cellText / parseDate 从文本还原。
+ */
+export type ValueRenderOption = "ToString" | "FormattedValue" | "UnformattedValue";
+
 export async function readRange(
   token: string,
   spreadsheetToken: string,
   range: string, // e.g. "<sheet_id>!A2:G"
   chunkRows?: number, // rows per request; keep rows*cols under Feishu's ~5000-cell cap
+  valueRenderOption: ValueRenderOption = "ToString",
 ) {
   // Feishu values v2 caps a single response at ~5000 cells.
   // For open-ended ranges (e.g. "A2:G") we paginate by row chunks until empty.
   const m = range.match(/^(.+)!([A-Z]+)(\d+):([A-Z]+)(\d*)$/);
-  if (!m) return await readRangeOnce(token, spreadsheetToken, range);
+  if (!m) return await readRangeOnce(token, spreadsheetToken, range, valueRenderOption);
   const [, sid, colStart, rowStartStr, colEnd, rowEndStr] = m;
   const startRow = parseInt(rowStartStr, 10);
   const endRow = rowEndStr ? parseInt(rowEndStr, 10) : 0; // 0 = open-ended
@@ -54,7 +64,7 @@ export async function readRange(
   while (true) {
     const stop = endRow ? Math.min(cur + CHUNK - 1, endRow) : cur + CHUNK - 1;
     const r = `${sid}!${colStart}${cur}:${colEnd}${stop}`;
-    const chunk = await readRangeOnce(token, spreadsheetToken, r);
+    const chunk = await readRangeOnce(token, spreadsheetToken, r, valueRenderOption);
     // Keep all rows (including internal blanks) so absolute row indices line up.
     out.push(...chunk);
     const hasContent = chunk.some((row) => (row ?? []).some((c) => c != null && String(c).trim() !== ""));
@@ -78,9 +88,15 @@ export async function readRange(
   return out.slice(0, lastNonEmpty + 1);
 }
 
-async function readRangeOnce(token: string, spreadsheetToken: string, range: string) {
+async function readRangeOnce(
+  token: string,
+  spreadsheetToken: string,
+  range: string,
+  valueRenderOption: ValueRenderOption = "ToString",
+) {
   const res = await fetch(
-    `${FEISHU_BASE}/sheets/v2/spreadsheets/${spreadsheetToken}/values/${encodeURIComponent(range)}`,
+    `${FEISHU_BASE}/sheets/v2/spreadsheets/${spreadsheetToken}/values/${encodeURIComponent(range)}` +
+      `?valueRenderOption=${valueRenderOption}`,
     { headers: { Authorization: `Bearer ${token}` } },
   );
   const json = await res.json();

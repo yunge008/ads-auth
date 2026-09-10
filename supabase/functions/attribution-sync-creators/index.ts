@@ -17,6 +17,7 @@ import { cellText, isPrecisionLostNumber, parseDate } from "../_shared/cells.ts"
 import {
   type RegistryEntry,
   type ReviewItem,
+  hasCjk,
   identityKey,
   normalizeName,
   resolveOwnership,
@@ -61,8 +62,15 @@ Deno.serve(async (req) => {
     const token = await getTenantAccessToken();
     const regRows: RegRow[] = [];
     const missing: string[] = [];
-    /** VID 单元格被飞书按数字返回导致丢精度的次数（这些 VID 已经是错值，只能丢弃并提醒改列格式） */
+    /** VID 单元格被飞书按数字返回导致丢精度的次数（读取已统一走 ToString，这里是最后一道保险） */
     let vidPrecisionLost = 0;
+    /** 含汉字的站点写法（站点统一用英文简写，汉字永远匹配不上，必须回飞书改） */
+    const cjkSites = new Map<string, number>();
+    const readSite = (cell: unknown): string => {
+      const raw = cellText(cell);
+      if (raw && hasCjk(raw)) cjkSites.set(raw, (cjkSites.get(raw) ?? 0) + 1);
+      return raw;
+    };
     /** 读一个 VID 单元格：丢精度的直接当空处理，避免把错的 VID 写进登记表 */
     const readVid = (cell: unknown): string => {
       if (isPrecisionLostNumber(cell)) {
@@ -105,7 +113,7 @@ Deno.serve(async (req) => {
           staff_active: !!t.active,
           register_date: parseDate(r[13]),
           sample_date: parseDate(r[1]),
-          country: cellText(r[2]),
+          country: readSite(r[2]),
           handle_raw: handleRaw,
           handle_norm: handleNorm,
           nickname_raw: nicknameRaw,
@@ -136,7 +144,7 @@ Deno.serve(async (req) => {
           staff_active: activeByName.get(bd) ?? false,
           register_date: parseDate(r[1]),
           sample_date: null,
-          country: cellText(r[2]),
+          country: readSite(r[2]),
           handle_raw: "",
           handle_norm: "",
           nickname_raw: nicknameRaw,
@@ -179,7 +187,7 @@ Deno.serve(async (req) => {
             staff_active: !!t.active,
             register_date: parseDate(r[2]),
             sample_date: null,
-            country: cellText(r[3]),
+            country: readSite(r[3]),
             handle_raw: "",
             handle_norm: "",
             nickname_raw: acctRaw,
@@ -272,6 +280,10 @@ Deno.serve(async (req) => {
         reviews_open: reviewsOpen ?? 0,
         missing_sheets: missing,
         vid_precision_lost: vidPrecisionLost,
+        cjk_sites: Array.from(cjkSites.entries())
+          .map(([site, rows]) => ({ site, rows }))
+          .sort((a, b) => b.rows - a.rows)
+          .slice(0, 20),
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );

@@ -228,15 +228,15 @@ export const uploadQueue = {
             patchItem(item.id, { uploadedRows: done, phase: `上传数据 ${done.toLocaleString()} / ${rows.length.toLocaleString()} 行` });
           });
 
-          patchItem(item.id, { status: "finalizing", uploadedRows: rows.length, phase: "服务端归因计算中（大文件需数分钟）" });
+          patchItem(item.id, { status: "finalizing", uploadedRows: rows.length, phase: "服务端归并中（按 VID+达人昵称）" });
           const fin = await finalizeWithRates(uploadId, cb.onMissingRates);
 
           lastSummary = fin.summary;
           lastLabel = `${item.country} ${item.month}（${item.fileName}）`;
           completedMonths.add(item.month);
-          patchItem(item.id, { status: "done", phase: "已归因", finishedAt: Date.now() });
+          patchItem(item.id, { status: "done", phase: "完成", finishedAt: Date.now() });
           setState({ viewing: { kind: "upload", id: uploadId, label: lastLabel } }, { persist: false });
-          cb.onSuccess(`${item.fileName}：${fin.row_count} 行归因完成`);
+          cb.onSuccess(`${item.fileName}：${fin.row_count} 行已归并${fin.agg_rows ? `为 ${fin.agg_rows} 组` : ""}`);
         } catch (e) {
           const msg = (e as Error).message;
           patchItem(item.id, { status: "failed", phase: "失败", error: msg, finishedAt: Date.now() });

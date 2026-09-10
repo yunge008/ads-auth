@@ -27,6 +27,14 @@ export function normalizeName(s: string | null | undefined): string {
 }
 
 /** 创意作品类型归一化：上传路径精确映射中英文；数据库路径对 shop_content_type 防御性判断。 */
+/**
+ * 站点写法全系统统一用英文简写（PH / TH / VN / MY / SG / MX-AR / US / JP…）。
+ * 含汉字 = 数据填错：归因不做任何汉字站点的匹配或换算，这类值永远匹配不上，只能在源头改。
+ */
+export function hasCjk(s: string | null | undefined): boolean {
+  return /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(s ?? "");
+}
+
 /** Map key used for every nickname/username alias lookup.  Country is mandatory. */
 export function identityKey(country: string | null | undefined, normalizedName: string): string {
   const site = (country ?? "").normalize("NFKC").trim().replace(/\s+/g, " ").toUpperCase();

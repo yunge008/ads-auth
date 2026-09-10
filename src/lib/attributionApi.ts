@@ -33,12 +33,12 @@ export type AttributionReport = {
   totals: { gmv: number; cost: number; orders: number; rows: number };
 };
 
+/** 明细行 = 一个归并组（VID × 达人昵称 × 商品ID × 内容类型 × 币种），rows_count 是它合并了多少条 Excel 原始行。 */
 export type DetailRow = {
-  row_no?: number;
   vid: string;
   account_name: string;
-  campaign_name?: string | null;
   product_id?: string | null;
+  rows_count?: number;
   country: string;
   creative_type: string;
   gmv: number;
@@ -146,8 +146,10 @@ export function syncCreators() {
     ownership_keys: number;
     reviews_open: number;
     missing_sheets: string[];
-    /** 飞书把 VID 列当数字返回、超出 2^53 丢精度而被丢弃的单元格数 */
+    /** 飞书把 VID 列当数字返回、超出 2^53 丢精度而被丢弃的单元格数（读取已统一 ToString，正常应为 0） */
     vid_precision_lost?: number;
+    /** 含汉字的站点写法（站点统一用英文简写，这些行永远匹配不上） */
+    cjk_sites?: Array<{ site: string; rows: number }>;
   }>(
     "attribution-sync-creators",
     {},
@@ -165,7 +167,7 @@ export const uploadApi = {
   append: (upload_id: string, rows: ParsedRow[]) =>
     invokeFn<{ inserted: number }>("attribution-upload", { action: "append", upload_id, rows }, { timeout: 120000 }),
   finalize: (upload_id: string) =>
-    invokeFn<{ summary: AttributionReport; row_count: number }>(
+    invokeFn<{ summary: AttributionReport; row_count: number; agg_rows?: number }>(
       "attribution-upload",
       { action: "finalize", upload_id },
       { timeout: 300000 },
@@ -218,8 +220,10 @@ export function siteMismatch(month: string) {
 
 /** 归因口径自查（attribution-upload → action=diagnose）。 */
 export type DiagnoseLayer = {
+  /** Excel 原始行数（按归并组的 rows_count 还原） */
   rows: number;
-  sampled: boolean;
+  /** 归并后的组数 */
+  agg_rows: number;
   product_card: number;
   vid_rows: number;
   vid_hit: number;
@@ -232,7 +236,6 @@ export type DiagnoseLayer = {
 
 export type DiagnoseResult = {
   month: string;
-  sample_limit: number;
   context: {
     vid_count: number;
     ownership_keys: number;

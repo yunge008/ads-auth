@@ -49,6 +49,15 @@ export function parseDate(v: unknown): string | null {
       if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
     }
   }
+  // 年在前的写法优先精确匹配：飞书按 ToString 返回时日期是「2024/01/05」「2024-1-5」「2024年1月5日」这类渲染文本，
+  // 交给 new Date() 解析在部分格式下会得到错误的月/日顺序，这里先自己拆。
+  const ymd = s.match(/^(\d{4})\s*[-/.\u5e74]\s*(\d{1,2})\s*[-/.\u6708]\s*(\d{1,2})/);
+  if (ymd) {
+    const [, y, mo, dd] = ymd;
+    const iso = `${y}-${mo.padStart(2, "0")}-${dd.padStart(2, "0")}`;
+    const d2 = new Date(`${iso}T00:00:00Z`);
+    if (!isNaN(d2.getTime())) return iso;
+  }
   // Common date strings
   const norm = s.replace(/[./]/g, "-");
   const d = new Date(norm);

@@ -168,13 +168,13 @@ export function UploadView({
       onFinished: loadHistory,
     });
 
-  /** 批次行数已经传完但卡在 UPLOADING（多半是上一轮 finalize 超时），重跑一次归因即可，不必重传文件。 */
+  /** 批次行数已经传完但卡在 UPLOADING（多半是上一轮归并超时），重跑一次归并即可，不必重传文件。 */
   const refinalize = async (u: UploadRec) => {
     setRefinalizing(u.id);
     try {
       const fin = await uploadApi.finalize(u.id);
       uploadQueue.setResult({ kind: "upload", id: u.id, label: `${u.country} ${u.month}（${u.file_name}）` }, fin.summary);
-      toast.success(`${u.file_name}：${fin.row_count} 行归因完成`);
+      toast.success(`${u.file_name}：${fin.row_count} 行已归并${fin.agg_rows ? `为 ${fin.agg_rows} 组` : ""}`);
       await loadHistory();
     } catch (e) {
       const payload = (e as Error & { payload?: { missing_currencies?: string[] } }).payload;
@@ -182,7 +182,7 @@ export function UploadView({
         setRefinalizing(null);
         return refinalize(u);
       }
-      toast.error(`重新归因失败：${(e as Error).message}`);
+      toast.error(`重新归并失败：${(e as Error).message}`);
     } finally {
       setRefinalizing(null);
     }
@@ -311,8 +311,9 @@ export function UploadView({
         <CardHeader className="pb-3">
           <CardTitle className="text-base">上传广告表</CardTitle>
           <p className="text-xs text-muted-foreground">
-            支持多选，文件名需为「站点 MAX yyyymm.xlsx」（如 墨西哥 MAX 202607.xlsx）；中英文表头均可。同月多站点上传后可在下方按月合并查看。
+            支持多选，文件名需为「站点 MAX yyyymm.xlsx」，站点用英文简写（如 PH MAX 202607.xlsx、MX-AR MAX 202607.xlsx）；中英文表头均可。同月多站点上传后可在下方按月合并查看。
             <br />大文件（10 万行级）会分批并发上传，进度列实时显示已传行数与阶段；切到别的标签页再回来进度不会丢。
+            <br />上传只负责存数据并按「VID + 达人昵称」归并；<b>归因不在这一步计算</b>，而是每次出报表时按当下的飞书登记数据现算，所以同步达人登记后不需要重传。
             <br />下表「行数」「商品卡行数」「有GMV行数」是 Excel 原始行计数；「GMV（原币种）」按文件里「货币」列分组汇总、仍是文件自身币种，上传归因后才按汇率折美元。
           </p>
         </CardHeader>
@@ -553,7 +554,7 @@ export function UploadView({
                                 size="sm"
                                 variant="ghost"
                                 className="h-7 px-2"
-                                title="行数据已经传完、只是归因没跑完时，点这里重跑归因，不用重传文件"
+                                title="行数据已经传完、只是没归并完时，点这里重跑，不用重传文件"
                                 onClick={() => refinalize(u)}
                                 disabled={refinalizing === u.id}
                               >

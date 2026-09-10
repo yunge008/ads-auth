@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { RotateCw, Users, Target as TargetIcon, ArrowLeftRight, Upload, Download } from "lucide-react";
+import { RotateCw, Users, Target as TargetIcon, ArrowLeftRight, Upload, Download, HelpCircle } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
 import { ProgressBoard } from "@/components/attribution/ProgressBoard";
@@ -25,6 +26,55 @@ import {
   uploadApi,
 } from "@/lib/attributionApi";
 
+
+/**
+ * 「数据准备」三个按钮的说明文案。写在按钮右侧的「?」里，不占版面。
+ * 口径提醒：这三个按钮只更新基础数据；归因结果每次出报表时按当下数据现算，不需要重传广告表。
+ */
+const SYNC_HELP: Record<"creators" | "targets" | "handovers", { title: string; lines: string[] }> = {
+  creators: {
+    title: "同步达人登记",
+    lines: [
+      "读飞书三处登记，重建达人归属表：",
+      "· 建联表（各 BD 的「建联-姓名」sheet）：用户名 / 昵称 / 登记日期 / VID",
+      "· 「授权记录」sheet：历史归档的达人与 VID",
+      "· 剪辑表：剪辑同事的账号与 VID",
+      "每次全量重建。同一个达人被多人登记时，按「谁先登记谁拥有 + 3 个月保护期」判归属，冲突项进「审查与回写」。",
+      "同步完刷新报表即可生效，不用重传广告表。",
+    ],
+  },
+  targets: {
+    title: "同步 GMV 目标",
+    lines: [
+      "读飞书「绩效配置表」A–F 列（月份 / 姓名 / 角色 / 目标金额 / 备注），覆盖写入月度目标。",
+      "只决定进度条的分母，不影响归因结果。",
+    ],
+  },
+  handovers: {
+    title: "同步站点交接",
+    lines: [
+      "读飞书「绩效配置表」H–L 列（站点 / 原BD / 新BD / 交接日期 / 备注），全量重建交接记录。",
+      "归因时按视频发布时间自动分段：交接日之前的算原 BD，之后的算新 BD。",
+    ],
+  },
+};
+
+function SyncHelp({ kind }: { kind: keyof typeof SYNC_HELP }) {
+  const help = SYNC_HELP[kind];
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground" aria-label={`${help.title}说明`}>
+          <HelpCircle className="h-4 w-4" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-96 text-xs space-y-1.5">
+        <div className="font-medium text-sm">{help.title}</div>
+        {help.lines.map((l, i) => <div key={i} className="text-muted-foreground leading-relaxed">{l}</div>)}
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 const VID_SUMMARY_HEADER = ["站点", "月份", "VID", "达人昵称", "PID", "SKU", "GMV", "消耗", "订单量", "ROI", "PV", "点击", "CTR", "CVR"];
 
@@ -112,6 +162,13 @@ function MonthlyView() {
             { duration: 15000 },
           );
         }
+        if (r.cjk_sites?.length) {
+          const sample = r.cjk_sites.slice(0, 6).map((c) => `${c.site}(${c.rows})`).join("、");
+          toast.error(
+            `建联/剪辑表里有汉字站点写法：${sample}。站点统一用英文简写（PH / TH / VN / MX-AR / US…），含汉字的行永远匹配不上，请到飞书改正后重新同步。`,
+            { duration: 15000 },
+          );
+        }
         if (!r.registry_vid_rows) {
           toast.warning("本次同步没有读到任何有效 VID：VID 强匹配这一层会完全失效，只能靠昵称路径归因。");
         }
@@ -139,32 +196,28 @@ function MonthlyView() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">数据准备</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            这三个按钮只更新基础数据。归因结果在每次「生成报表」时按当下的登记数据现算，同步完刷新即可，不需要重传广告表。
+          </p>
         </CardHeader>
         <CardContent className="flex flex-wrap items-end gap-2">
-          <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-0.5">
             <Button size="sm" variant="outline" onClick={() => doSync("creators")} disabled={!!busy}>
-              <Users className={`h-4 w-4 mr-1.5 ${busy === "creators" ? "animate-pulse" : ""}`} />同步达人登记（建联+归档+剪辑）
+              <Users className={`h-4 w-4 mr-1.5 ${busy === "creators" ? "animate-pulse" : ""}`} />同步达人登记
             </Button>
-            <span className="text-[11px] text-muted-foreground max-w-[22rem]">
-              读飞书：各 BD「建联-姓名」sheet（A2:Q）+「授权记录」M3:S + 剪辑表（A2:H）→ 全量重建 creator_registry →
-              按 3 个月保护期解析昵称/用户名归属 → 全量重建 creator_ownership → 冲突写入审查表。归因前必须先跑。
-            </span>
+            <SyncHelp kind="creators" />
           </div>
-          <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-0.5">
             <Button size="sm" variant="outline" onClick={() => doSync("targets")} disabled={!!busy}>
               <TargetIcon className="h-4 w-4 mr-1.5" />同步 GMV 目标
             </Button>
-            <span className="text-[11px] text-muted-foreground max-w-[18rem]">
-              读飞书「绩效配置表」A2:F（月份/姓名/角色/目标/备注）→ upsert gmv_targets。只影响进度条分母，不影响归因结果。
-            </span>
+            <SyncHelp kind="targets" />
           </div>
-          <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-0.5">
             <Button size="sm" variant="outline" onClick={() => doSync("handovers")} disabled={!!busy}>
               <ArrowLeftRight className="h-4 w-4 mr-1.5" />同步站点交接
             </Button>
-            <span className="text-[11px] text-muted-foreground max-w-[18rem]">
-              读飞书「绩效配置表」H2:L（站点/原BD/新BD/交接日期/备注）→ 全量重建 site_handovers。按视频发布日在交接日前后改判归属。
-            </span>
+            <SyncHelp kind="handovers" />
           </div>
           <div className="flex flex-col gap-1 ml-auto">
             <span className="text-xs text-muted-foreground">月份</span>

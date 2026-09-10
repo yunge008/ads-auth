@@ -1,29 +1,38 @@
 // Excel 广告表上传 + 归因。文件名约定「站点 MAX yyyymm.xlsx」→ 每文件一个批次。
-// Body: { action: 'create'|'append'|'finalize'|'list'|'get'|'delete'|'list_exchange_rates'|'save_exchange_rate'|'export_vid_summary', ... }
+//
+// 【口径：上传与归因彻底解耦】
+//   上传阶段只做两件事：把原始行落库（ad_upload_rows），再按 (VID, 达人昵称, 商品ID, 内容类型, 币种)
+//   在数据库里归并成 ad_upload_agg（10 万行级 → 几千行）。**不计算、不存储任何归因结果。**
+//   归因一律在出报表的那一刻现算：重新 loadAttrContext() 读当下的 creator_registry / creator_ownership /
+//   creator_alias / site_handovers / attribution_review，再跑引擎。所以「同步达人登记」之后不需要重传、
+//   不需要重跑批次，刷新报表就是新结果。ad_upload_rows.attr_* 四列已废弃，只留历史痕迹，不再读写。
+//
+// Body: { action, ... }
 //   create   { file_name, country, month:'YYYY-MM', note?, force?, replace_existing? } → { upload_id }
-//            同 (country, month) 已有 UPLOADING/READY 记录时默认报错（payload.duplicate=true）；replace_existing=true 先删旧记录再插入
+//            站点必须是英文简写（PH / TH / VN / US / MX-AR…），含汉字直接拒收（force=true 可强制）
 //   append   { upload_id, rows: ParsedRow[] } （≤2000 行/批，幂等键 (upload_id,row_no)）
-//   finalize { upload_id } → 校验汇率覆盖（缺失时报错 payload.missing_currencies=[...]，不写 attr_*/READY）→ 归因 + 回填 attr_* + 汇总 → { summary }
+//   finalize { upload_id } → 校验汇率覆盖（缺失时报错 payload.missing_currencies=[...]）→ 数据库内归并
+//            （RPC attribution_build_upload_agg）→ 现算一次归因返回预览汇总 → 批次置 READY
 //   list     { month? } → { uploads }
 //   get      { upload_id, detail_for? } 或 { month, merged:true } → { summary, uploads?, last_synced_at?, detail_rows? }
-//   delete   { upload_id } 或 { upload_ids: [...] } 或 { all: true }（清空全部批次，级联删行）
-//   diagnose      { month, sample_limit? } → 归因口径自查：逐批次统计商品卡/VID命中/昵称同站点命中/昵称异站点/从未登记，
-//                 并给出「哪一层断了」的结论，用于排查「一个人都归不上」
-//   site_mismatch { month } → { rows }：站点按字母精确匹配后仍归 UNMATCHED、但达人名字在建联归属/别名表里
-//                 存在（只是登记在别的站点）的行，按 (上传站点, 达人昵称) 聚合，供人工确认是否该跨站点认人
-//   list_exchange_rates {} → { rates }（含禁用行）
-//   save_exchange_rate  { currency, usd_rate, enabled? } → { rate }；usd_rate 语义=1 美元兑多少本币
-//   export_vid_summary  { month } → { rows }：按 (国家,VID,商品ID) 聚合的唯一 VID 汇总（14 列口径），前端生成 xlsx
-//   unmatched_trend     { month } → { months, rows }：以 month 为最近一个月，往前推 12 个月，逐月在 DB 内按 (国家,达人昵称) 聚合 UNMATCHED 桶 GMV（折美元），再合并 rows[].by_month；避免 12 个月单条 SQL 撞 statement timeout
+//   delete   { upload_id } 或 { upload_ids: [...] } 或 { all: true }
+//   diagnose { month } → 归因口径自查：逐批次统计商品卡/VID命中/昵称同站点命中/昵称异站点/从未登记 + 站点写法对照
+//   site_mismatch { month } → { rows }：现算后仍归 UNMATCHED、但名字在建联/别名表里（登记在别站点）的行
+//   list_exchange_rates {} / save_exchange_rate { currency, usd_rate, enabled? }（usd_rate=1 美元兑多少本币）
+//   export_vid_summary { month } → 按 (国家,VID,商品ID) 聚合的唯一 VID 汇总（14 列口径）
+//   unmatched_trend    { month } → 以 month 为最近一个月往前 12 个月，逐月现算 UNMATCHED 桶并按 (国家,昵称) 聚合
 import { corsHeaders } from "../_shared/feishu.ts";
 import { admin, verifyPasscode } from "../_shared/auth.ts";
 import {
   type AttrInputRow,
   type AttrRowResult,
+  type AttrRunResult,
   attributeRows,
+  hasCjk,
   identityKey,
   normalizeCreativeType,
   normalizeName,
+  splitIdentityKey,
   vidToPostedAt,
 } from "../_shared/attribution.ts";
 import {
@@ -40,30 +49,28 @@ import {
 const PAGE = 1000;
 const DETAIL_CAP = 5000;
 
-type StoredRow = {
-  row_no: number;
-  campaign_name: string | null;
-  campaign_id: string;
+/** 归并行：一行 = 一个 (批次, VID, 达人昵称, 商品ID, 内容类型, 币种) 组。归因的输入单位。 */
+type AggRow = {
+  id: string;
+  upload_id: string;
+  country: string;
+  month: string;
+  vid: string;
+  account_name: string;
   product_id: string;
   creative_type: string;
-  video_title: string | null;
-  vid: string;
-  tt_account_name: string;
+  currency: string;
   posted_at: string | null;
-  status: string | null;
-  authorization_type: string | null;
+  rows_count: number;
   cost: number;
-  orders: number;
   gross_revenue: number;
-  roi: number | null;
-  impressions: number | null;
-  clicks: number | null;
-  currency: string | null;
-  attr_bucket: string | null;
-  attr_staff: string | null;
-  attr_source: string | null;
-  attr_match_type: string | null;
+  orders: number;
+  impressions: number;
+  clicks: number;
 };
+
+const AGG_COLUMNS =
+  "id, upload_id, country, month, vid, account_name, product_id, creative_type, currency, posted_at, rows_count, cost, gross_revenue, orders, impressions, clicks";
 
 type UploadRec = {
   id: string;
@@ -90,7 +97,9 @@ function errWithPayload(message: string, payload: Record<string, unknown>): Erro
   return e;
 }
 
-function toInput(uploadId: string, country: string, r: AttrRow): AttrInputRow {
+// ---------- 归并行 → 归因输入 ----------
+
+function aggToInput(r: AggRow): AttrInputRow {
   let postedAt: string | null = null;
   let postedAtSource: AttrInputRow["postedAtSource"] = null;
   if (r.posted_at) {
@@ -104,86 +113,114 @@ function toInput(uploadId: string, country: string, r: AttrRow): AttrInputRow {
     }
   }
   return {
-    key: `u:${uploadId}:${r.row_no}`,
+    key: `g:${r.id}`,
     creativeType: normalizeCreativeType(r.creative_type),
     vid: r.vid ?? "",
-    accountName: r.tt_account_name ?? "",
-    country,
+    accountName: r.account_name ?? "",
+    country: r.country ?? "",
     postedAt,
     postedAtSource,
-    currency: r.currency ?? "USD",
+    currency: r.currency || "USD",
     cost: num(r.cost),
     grossRevenue: num(r.gross_revenue),
     orders: Math.round(num(r.orders)),
   };
 }
 
-/** 从已存储的 attr_* 列重建归因结果（get / merged 视图不重跑引擎）。 */
-function storedPairs(uploadId: string, country: string, rows: StoredRow[]) {
-  return rows.map((r) => {
-    const input = toInput(uploadId, country, r);
-    const result: AttrRowResult = {
-      key: input.key,
-      bucket: (r.attr_bucket as AttrRowResult["bucket"]) ?? "UNMATCHED",
-      staff: r.attr_staff ?? undefined,
-      source: (r.attr_source as AttrRowResult["source"]) ?? undefined,
-      matchType: (r.attr_match_type as AttrRowResult["matchType"]) ?? undefined,
-      country,
-    };
-    return { input, result, stored: r };
-  });
-}
-
-/** 归因只需要这 9 列；finalize 读全部 22 列在 10 万行量级会明显拖慢并推高内存。 */
-const ATTR_COLUMNS = "row_no, creative_type, vid, tt_account_name, posted_at, cost, orders, gross_revenue, currency";
-
-type AttrRow = Pick<
-  StoredRow,
-  "row_no" | "creative_type" | "vid" | "tt_account_name" | "posted_at" | "cost" | "orders" | "gross_revenue" | "currency"
->;
-
-/** finalize 专用：只取归因需要的列，分页拉全量。 */
-async function fetchAttrRows(db: ReturnType<typeof admin>, uploadId: string): Promise<AttrRow[]> {
-  const out: AttrRow[] = [];
-  let lastRowNo = -1;
-  for (;;) {
-    const { data, error } = await db
-      .from("ad_upload_rows")
-      .select(ATTR_COLUMNS)
-      .eq("upload_id", uploadId)
-      .gt("row_no", lastRowNo)
-      .order("row_no", { ascending: true })
-      .limit(PAGE);
-    if (error) throw new Error(error.message);
-    const rows = (data ?? []) as AttrRow[];
-    out.push(...rows);
-    if (rows.length < PAGE) break;
-    const nextRowNo = rows.at(-1)?.row_no;
-    if (nextRowNo === undefined || nextRowNo <= lastRowNo) throw new Error("归因数据分页游标异常");
-    lastRowNo = nextRowNo;
+async function fetchAgg(db: ReturnType<typeof admin>, uploadIds: string[]): Promise<AggRow[]> {
+  const out: AggRow[] = [];
+  for (let i = 0; i < uploadIds.length; i += 50) {
+    const ids = uploadIds.slice(i, i + 50);
+    let from = 0;
+    for (;;) {
+      const { data, error } = await db
+        .from("ad_upload_agg")
+        .select(AGG_COLUMNS)
+        .in("upload_id", ids)
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (error) throw new Error(error.message);
+      const rows = (data ?? []) as AggRow[];
+      out.push(...rows);
+      if (rows.length < PAGE) break;
+      from += PAGE;
+    }
   }
   return out;
 }
 
-async function fetchAllRows(db: ReturnType<typeof admin>, uploadId: string): Promise<StoredRow[]> {
-  const out: StoredRow[] = [];
-  let from = 0;
-  for (;;) {
-    const { data, error } = await db
-      .from("ad_upload_rows")
-      .select(
-        "row_no, campaign_name, campaign_id, product_id, creative_type, video_title, vid, tt_account_name, posted_at, status, authorization_type, cost, orders, gross_revenue, roi, impressions, clicks, currency, attr_bucket, attr_staff, attr_source, attr_match_type",
-      )
-      .eq("upload_id", uploadId)
-      .order("row_no", { ascending: true })
-      .range(from, from + PAGE - 1);
-    if (error) throw new Error(error.message);
-    const rows = (data ?? []) as StoredRow[];
-    out.push(...rows);
-    if (rows.length < PAGE) break;
-    from += PAGE;
-  }
-  return out;
+type LivePair = { input: AttrInputRow; result: AttrRowResult; agg: AggRow };
+
+/**
+ * 现算归因。每次都重新加载归因上下文（当下的飞书同步结果），不读任何固化的 attr_* 列。
+ * persist=true 时把本次推断出的别名与审查项落库（只在「生成报表 / finalize」这种显式动作里做）。
+ */
+async function attributeNow(
+  db: ReturnType<typeof admin>,
+  aggRows: AggRow[],
+  opts?: { persist?: boolean },
+): Promise<{ pairs: LivePair[]; run: AttrRunResult }> {
+  const inputs = aggRows.map(aggToInput);
+  const ctx = await loadAttrContext(db);
+  const run = attributeRows(inputs, ctx);
+  if (opts?.persist) await persistRunArtifacts(db, run);
+  const byKey = new Map(run.rows.map((r) => [r.key, r]));
+  const pairs: LivePair[] = inputs.map((input, i) => ({ input, result: byKey.get(input.key)!, agg: aggRows[i] }));
+  return { pairs, run };
+}
+
+async function getUpload(db: ReturnType<typeof admin>, uploadId: string): Promise<UploadRec> {
+  const { data, error } = await db
+    .from("ad_uploads")
+    .select("id, file_name, country, month, period_start, period_end, status")
+    .eq("id", uploadId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("上传批次不存在");
+  return data as UploadRec;
+}
+
+/** 某月全部已完成归并的批次。 */
+async function readyUploads(db: ReturnType<typeof admin>, month: string) {
+  const { data, error } = await db
+    .from("ad_uploads")
+    .select("id, file_name, country, month, period_start, period_end, status, row_count, total_revenue, attributed_at")
+    .eq("month", month)
+    .eq("status", "READY");
+  if (error) throw new Error(error.message);
+  return (data ?? []) as Array<UploadRec & { row_count: number; total_revenue: number; attributed_at: string | null }>;
+}
+
+function detailFromPairs(pairs: LivePair[], f: { staff?: string; role?: string; bucket?: string }) {
+  return pairs
+    .filter(({ result }) => {
+      if (f.bucket) return result.bucket === f.bucket;
+      if (f.staff) {
+        return result.bucket === "STAFF" && result.staff === f.staff && (!f.role || result.source === f.role);
+      }
+      return false;
+    })
+    .sort((a, b) => b.input.grossRevenue - a.input.grossRevenue)
+    .slice(0, DETAIL_CAP)
+    .map(({ input, result, agg }) => ({
+      vid: input.vid,
+      account_name: input.accountName,
+      product_id: agg.product_id ?? null,
+      creative_type: input.creativeType,
+      country: result.country,
+      gmv: input.grossRevenue,
+      cost: input.cost,
+      orders: input.orders,
+      currency: input.currency,
+      rows_count: agg.rows_count,
+      bucket: result.bucket,
+      staff: result.staff ?? null,
+      source: result.source ?? null,
+      match_type: result.matchType ?? null,
+      posted_at: input.postedAt,
+      posted_at_source: input.postedAtSource,
+      handover_applied: result.handoverApplied ?? false,
+    }));
 }
 
 /** 通用整表分页读取（诊断用的小表：creator_ownership / creator_alias）。 */
@@ -205,78 +242,6 @@ async function pageAllRows<T>(
   return out;
 }
 
-type UnmatchedRow = { tt_account_name: string; gross_revenue: number; currency: string | null };
-
-/**
- * 只取某批次 UNMATCHED 桶的 3 个字段。
- * `unmatched_trend` 要扫 12 个月 × 全部站点的批次，走 fetchAllRows（22 列 + 全部桶）会超时，
- * 这里把桶过滤下推到数据库、列裁到最小。
- */
-async function fetchUnmatchedRows(db: ReturnType<typeof admin>, uploadId: string): Promise<UnmatchedRow[]> {
-  const out: UnmatchedRow[] = [];
-  let from = 0;
-  for (;;) {
-    const { data, error } = await db
-      .from("ad_upload_rows")
-      .select("tt_account_name, gross_revenue, currency")
-      .eq("upload_id", uploadId)
-      .eq("attr_bucket", "UNMATCHED")
-      .order("row_no", { ascending: true })
-      .range(from, from + PAGE - 1);
-    if (error) throw new Error(error.message);
-    const rows = (data ?? []) as UnmatchedRow[];
-    out.push(...rows);
-    if (rows.length < PAGE) break;
-    from += PAGE;
-  }
-  return out;
-}
-
-async function getUpload(db: ReturnType<typeof admin>, uploadId: string): Promise<UploadRec> {
-  const { data, error } = await db
-    .from("ad_uploads")
-    .select("id, file_name, country, month, period_start, period_end, status")
-    .eq("id", uploadId)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  if (!data) throw new Error("上传批次不存在");
-  return data as UploadRec;
-}
-
-function detailFromPairs(
-  pairs: Array<{ input: AttrInputRow; result: AttrRowResult; stored?: StoredRow }>,
-  f: { staff?: string; role?: string; bucket?: string },
-) {
-  return pairs
-    .filter(({ result }) => {
-      if (f.bucket) return result.bucket === f.bucket;
-      if (f.staff) {
-        return result.bucket === "STAFF" && result.staff === f.staff && (!f.role || result.source === f.role);
-      }
-      return false;
-    })
-    .sort((a, b) => b.input.grossRevenue - a.input.grossRevenue)
-    .slice(0, DETAIL_CAP)
-    .map(({ input, result, stored }) => ({
-      row_no: stored?.row_no,
-      vid: input.vid,
-      account_name: input.accountName,
-      campaign_name: stored?.campaign_name ?? null,
-      product_id: stored?.product_id ?? null,
-      creative_type: input.creativeType,
-      country: result.country,
-      gmv: input.grossRevenue,
-      cost: input.cost,
-      orders: input.orders,
-      currency: input.currency,
-      bucket: result.bucket,
-      staff: result.staff ?? null,
-      source: result.source ?? null,
-      match_type: result.matchType ?? null,
-      posted_at: input.postedAt,
-    }));
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -292,6 +257,13 @@ Deno.serve(async (req) => {
       if (!fileName) throw new Error("file_name 必填");
       if (!country) throw new Error("country 必填（从文件名「站点 MAX yyyymm.xlsx」解析或手动指定）");
       if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("month 格式应为 YYYY-MM");
+      // 站点写法全系统统一用英文简写；含汉字的站点永远匹配不上飞书登记表，直接在入口拦掉
+      if (!body.force && hasCjk(country)) {
+        throw new Error(
+          `站点「${country}」含汉字。站点写法统一用英文简写（PH / TH / VN / MY / SG / MX-AR / US / JP…），` +
+            `请把文件名改成「PH MAX ${month.replace("-", "")}.xlsx」这种形式后重新上传。`,
+        );
+      }
       if (!body.force) {
         const { data: ac } = await db.from("advertiser_countries").select("country");
         const known = new Set(((ac ?? []) as { country: string }[]).map((r) => r.country.trim()));
@@ -377,18 +349,24 @@ Deno.serve(async (req) => {
       return json({ inserted: payload.length });
     }
 
+    // 归并 + 置 READY。这里**不写任何归因结果**，返回的 summary 只是「按当下登记数据现算」的即时预览。
     if (action === "finalize") {
       const uploadId = str(body.upload_id);
       const upload = await getUpload(db, uploadId);
+
       const t0 = Date.now();
-      const rows = await fetchAttrRows(db, uploadId);
-      if (!rows.length) throw new Error("该批次没有数据行");
-      console.log(`finalize ${uploadId}: 读取 ${rows.length} 行耗时 ${Date.now() - t0}ms`);
+      const { data: aggInfo, error: aggErr } = await db.rpc("attribution_build_upload_agg", { _upload_id: uploadId });
+      if (aggErr) throw new Error(`归并失败：${aggErr.message}`);
+      const info = (Array.isArray(aggInfo) ? aggInfo[0] : aggInfo) as { agg_rows: number; raw_rows: number } | null;
+      const rawRows = Number(info?.raw_rows ?? 0);
+      if (!rawRows) throw new Error("该批次没有数据行");
+      console.log(`finalize ${uploadId}: ${rawRows} 原始行 → ${info?.agg_rows ?? 0} 归并行，耗时 ${Date.now() - t0}ms`);
 
-      const inputs = rows.map((r) => toInput(uploadId, upload.country, r));
+      const aggRows = await fetchAgg(db, [uploadId]);
+      const inputs = aggRows.map(aggToInput);
 
-      const exchangeRatesPre = await loadExchangeRates(db);
-      const missing = findMissingCurrencies(inputs, exchangeRatesPre);
+      const exchangeRates = await loadExchangeRates(db);
+      const missing = findMissingCurrencies(inputs, exchangeRates);
       if (missing.length) {
         throw errWithPayload(
           `缺少汇率配置：${missing.join("、")}，请先在设置页维护汇率后重试`,
@@ -396,64 +374,20 @@ Deno.serve(async (req) => {
         );
       }
 
-      const contextStartedAt = Date.now();
-      const ctx = await loadAttrContext(db);
-      console.log(`finalize ${uploadId}: 加载归因上下文耗时 ${Date.now() - contextStartedAt}ms`);
-      const attributeStartedAt = Date.now();
-      const run = attributeRows(inputs, ctx);
-      console.log(`finalize ${uploadId}: 计算 ${run.rows.length} 行归因耗时 ${Date.now() - attributeStartedAt}ms`);
-      const artifactsStartedAt = Date.now();
-      const persisted = await persistRunArtifacts(db, run);
-      console.log(`finalize ${uploadId}: 保存归因产物耗时 ${Date.now() - artifactsStartedAt}ms`);
-      const resultByKey = new Map(run.rows.map((r) => [r.key, r]));
-
-      // 回填 attr_* 列。只发「主键 + 4 个归因列」：这些行必然已存在，ON CONFLICT 只会更新带过来的列，
-      // 不必把 22 列原样再传一遍——10 万行时那样的请求体会把 finalize 直接拖到超时（表现就是「卡在上传中」）。
-      const writeback = rows.map((r) => {
-        const res = resultByKey.get(`u:${uploadId}:${r.row_no}`);
-        if (!res) throw new Error(`第 ${r.row_no} 行缺少归因结果`);
-        return {
-          row_no: r.row_no,
-          attr_bucket: res.bucket,
-          attr_staff: res.staff ?? null,
-          attr_source: res.source ?? null,
-          attr_match_type: res.matchType ?? null,
-        };
-      });
-      const t1 = Date.now();
-      for (let i = 0; i < writeback.length; i += 1000) {
-        const { data: affected, error } = await db.rpc("attribution_upload_rows_update", {
-          _upload_id: uploadId,
-          _rows: writeback.slice(i, i + 1000),
-        });
-        if (error) throw new Error(error.message);
-        const expected = Math.min(1000, writeback.length - i);
-        if (Number(affected) !== expected) {
-          throw new Error(`归因结果回填不完整：预期 ${expected} 行，实际 ${Number(affected) || 0} 行`);
-        }
-      }
-      console.log(`finalize ${uploadId}: 回填 ${writeback.length} 行耗时 ${Date.now() - t1}ms`);
-
-      const pairs = inputs.map((input) => {
-        const result = resultByKey.get(input.key);
-        if (!result) throw new Error(`缺少归因结果：${input.key}`);
-        return { input, result };
-      });
-      const summaryStartedAt = Date.now();
+      const { pairs } = await attributeNow(db, aggRows, { persist: true });
       const [targets, staffMeta] = await Promise.all([loadTargets(db, upload.month), loadStaffMeta(db)]);
       const summary = aggregateResults(pairs, {
         period: { start: upload.period_start ?? "", end: upload.period_end ?? "" },
         month: upload.month,
         targets,
-        exchangeRates: exchangeRatesPre,
+        exchangeRates,
         staffMeta,
       });
-      console.log(`finalize ${uploadId}: 汇总报表耗时 ${Date.now() - summaryStartedAt}ms`);
 
       const { error: upErr } = await db
         .from("ad_uploads")
         .update({
-          row_count: rows.length,
+          row_count: rawRows,
           total_cost: summary.totals.cost,
           total_revenue: summary.totals.gmv,
           status: "READY",
@@ -462,7 +396,7 @@ Deno.serve(async (req) => {
         .eq("id", uploadId);
       if (upErr) throw new Error(upErr.message);
 
-      return json({ summary, persisted, row_count: rows.length });
+      return json({ summary, row_count: rawRows, agg_rows: aggRows.length });
     }
 
     if (action === "list") {
@@ -481,55 +415,30 @@ Deno.serve(async (req) => {
 
     if (action === "get") {
       const detailFor = (body.detail_for ?? null) as { staff?: string; role?: string; bucket?: string } | null;
+
       if (body.merged) {
         const month = str(body.month);
         if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("merged 视图需要 month（YYYY-MM）");
-        const { data: ups, error } = await db
-          .from("ad_uploads")
-          .select("id, file_name, country, month, period_start, period_end, status, row_count, total_revenue, attributed_at")
-          .eq("month", month)
-          .eq("status", "READY");
-        if (error) throw new Error(error.message);
-        const uploads = (ups ?? []) as (UploadRec & { row_count: number; total_revenue: number; attributed_at: string | null })[];
+        const uploads = await readyUploads(db, month);
+        const { start, end } = monthRange(month);
+        const [targets, exchangeRates, staffMeta] = await Promise.all([
+          loadTargets(db, month),
+          loadExchangeRates(db),
+          loadStaffMeta(db),
+        ]);
         if (!uploads.length) {
-          // 该月没有已完成归因的批次时，返回空报表而不是报错（避免前端白屏）
-          const [targets0, exchangeRates0, staffMeta0] = await Promise.all([
-            loadTargets(db, month),
-            loadExchangeRates(db),
-            loadStaffMeta(db),
-          ]);
-          const { start: s0, end: e0 } = monthRange(month);
+          // 该月没有批次时返回空报表而不是报错（避免前端白屏）
           return json({
-            summary: aggregateResults([], {
-              period: { start: s0, end: e0 },
-              month,
-              targets: targets0,
-              exchangeRates: exchangeRates0,
-              staffMeta: staffMeta0,
-            }),
+            summary: aggregateResults([], { period: { start, end }, month, targets, exchangeRates, staffMeta }),
             uploads: [],
             last_synced_at: null,
             detail_rows: detailFor ? [] : undefined,
           });
         }
-        // 内存优化：整月合并可能有 10w+ 行，逐批次读取后立刻丢掉原始行（22 列），
-        // 只保留聚合所需的 input/result；明细按批次先过滤再合并，避免 worker OOM。
-        const allPairs: Array<{ input: AttrInputRow; result: AttrRowResult }> = [];
-        let detailRows: ReturnType<typeof detailFromPairs> = [];
-        for (const u of uploads) {
-          const rows = await fetchAllRows(db, u.id);
-          const pairs = storedPairs(u.id, u.country, rows);
-          if (detailFor) {
-            detailRows = detailRows
-              .concat(detailFromPairs(pairs, detailFor))
-              .sort((a, b) => b.gmv - a.gmv)
-              .slice(0, DETAIL_CAP);
-          }
-          for (const p of pairs) allPairs.push({ input: p.input, result: p.result });
-        }
-        const [targets, exchangeRates, staffMeta] = await Promise.all([loadTargets(db, month), loadExchangeRates(db), loadStaffMeta(db)]);
-        const { start, end } = monthRange(month);
-        const summary = aggregateResults(allPairs, { period: { start, end }, month, targets, exchangeRates, staffMeta });
+        const aggRows = await fetchAgg(db, uploads.map((u) => u.id));
+        // 「生成报表」是显式动作，这里顺带把新推断的别名与审查项落库
+        const { pairs } = await attributeNow(db, aggRows, { persist: true });
+        const summary = aggregateResults(pairs, { period: { start, end }, month, targets, exchangeRates, staffMeta });
         const lastSyncedAt = uploads.reduce<string | null>(
           (acc, u) => (u.attributed_at && (!acc || u.attributed_at > acc) ? u.attributed_at : acc),
           null,
@@ -538,15 +447,19 @@ Deno.serve(async (req) => {
           summary,
           uploads,
           last_synced_at: lastSyncedAt,
-          detail_rows: detailFor ? detailRows : undefined,
+          detail_rows: detailFor ? detailFromPairs(pairs, detailFor) : undefined,
         });
-
       }
+
       const uploadId = str(body.upload_id);
       const upload = await getUpload(db, uploadId);
-      const rows = await fetchAllRows(db, uploadId);
-      const pairs = storedPairs(uploadId, upload.country, rows);
-      const [targets, exchangeRates, staffMeta] = await Promise.all([loadTargets(db, upload.month), loadExchangeRates(db), loadStaffMeta(db)]);
+      const aggRows = await fetchAgg(db, [uploadId]);
+      const { pairs } = await attributeNow(db, aggRows);
+      const [targets, exchangeRates, staffMeta] = await Promise.all([
+        loadTargets(db, upload.month),
+        loadExchangeRates(db),
+        loadStaffMeta(db),
+      ]);
       const summary = aggregateResults(pairs, {
         period: { start: upload.period_start ?? "", end: upload.period_end ?? "" },
         month: upload.month,
@@ -588,17 +501,14 @@ Deno.serve(async (req) => {
       return json({ rate: data });
     }
 
+    // 唯一 VID 汇总：归并表本身就是按 (VID, 昵称, 商品ID) 分组的，这里只需跨批次再合一次
     if (action === "export_vid_summary") {
       const month = str(body.month);
       if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("month 格式应为 YYYY-MM");
-      const { data: ups, error } = await db
-        .from("ad_uploads")
-        .select("id, file_name, country, month, period_start, period_end, status")
-        .eq("month", month)
-        .eq("status", "READY");
-      if (error) throw new Error(error.message);
-      const uploads = (ups ?? []) as UploadRec[];
-      if (!uploads.length) throw new Error(`没有 ${month} 已完成归因的上传批次`);
+      const uploads = await readyUploads(db, month);
+      if (!uploads.length) throw new Error(`没有 ${month} 已完成上传的批次`);
+      const aggRows = await fetchAgg(db, uploads.map((u) => u.id));
+      const exchangeRates = await loadExchangeRates(db);
 
       type Group = {
         country: string;
@@ -612,30 +522,26 @@ Deno.serve(async (req) => {
         accountNameCounts: Map<string, number>;
       };
       const groups = new Map<string, Group>();
-      const exchangeRates = await loadExchangeRates(db);
-
-      for (const u of uploads) {
-        const rows = await fetchAllRows(db, u.id);
-        for (const r of rows) {
-          const input = toInput(u.id, u.country, r);
-          const cur = (input.currency || "USD").toUpperCase();
-          const rate = exchangeRates.get(cur) ?? (cur === "USD" ? 1 : 0);
-          if (!rate) continue; // 理论上不会发生：finalize 已强制要求补齐汇率
-          const pid = r.product_id ?? "";
-          const key = `${input.country}|${input.vid}|${pid}`;
-          let g = groups.get(key);
-          if (!g) {
-            g = { country: input.country, vid: input.vid, product_id: pid, gmvUsd: 0, costUsd: 0, orders: 0, impressions: 0, clicks: 0, accountNameCounts: new Map() };
-            groups.set(key, g);
-          }
-          g.gmvUsd += input.grossRevenue / rate;
-          g.costUsd += input.cost / rate;
-          g.orders += input.orders;
-          g.impressions += r.impressions ?? 0;
-          g.clicks += r.clicks ?? 0;
-          const name = input.accountName.trim() || "（无账号）";
-          g.accountNameCounts.set(name, (g.accountNameCounts.get(name) ?? 0) + 1);
+      for (const r of aggRows) {
+        const cur = (r.currency || "USD").toUpperCase();
+        const rate = exchangeRates.get(cur) ?? (cur === "USD" ? 1 : 0);
+        if (!rate) continue; // 理论上不会发生：finalize 已强制要求补齐汇率
+        const key = `${r.country}|${r.vid}|${r.product_id ?? ""}`;
+        let g = groups.get(key);
+        if (!g) {
+          g = {
+            country: r.country, vid: r.vid, product_id: r.product_id ?? "",
+            gmvUsd: 0, costUsd: 0, orders: 0, impressions: 0, clicks: 0, accountNameCounts: new Map(),
+          };
+          groups.set(key, g);
         }
+        g.gmvUsd += num(r.gross_revenue) / rate;
+        g.costUsd += num(r.cost) / rate;
+        g.orders += Math.round(num(r.orders));
+        g.impressions += Math.round(num(r.impressions));
+        g.clicks += Math.round(num(r.clicks));
+        const name = (r.account_name ?? "").trim() || "（无账号）";
+        g.accountNameCounts.set(name, (g.accountNameCounts.get(name) ?? 0) + (r.rows_count || 1));
       }
 
       const productIds = Array.from(new Set(Array.from(groups.values()).map((g) => g.product_id).filter(Boolean)));
@@ -661,9 +567,6 @@ Deno.serve(async (req) => {
         for (const [name, cnt] of g.accountNameCounts) {
           if (cnt > bestCount) { bestName = name; bestCount = cnt; }
         }
-        if (g.accountNameCounts.size > 1) {
-          console.log(`export_vid_summary: vid=${g.vid} 昵称不一致，取出现最多次的「${bestName}」，候选=${JSON.stringify(Array.from(g.accountNameCounts.entries()))}`);
-        }
         return {
           country: g.country,
           month,
@@ -684,6 +587,7 @@ Deno.serve(async (req) => {
       return json({ rows: rowsOut });
     }
 
+    // 12 个月无建联趋势：逐月现算（归并后每月只有几千行，够快），不再依赖已废弃的 attr_bucket
     if (action === "unmatched_trend") {
       const anchorMonth = str(body.month);
       if (!/^\d{4}-\d{2}$/.test(anchorMonth)) throw new Error("month 格式应为 YYYY-MM");
@@ -695,21 +599,32 @@ Deno.serve(async (req) => {
           months.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`);
         }
       }
-      type TrendRow = { country: string; account_name: string; month: string; gmv_usd: number };
+      const exchangeRates = await loadExchangeRates(db);
+      const ctx = await loadAttrContext(db); // 12 个月共用一次上下文
       type Agg = { country: string; account_name: string; byMonth: Map<string, number> };
       const aggMap = new Map<string, Agg>();
-      // 12 个月一次性聚合在大月份会逼近数据库的语句超时；逐月执行可稳定利用 upload_id 部分索引。
       for (const trendMonth of months) {
-        const { data, error } = await db.rpc("attribution_unmatched_trend_json", { _months: [trendMonth] });
-        if (error) throw new Error(`${trendMonth}: ${error.message}`);
-        for (const r of (Array.isArray(data) ? data : []) as TrendRow[]) {
-          const key = `${r.country}|${r.account_name}`;
+        const uploads = await readyUploads(db, trendMonth);
+        if (!uploads.length) continue;
+        const aggRows = await fetchAgg(db, uploads.map((u) => u.id));
+        const inputs = aggRows.map(aggToInput);
+        const run = attributeRows(inputs, ctx);
+        const byKey = new Map(run.rows.map((r) => [r.key, r]));
+        for (const input of inputs) {
+          if (byKey.get(input.key)?.bucket !== "UNMATCHED") continue;
+          const name = input.accountName.trim();
+          const norm = normalizeName(name);
+          if (!norm) continue;
+          const cur = (input.currency || "USD").toUpperCase();
+          const rate = exchangeRates.get(cur) ?? (cur === "USD" ? 1 : 0);
+          if (!rate) continue;
+          const key = `${input.country}|${norm}`;
           let agg = aggMap.get(key);
           if (!agg) {
-            agg = { country: r.country, account_name: r.account_name, byMonth: new Map() };
+            agg = { country: input.country, account_name: name, byMonth: new Map() };
             aggMap.set(key, agg);
           }
-          agg.byMonth.set(r.month, num(r.gmv_usd));
+          agg.byMonth.set(trendMonth, (agg.byMonth.get(trendMonth) ?? 0) + input.grossRevenue / rate);
         }
       }
       const rowsOut = Array.from(aggMap.values())
@@ -729,7 +644,7 @@ Deno.serve(async (req) => {
     }
 
     if (action === "delete") {
-      // ad_upload_rows.upload_id 是 ON DELETE CASCADE，删批次会连行一起删
+      // ad_upload_rows / ad_upload_agg 的 upload_id 都是 ON DELETE CASCADE，删批次会连行一起删
       if (body.all === true) {
         // 全量清空走 TRUNCATE RPC：级联 DELETE 几十万行会触发 statement timeout
         const { data, error } = await db.rpc("attribution_uploads_delete_all");
@@ -756,28 +671,17 @@ Deno.serve(async (req) => {
     if (action === "diagnose") {
       const month = str(body.month);
       if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("month 格式应为 YYYY-MM");
-      const perUploadCap = Math.max(1000, Math.min(200000, Math.round(num(body.sample_limit)) || 50000));
-
-      const { data: ups, error } = await db
-        .from("ad_uploads")
-        .select("id, file_name, country, month, status, row_count")
-        .eq("month", month)
-        .order("country", { ascending: true });
-      if (error) throw new Error(error.message);
-      const uploads = (ups ?? []) as Array<UploadRec & { row_count: number }>;
-
+      const uploads = await readyUploads(db, month);
       const ctx = await loadAttrContext(db);
 
       // 名字（不分站点）→ 已登记站点集合，用于区分「名字没登记过」和「名字登记在别的站点」
       const sitesByName = new Map<string, Set<string>>();
       const addName = (key: string) => {
-        const at = key.indexOf("\u001f");
-        const country = at < 0 ? "" : key.slice(0, at);
-        const norm = at < 0 ? key : key.slice(at + 1);
-        if (!norm) return;
-        const set = sitesByName.get(norm) ?? new Set<string>();
+        const { country, normalizedName } = splitIdentityKey(key);
+        if (!normalizedName) return;
+        const set = sitesByName.get(normalizedName) ?? new Set<string>();
         set.add(country || "（空）");
-        sitesByName.set(norm, set);
+        sitesByName.set(normalizedName, set);
       };
       for (const k of ctx.ownership.keys()) addName(k);
       for (const k of ctx.manualAlias.keys()) addName(k);
@@ -785,8 +689,7 @@ Deno.serve(async (req) => {
 
       const registryCountries = new Map<string, number>();
       for (const k of ctx.ownership.keys()) {
-        const at = k.indexOf("\u001f");
-        const c = at < 0 ? "（空）" : (k.slice(0, at) || "（空）");
+        const c = splitIdentityKey(k).country || "（空）";
         registryCountries.set(c, (registryCountries.get(c) ?? 0) + 1);
       }
       const vidCountries = new Map<string, number>();
@@ -799,80 +702,68 @@ Deno.serve(async (req) => {
 
       type Layer = {
         rows: number;
-        sampled: boolean;
+        agg_rows: number;
         product_card: number;
         vid_rows: number;
         vid_hit: number;
         no_name: number;
         name_hit_same_site: number;
-        /** 名字登记过、但登记站点和上传站点不一致 → 归因引擎按规则判 UNMATCHED */
+        /** 名字登记过、但登记站点和上传站点不一致 → 按现行口径判 UNMATCHED */
         name_hit_other_site: number;
         name_never_registered: number;
-        /** 上述「站点对不上」的样本：上传站点 → 登记站点 */
         other_site_samples: Array<{ account_name: string; registered_sites: string[] }>;
       };
       const emptyLayer = (): Layer => ({
-        rows: 0, sampled: false, product_card: 0, vid_rows: 0, vid_hit: 0, no_name: 0,
+        rows: 0, agg_rows: 0, product_card: 0, vid_rows: 0, vid_hit: 0, no_name: 0,
         name_hit_same_site: 0, name_hit_other_site: 0, name_never_registered: 0, other_site_samples: [],
       });
       const total = emptyLayer();
-
       const perUpload: Array<{ file_name: string; country: string; status: string } & Layer> = [];
+
       for (const u of uploads) {
         const layer = emptyLayer();
-        let from = 0;
-        for (; from < perUploadCap;) {
-          const { data, error: rowErr } = await db
-            .from("ad_upload_rows")
-            .select("creative_type, vid, tt_account_name")
-            .eq("upload_id", u.id)
-            .order("row_no", { ascending: true })
-            .range(from, Math.min(from + PAGE, perUploadCap) - 1);
-          if (rowErr) throw new Error(rowErr.message);
-          const rows = (data ?? []) as Array<{ creative_type: string; vid: string; tt_account_name: string }>;
-          for (const r of rows) {
-            layer.rows++;
-            if (normalizeCreativeType(r.creative_type) === "product_card") {
-              layer.product_card++;
+        const aggRows = await fetchAgg(db, [u.id]);
+        for (const r of aggRows) {
+          const n = r.rows_count || 1;
+          layer.rows += n;
+          layer.agg_rows++;
+          if (normalizeCreativeType(r.creative_type) === "product_card") {
+            layer.product_card += n;
+            continue;
+          }
+          if (r.vid) {
+            layer.vid_rows += n;
+            if (ctx.vidRegs.has(r.vid)) {
+              layer.vid_hit += n;
               continue;
-            }
-            const vid = r.vid ?? "";
-            if (vid) {
-              layer.vid_rows++;
-              if (ctx.vidRegs.has(vid)) {
-                layer.vid_hit++;
-                continue;
-              }
-            }
-            const norm = normalizeName(r.tt_account_name);
-            if (!norm) {
-              layer.no_name++;
-              continue;
-            }
-            const scoped = identityKey(u.country, norm);
-            if (ctx.manualAlias.has(scoped) || ctx.ownership.has(scoped) || ctx.vidAlias.has(scoped)) {
-              layer.name_hit_same_site++;
-              continue;
-            }
-            const sites = sitesByName.get(norm);
-            if (sites?.size) {
-              layer.name_hit_other_site++;
-              if (layer.other_site_samples.length < 10) {
-                layer.other_site_samples.push({
-                  account_name: (r.tt_account_name ?? "").trim(),
-                  registered_sites: Array.from(sites).slice(0, 5),
-                });
-              }
-            } else {
-              layer.name_never_registered++;
             }
           }
-          if (rows.length < PAGE) break;
-          from += PAGE;
+          const norm = normalizeName(r.account_name);
+          if (!norm) {
+            layer.no_name += n;
+            continue;
+          }
+          const scoped = identityKey(u.country, norm);
+          if (ctx.manualAlias.has(scoped) || ctx.ownership.has(scoped) || ctx.vidAlias.has(scoped)) {
+            layer.name_hit_same_site += n;
+            continue;
+          }
+          const sites = sitesByName.get(norm);
+          if (sites?.size) {
+            layer.name_hit_other_site += n;
+            if (layer.other_site_samples.length < 10) {
+              layer.other_site_samples.push({
+                account_name: (r.account_name ?? "").trim(),
+                registered_sites: Array.from(sites).slice(0, 5),
+              });
+            }
+          } else {
+            layer.name_never_registered += n;
+          }
         }
-        layer.sampled = layer.rows >= perUploadCap && (u.row_count ?? 0) > layer.rows;
         perUpload.push({ file_name: u.file_name, country: u.country, status: u.status, ...layer });
         total.rows += layer.rows;
+        total.agg_rows += layer.agg_rows;
         total.product_card += layer.product_card;
         total.vid_rows += layer.vid_rows;
         total.vid_hit += layer.vid_hit;
@@ -880,14 +771,13 @@ Deno.serve(async (req) => {
         total.name_hit_same_site += layer.name_hit_same_site;
         total.name_hit_other_site += layer.name_hit_other_site;
         total.name_never_registered += layer.name_never_registered;
-        total.sampled = total.sampled || layer.sampled;
       }
 
       // 结论：按归因瀑布从上往下，第一条断掉的就是主因
       const hints: string[] = [];
-      if (!uploads.length) hints.push(`${month} 没有任何上传批次，先上传广告表。`);
+      if (!uploads.length) hints.push(`${month} 没有任何已完成上传的批次，先上传广告表。`);
       if (!ctx.vidRegs.size && !ctx.ownership.size) {
-        hints.push("VID 登记表和建联归属表都是空的 —— 说明「同步达人登记」从来没成功跑过（或跑完被清空了）。先点「同步达人登记（建联+归档+剪辑）」，看返回的登记行数是否 > 0。");
+        hints.push("VID 登记表和建联归属表都是空的 —— 说明「同步达人登记」从来没成功跑过（或跑完被清空了）。先点「同步达人登记」，看返回的登记行数是否 > 0。");
       } else {
         if (!ctx.vidRegs.size) hints.push("VID 登记为空：staff_vid_map 与 creator_registry 都没有带 VID 的记录，VID 强匹配这一层完全失效。");
         if (!ctx.ownership.size) hints.push("建联归属为空：creator_ownership 没有记录，昵称匹配这一层完全失效。");
@@ -895,10 +785,14 @@ Deno.serve(async (req) => {
       if (total.vid_rows > 0 && total.vid_hit === 0 && ctx.vidRegs.size > 0) {
         hints.push(`广告表里有 ${total.vid_rows} 行带 VID，但没有一个 VID 出现在登记表（登记表共 ${ctx.vidRegs.size} 个 VID）。检查飞书建联表 P 列 / 授权记录 Q 列 / 剪辑表 G 列的 VID 是否真的填了、是否 19 位且以 7 开头。`);
       }
+      const cjkSites = Array.from(registryCountries.keys()).filter((c) => hasCjk(c));
+      if (cjkSites.length) {
+        hints.push(`建联表里有 ${cjkSites.length} 种汉字站点写法（${cjkSites.slice(0, 10).join("、")}）。站点统一用英文简写，含汉字的行永远匹配不上，请到飞书把这些改成 PH / TH / VN / US / MX-AR 这类代码后重新同步。`);
+      }
       if (total.name_hit_other_site > 0 && total.name_hit_other_site >= total.name_hit_same_site) {
         const upSites = Array.from(new Set(uploads.map((u) => u.country))).join("、");
         const regSites = Array.from(registryCountries.keys()).slice(0, 15).join("、");
-        hints.push(`有 ${total.name_hit_other_site} 行的达人名字在登记表里存在，但登记站点和上传站点对不上，按现行口径一律判「无建联」。上传站点写法：${upSites}；登记表站点写法：${regSites}。两边必须逐字一致（大小写和空格会自动归一，中英文不会）。`);
+        hints.push(`有 ${total.name_hit_other_site} 行的达人名字在登记表里存在，但登记站点和上传站点对不上，按现行口径一律判「无建联」。上传站点写法：${upSites}；登记表站点写法：${regSites}。两边必须逐字一致。`);
       }
       if (total.name_never_registered > 0 && total.name_hit_same_site === 0 && total.vid_hit === 0) {
         hints.push(`还有 ${total.name_never_registered} 行的达人名字在建联/别名表里完全查不到，这部分是真正的「无建联达人」。`);
@@ -907,7 +801,6 @@ Deno.serve(async (req) => {
 
       return json({
         month,
-        sample_limit: perUploadCap,
         context: {
           vid_count: ctx.vidRegs.size,
           ownership_keys: ctx.ownership.size,
@@ -932,14 +825,8 @@ Deno.serve(async (req) => {
     if (action === "site_mismatch") {
       const month = str(body.month);
       if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("month 格式应为 YYYY-MM");
-      const { data: ups, error } = await db
-        .from("ad_uploads")
-        .select("id, country, month")
-        .eq("month", month)
-        .eq("status", "READY");
-      if (error) throw new Error(error.message);
-      const uploads = (ups ?? []) as { id: string; country: string; month: string }[];
-      if (!uploads.length) throw new Error(`没有 ${month} 已完成归因的上传批次`);
+      const uploads = await readyUploads(db, month);
+      if (!uploads.length) throw new Error(`没有 ${month} 已完成上传的批次`);
 
       // 建联归属 + 别名，按「归一化名字」建索引（不含站点），只用于诊断、不参与归因
       type Owner = { bd: string; country: string; source: string };
@@ -967,6 +854,9 @@ Deno.serve(async (req) => {
       }
 
       const exchangeRates = await loadExchangeRates(db);
+      const aggRows = await fetchAgg(db, uploads.map((u) => u.id));
+      const { pairs } = await attributeNow(db, aggRows);
+
       type Miss = {
         upload_country: string;
         account_name: string;
@@ -975,26 +865,23 @@ Deno.serve(async (req) => {
         registered: Owner[];
       };
       const missMap = new Map<string, Miss>();
-      for (const u of uploads) {
-        const rows = await fetchUnmatchedRows(db, u.id);
-        for (const r of rows) {
-          const raw = (r.tt_account_name ?? "").trim();
-          const norm = normalizeName(raw);
-          if (!norm) continue;
-          const owners = byName.get(norm);
-          if (!owners?.length) continue; // 名字压根没登记过 → 是真的无建联，不进这张表
-          // 站点精确匹配得上的不会走到 UNMATCHED，这里剩下的都是「名字在、站点不同」
-          const cur = (r.currency || "USD").toUpperCase();
-          const rate = exchangeRates.get(cur) ?? (cur === "USD" ? 1 : 0);
-          const key = `${u.country}|${norm}`;
-          let m = missMap.get(key);
-          if (!m) {
-            m = { upload_country: u.country, account_name: raw, rows: 0, gmv_usd: 0, registered: owners };
-            missMap.set(key, m);
-          }
-          m.rows++;
-          if (rate) m.gmv_usd += num(r.gross_revenue) / rate;
+      for (const { input, result, agg } of pairs) {
+        if (result.bucket !== "UNMATCHED") continue;
+        const raw = (input.accountName ?? "").trim();
+        const norm = normalizeName(raw);
+        if (!norm) continue;
+        const owners = byName.get(norm);
+        if (!owners?.length) continue; // 名字压根没登记过 → 是真的无建联，不进这张表
+        const cur = (input.currency || "USD").toUpperCase();
+        const rate = exchangeRates.get(cur) ?? (cur === "USD" ? 1 : 0);
+        const key = `${input.country}|${norm}`;
+        let m = missMap.get(key);
+        if (!m) {
+          m = { upload_country: input.country, account_name: raw, rows: 0, gmv_usd: 0, registered: owners };
+          missMap.set(key, m);
         }
+        m.rows += agg.rows_count || 1;
+        if (rate) m.gmv_usd += input.grossRevenue / rate;
       }
       const rowsOut = Array.from(missMap.values()).sort((a, b) => b.gmv_usd - a.gmv_usd);
       return json({ month, rows: rowsOut });

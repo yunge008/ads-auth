@@ -19,7 +19,7 @@ export function DetailTable({ rows, loading, title }: { rows: DetailRow[]; loadi
 
   return (
     <div className="space-y-2">
-      {title ? <div className="text-sm font-medium">{title}<span className="text-xs text-muted-foreground ml-2">共 {rows.length} 行（上限 5000）</span></div> : null}
+      {title ? <div className="text-sm font-medium">{title}<span className="text-xs text-muted-foreground ml-2">共 {rows.length} 个归并组（上限 5000）</span></div> : null}
       <div className="border rounded-md overflow-x-auto">
         <Table>
           <TableHeader>
@@ -28,6 +28,7 @@ export function DetailTable({ rows, loading, title }: { rows: DetailRow[]; loadi
               <TableHead>账号昵称</TableHead>
               <TableHead>站点</TableHead>
               <TableHead>类型</TableHead>
+              <TableHead className="text-right">原始行</TableHead>
               <TableHead className="text-right">GMV</TableHead>
               <TableHead className="text-right">消耗</TableHead>
               <TableHead className="text-right">订单</TableHead>
@@ -37,15 +38,17 @@ export function DetailTable({ rows, loading, title }: { rows: DetailRow[]; loadi
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow><TableCell colSpan={9} className="h-16 text-center text-sm text-muted-foreground">加载中…</TableCell></TableRow>
+              <TableRow><TableCell colSpan={10} className="h-16 text-center text-sm text-muted-foreground">加载中…</TableCell></TableRow>
             ) : paged.length === 0 ? (
-              <TableRow><TableCell colSpan={9} className="h-16 text-center text-sm text-muted-foreground">暂无数据</TableCell></TableRow>
+              <TableRow><TableCell colSpan={10} className="h-16 text-center text-sm text-muted-foreground">暂无数据</TableCell></TableRow>
             ) : paged.map((r, i) => (
               <TableRow key={`${r.vid}-${r.account_name}-${i}`}>
                 <TableCell className="font-mono text-xs">{r.vid || "—"}</TableCell>
                 <TableCell className="text-xs max-w-48 truncate" title={r.account_name}>{r.account_name || "—"}</TableCell>
                 <TableCell className="text-xs">{r.country || "未知站点"}</TableCell>
                 <TableCell className="text-xs">{TYPE_LABELS[r.creative_type] ?? r.creative_type}</TableCell>
+                {/* 一行明细 = 一个归并组，这里是它合并了多少条 Excel 原始行 */}
+                <TableCell className="text-right tabular-nums">{r.rows_count ?? "—"}</TableCell>
                 <TableCell className="text-right tabular-nums">{fmtUsd2(r.gmv)}</TableCell>
                 <TableCell className="text-right tabular-nums">{fmtUsd2(r.cost)}</TableCell>
                 <TableCell className="text-right tabular-nums">{r.orders}</TableCell>
