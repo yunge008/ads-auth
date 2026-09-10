@@ -2,6 +2,8 @@
 
 格式：`日期 | 工具 | 改了什么 | 涉及文件`
 
+2026-09-10 | lovable | 修复 attribution-upload 的 10 万行 finalize 超时：新增仅 service_role 可调用的 attribution_finalize_upload RPC，在数据库内原子完成归并、汇率校验、金额汇总和 READY 状态更新，并用 advisory lock 防止同批次并发重算；Edge Function 删除归并后读回全部结果及即时归因预览，前端改为上传完成后刷新月度快照；版本号改为 0910.036 | supabase/migrations/20260910162142_eaf75eb7-658d-46d8-b77f-48be76bd0919.sql, supabase/functions/attribution-upload/index.ts, src/lib/{attributionApi,uploadQueue,version}.ts, src/components/attribution/UploadView.tsx, docs/{ARCHITECTURE,PLAN,WORKLOG}.md
+
 2026-09-09 | lovable | 二次修复 attribution-upload 查询超时：unmatched_trend 将 12 个月一次性数据库聚合拆成逐月聚合并在函数内合并，避免大月份和并发查询撞 statement timeout；无需新增迁移；版本号改为 0909.022 | supabase/functions/attribution-upload/index.ts, src/lib/version.ts, docs/{ARCHITECTURE,PLAN,WORKLOG}.md
 2026-09-09 | lovable | 修复 attribution-upload 查询超时：unmatched_trend 从逐页拉取近 12 个月约 58 万条明细改为数据库内按国家×达人×月份聚合；新增仅 service_role 可调用且带 120 秒预算的 attribution_unmatched_trend_json RPC，以单个 JSON 返回完整结果避免默认 1000 行截断，并增加 UNMATCHED 覆盖索引；迁移已执行并重新部署 attribution-upload；版本号改为 0909.021 | supabase/functions/attribution-upload/index.ts, supabase/migrations/20260909172925_2e561aca-50af-4178-ae25-2d90fcb309d0.sql, supabase/migrations/20260909173053_f73d6206-d1d9-40d3-91bb-9e68cd8aee7f.sql, supabase/migrations/20260909173131_0e9146cf-8adf-466f-bac2-dc88f16a8c87.sql, supabase/migrations/20260909173353_90b1729c-06a6-4ef1-9016-ad0bf7142f92.sql, src/lib/version.ts, docs/{ARCHITECTURE,PLAN,WORKLOG}.md
 

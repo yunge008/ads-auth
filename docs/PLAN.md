@@ -31,6 +31,8 @@
 
 ## 已完成
 
+- ✅ 2026-09-10 [lovable] 修复 10 万行上传 finalize 超时：新增 service-role-only 的 `attribution_finalize_upload` RPC，在数据库内原子完成归并、汇率校验、金额汇总和置 READY，并用 advisory lock 阻止同批次并发重算；Edge Function 不再读回 9 万余条归并结果生成即时预览，上传完成后统一刷新月度快照。
+
 - ✅ 2026-09-10 [lovable] 修复 `attribution-upload finalize` 的 10 万行数据库超时：读取从 OFFSET 分页改为 `row_no` 游标分页；归因结果回填从通用 UPSERT 改为 service-role-only 的 `attribution_upload_rows_update(uuid,jsonb)` 专用 UPDATE RPC（120 秒独立预算），并增加读取/上下文/归因/产物/回填/汇总分阶段耗时日志。
 
 - ✅ 2026-09-09 [lovable] 二次修复 `attribution-upload` 的 `unmatched_trend` 超时：线上日志确认 12 个月一次性 RPC 在并发/大月数据下仍撞约 20 秒语句预算；改为 12 次逐月数据库聚合后在函数内合并，完整保留全部月份与达人数据，同时将每条 SQL 限定为单月。已重新部署 `attribution-upload`。
