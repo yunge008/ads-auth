@@ -145,19 +145,22 @@ type AttrRow = Pick<
 /** finalize 专用：只取归因需要的列，分页拉全量。 */
 async function fetchAttrRows(db: ReturnType<typeof admin>, uploadId: string): Promise<AttrRow[]> {
   const out: AttrRow[] = [];
-  let from = 0;
+  let lastRowNo = -1;
   for (;;) {
     const { data, error } = await db
       .from("ad_upload_rows")
       .select(ATTR_COLUMNS)
       .eq("upload_id", uploadId)
+      .gt("row_no", lastRowNo)
       .order("row_no", { ascending: true })
-      .range(from, from + PAGE - 1);
+      .limit(PAGE);
     if (error) throw new Error(error.message);
     const rows = (data ?? []) as AttrRow[];
     out.push(...rows);
     if (rows.length < PAGE) break;
-    from += PAGE;
+    const nextRowNo = rows.at(-1)?.row_no;
+    if (nextRowNo === undefined || nextRowNo <= lastRowNo) throw new Error("归因数据分页游标异常");
+    lastRowNo = nextRowNo;
   }
   return out;
 }
@@ -393,17 +396,23 @@ Deno.serve(async (req) => {
         );
       }
 
+      const contextStartedAt = Date.now();
       const ctx = await loadAttrContext(db);
+      console.log(`finalize ${uploadId}: 加载归因上下文耗时 ${Date.now() - contextStartedAt}ms`);
+      const attributeStartedAt = Date.now();
       const run = attributeRows(inputs, ctx);
+      console.log(`finalize ${uploadId}: 计算 ${run.rows.length} 行归因耗时 ${Date.now() - attributeStartedAt}ms`);
+      const artifactsStartedAt = Date.now();
       const persisted = await persistRunArtifacts(db, run);
+      console.log(`finalize ${uploadId}: 保存归因产物耗时 ${Date.now() - artifactsStartedAt}ms`);
       const resultByKey = new Map(run.rows.map((r) => [r.key, r]));
 
       // 回填 attr_* 列。只发「主键 + 4 个归因列」：这些行必然已存在，ON CONFLICT 只会更新带过来的列，
       // 不必把 22 列原样再传一遍——10 万行时那样的请求体会把 finalize 直接拖到超时（表现就是「卡在上传中」）。
       const writeback = rows.map((r) => {
-        const res = resultByKey.get(`u:${uploadId}:${r.row_no}`)!;
+        const res = resultByKey.get(`u:${uploadId}:${r.row_no}`);
+        if (!res) throw new Error(`第 ${r.row_no} 行缺少归因结果`);
         return {
-          upload_id: uploadId,
           row_no: r.row_no,
           attr_bucket: res.bucket,
           attr_staff: res.staff ?? null,
@@ -413,14 +422,24 @@ Deno.serve(async (req) => {
       });
       const t1 = Date.now();
       for (let i = 0; i < writeback.length; i += 1000) {
-        const { error } = await db
-          .from("ad_upload_rows")
-          .upsert(writeback.slice(i, i + 1000), { onConflict: "upload_id,row_no" });
+        const { data: affected, error } = await db.rpc("attribution_upload_rows_update", {
+          _upload_id: uploadId,
+          _rows: writeback.slice(i, i + 1000),
+        });
         if (error) throw new Error(error.message);
+        const expected = Math.min(1000, writeback.length - i);
+        if (Number(affected) !== expected) {
+          throw new Error(`归因结果回填不完整：预期 ${expected} 行，实际 ${Number(affected) || 0} 行`);
+        }
       }
       console.log(`finalize ${uploadId}: 回填 ${writeback.length} 行耗时 ${Date.now() - t1}ms`);
 
-      const pairs = inputs.map((input) => ({ input, result: resultByKey.get(input.key)! }));
+      const pairs = inputs.map((input) => {
+        const result = resultByKey.get(input.key);
+        if (!result) throw new Error(`缺少归因结果：${input.key}`);
+        return { input, result };
+      });
+      const summaryStartedAt = Date.now();
       const [targets, staffMeta] = await Promise.all([loadTargets(db, upload.month), loadStaffMeta(db)]);
       const summary = aggregateResults(pairs, {
         period: { start: upload.period_start ?? "", end: upload.period_end ?? "" },
@@ -429,6 +448,7 @@ Deno.serve(async (req) => {
         exchangeRates: exchangeRatesPre,
         staffMeta,
       });
+      console.log(`finalize ${uploadId}: 汇总报表耗时 ${Date.now() - summaryStartedAt}ms`);
 
       const { error: upErr } = await db
         .from("ad_uploads")
