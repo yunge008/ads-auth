@@ -436,7 +436,7 @@ Deno.serve(async (req) => {
         if (!uploads.length) throw new Error(`没有 ${month} 已完成归因的上传批次`);
         // 内存优化：整月合并可能有 10w+ 行，逐批次读取后立刻丢掉原始行（22 列），
         // 只保留聚合所需的 input/result；明细按批次先过滤再合并，避免 worker OOM。
-        const allPairs: ReturnType<typeof storedPairs> = [];
+        const allPairs: Array<{ input: AttrInputRow; result: AttrRowResult }> = [];
         let detailRows: ReturnType<typeof detailFromPairs> = [];
         for (const u of uploads) {
           const rows = await fetchAllRows(db, u.id);
