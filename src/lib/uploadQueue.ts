@@ -96,16 +96,20 @@ function restore() {
     const raw = window.sessionStorage.getItem(SS_KEY);
     if (!raw) return;
     const parsed = JSON.parse(raw) as { items?: QueueItem[] };
-    const items = (parsed.items ?? []).map((i) => ({
-      ...i,
-      restored: true,
-      // 刷新时还在上传中的条目：进程已经没了，标成失败而不是永远转圈
-      status: i.status === "uploading" || i.status === "finalizing" || i.status === "queued" ? ("failed" as const) : i.status,
-      phase:
-        i.status === "uploading" || i.status === "finalizing" || i.status === "queued"
-          ? "页面刷新导致上传中断，请重新选择文件上传"
-          : i.phase,
-    }));
+    const items = (parsed.items ?? [])
+      // 只恢复「真的跑过」的条目。刷新后 File 对象已经没了，还没开始上传的「待上传」行既传不了也删不掉，
+      // 留在表里只会让人以为卡住了 —— 直接丢弃，需要就重新选文件。
+      .filter((i) => i.status !== "parsed" && i.status !== "queued")
+      .map((i) => ({
+        ...i,
+        restored: true,
+        // 刷新时还在上传中的条目：进程已经没了，标成失败而不是永远转圈
+        status: i.status === "uploading" || i.status === "finalizing" ? ("failed" as const) : i.status,
+        phase:
+          i.status === "uploading" || i.status === "finalizing"
+            ? "页面刷新导致上传中断，请重新选择文件上传"
+            : i.phase,
+      }));
     if (items.length) state = { ...state, items };
   } catch {
     /* 坏数据直接忽略 */
@@ -132,6 +136,16 @@ export const uploadQueue = {
   clear() {
     rowsById.clear();
     setState({ items: [] });
+  },
+
+  /** 从列表里移除一条（上传中的除外，避免把正在跑的任务从视图里抹掉）。 */
+  remove(id: string) {
+    if (state.uploading) {
+      const item = state.items.find((i) => i.id === id);
+      if (item && (item.status === "uploading" || item.status === "finalizing" || item.status === "queued")) return;
+    }
+    rowsById.delete(id);
+    setState({ items: state.items.filter((i) => i.id !== id) });
   },
 
   patch(id: string, patch: Partial<QueueItem>) {

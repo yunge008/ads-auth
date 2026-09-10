@@ -35,6 +35,40 @@ export function hasCjk(s: string | null | undefined): boolean {
   return /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(s ?? "");
 }
 
+/**
+ * 站点等效写法映射：极少数历史写法在飞书里已经沉淀了很多行，逐条改不现实，
+ * 就在读取时归一到标准代码。**这不是「汉字匹配」**——只是把已知的旧写法翻译成代码，
+ * 表里没列出的汉字站点一律不认，仍旧报错让人去飞书改。
+ */
+const SITE_ALIASES: Record<string, string> = {
+  "PH本土": "PHL",
+  "PH 本土": "PHL",
+};
+
+/**
+ * 明显是表头/占位而不是站点的单元格。建联表有的 sheet 有多行表头，
+ * 从 A2 开始读会把「地区/店铺」这种标题当成站点收进来，不该报成「汉字站点写法」。
+ */
+const SITE_HEADER_WORDS = new Set([
+  "地区/店铺", "地区", "店铺", "国家", "站点", "国家/地区", "地区/国家", "站点/地区", "所属站点", "（空）", "(空)",
+]);
+
+export function isHeaderLikeSite(s: string | null | undefined): boolean {
+  const t = (s ?? "").normalize("NFKC").trim().replace(/\s+/g, "");
+  return t === "" || SITE_HEADER_WORDS.has(t);
+}
+
+/**
+ * 站点归一：NFKC + trim + 折叠空白 + 大写，再套等效写法映射。
+ * 归一后仍含汉字 = 数据填错，调用方负责计数并提示回飞书改，不做任何猜测性匹配。
+ */
+export function normalizeSiteCode(s: string | null | undefined): string {
+  const t = (s ?? "").normalize("NFKC").trim().replace(/\s+/g, " ");
+  if (!t) return "";
+  const mapped = SITE_ALIASES[t] ?? SITE_ALIASES[t.toUpperCase()] ?? t;
+  return mapped.toUpperCase();
+}
+
 /** Map key used for every nickname/username alias lookup.  Country is mandatory. */
 export function identityKey(country: string | null | undefined, normalizedName: string): string {
   const site = (country ?? "").normalize("NFKC").trim().replace(/\s+/g, " ").toUpperCase();

@@ -19,6 +19,8 @@ import {
   type ReviewItem,
   hasCjk,
   identityKey,
+  isHeaderLikeSite,
+  normalizeSiteCode,
   normalizeName,
   resolveOwnership,
 } from "../_shared/attribution.ts";
@@ -68,8 +70,12 @@ Deno.serve(async (req) => {
     const cjkSites = new Map<string, number>();
     const readSite = (cell: unknown): string => {
       const raw = cellText(cell);
-      if (raw && hasCjk(raw)) cjkSites.set(raw, (cjkSites.get(raw) ?? 0) + 1);
-      return raw;
+      // 表头/占位单元格（「地区/店铺」这类）不是站点，既不上报也不入库
+      if (isHeaderLikeSite(raw)) return "";
+      // 先套等效写法映射（PH本土 → PHL），映射完仍含汉字才算填错
+      const site = normalizeSiteCode(raw);
+      if (site && hasCjk(site)) cjkSites.set(site, (cjkSites.get(site) ?? 0) + 1);
+      return site;
     };
     /** 读一个 VID 单元格：丢精度的直接当空处理，避免把错的 VID 写进登记表 */
     const readVid = (cell: unknown): string => {

@@ -250,11 +250,11 @@ export const snapshotApi = {
     ),
   /** 重新计算并生成一条新快照（会比较慢，页面上要给等待提示）。 */
   refresh: (month: string, source = "MANUAL") =>
-    invokeFn<{ months: string[]; results: Array<{ month: string; ok: boolean; run?: RunMeta; error?: string }> }>(
-      "attribution-upload",
-      { action: "refresh", month, source },
-      { timeout: 600000 },
-    ),
+    invokeFn<{
+      months: string[];
+      // skipped=true 表示该月没有新数据、直接沿用上一版快照（cron 才会跳过，手动重算永远强制重跑）
+      results: Array<{ month: string; ok: boolean; skipped?: boolean; reason?: string; run?: RunMeta; error?: string }>;
+    }>("attribution-upload", { action: "refresh", month, source }, { timeout: 600000 }),
   /** 从快照明细表下钻，不重算。 */
   detail: (p: { run_id?: string; month?: string; detail_for: DrillFilter }) =>
     invokeFn<{ detail_rows: DetailRow[]; run_id?: string }>(
@@ -298,6 +298,8 @@ export type DiagnoseResult = {
   vid_countries: Array<{ country: string; rows: number }>;
   uploads: Array<{ file_name: string; country: string; status: string } & DiagnoseLayer>;
   totals: DiagnoseLayer;
+  /** 本次自查顺带补跑归并的批次数（解耦改造之前上传、没有归并数据的历史批次） */
+  healed?: number;
   hints: string[];
 };
 

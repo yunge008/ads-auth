@@ -38,6 +38,7 @@ import {
   attributeRows,
   hasCjk,
   identityKey,
+  isHeaderLikeSite,
   normalizeCreativeType,
   normalizeName,
   splitIdentityKey,
@@ -199,6 +200,72 @@ async function readyUploads(db: ReturnType<typeof admin>, month: string) {
   return (data ?? []) as Array<UploadRec & { row_count: number; total_revenue: number; attributed_at: string | null }>;
 }
 
+/**
+ * 自愈：把「已 READY 但归并表里没有数据」的批次补跑一次归并。
+ * 解耦改造之前 finalize 过的历史批次没有 ad_upload_agg 行，直接算会得到全 0 的报表；
+ * 与其让用户挨个去点「重新归并」，不如在生成快照 / 自查时自动补上。
+ */
+async function ensureAgg(
+  db: ReturnType<typeof admin>,
+  uploads: Array<{ id: string; file_name: string }>,
+): Promise<{ built: number; details: string[] }> {
+  let built = 0;
+  const details: string[] = [];
+  for (const u of uploads) {
+    const { count, error } = await db
+      .from("ad_upload_agg")
+      .select("id", { count: "exact", head: true })
+      .eq("upload_id", u.id);
+    if (error) throw new Error(error.message);
+    if ((count ?? 0) > 0) continue;
+    const t = Date.now();
+    const { data, error: rpcErr } = await db.rpc("attribution_build_upload_agg", { _upload_id: u.id });
+    if (rpcErr) {
+      details.push(`${u.file_name}：补归并失败 ${rpcErr.message}`);
+      console.error(`ensureAgg ${u.id} 失败`, rpcErr);
+      continue;
+    }
+    const info = (Array.isArray(data) ? data[0] : data) as { agg_rows: number; raw_rows: number } | null;
+    built++;
+    details.push(`${u.file_name}：${Number(info?.raw_rows ?? 0)} 原始行 → ${Number(info?.agg_rows ?? 0)} 归并组（${Date.now() - t}ms）`);
+    console.log(`ensureAgg ${u.file_name}: ${details[details.length - 1]}`);
+  }
+  return { built, details };
+}
+
+/**
+ * 这个月要不要重跑快照。cron 默认带上这个判断，没有新数据就跳过，避免每晚白跑一遍。
+ * 判定依据：该月有新完成的广告表批次，或达人登记有更新（两者都会改变归因结果）。
+ */
+async function monthNeedsRefresh(
+  db: ReturnType<typeof admin>,
+  month: string,
+  run: RunMeta | null,
+): Promise<{ needed: boolean; reason: string }> {
+  if (!run) return { needed: true, reason: "该月还没有快照" };
+  const since = run.started_at;
+
+  const { data: ups, error: upErr } = await db
+    .from("ad_uploads")
+    .select("id")
+    .eq("month", month)
+    .eq("status", "READY")
+    .gt("attributed_at", since)
+    .limit(1);
+  if (upErr) throw new Error(upErr.message);
+  if (ups?.length) return { needed: true, reason: "该月有新完成的广告表批次" };
+
+  const { data: own, error: ownErr } = await db
+    .from("creator_ownership")
+    .select("resolved_at")
+    .gt("resolved_at", since)
+    .limit(1);
+  if (ownErr) throw new Error(ownErr.message);
+  if (own?.length) return { needed: true, reason: "达人登记有更新" };
+
+  return { needed: false, reason: "广告表和达人登记都没有变化" };
+}
+
 function detailFromPairs(pairs: LivePair[], f: { staff?: string; role?: string; bucket?: string }) {
   return pairs
     .filter(({ result }) => {
@@ -295,6 +362,11 @@ async function buildSnapshot(
 
   try {
     const uploads = await readyUploads(db, month);
+    // 历史批次可能还没归并过（解耦改造之前 finalize 的），这里自动补上，否则会算出一张全 0 的报表
+    if (uploads.length) {
+      const healed = await ensureAgg(db, uploads);
+      if (healed.built) console.log(`buildSnapshot ${month}: 补归并 ${healed.built} 个批次`);
+    }
     const { start, end } = monthRange(month);
     const [targets, exchangeRates, staffMeta] = await Promise.all([
       loadTargets(db, month),
@@ -658,9 +730,21 @@ Deno.serve(async (req) => {
         months = seen.slice(0, lookback);
       }
 
-      const results: Array<{ month: string; ok: boolean; run?: RunMeta; error?: string }> = [];
+      // cron 默认只在「有新数据」时才跑；页面上手动点「重新计算」永远强制重算
+      const skipIfUnchanged = body.skip_if_unchanged === undefined ? cronAuthed : !!body.skip_if_unchanged;
+
+      const results: Array<{ month: string; ok: boolean; skipped?: boolean; reason?: string; run?: RunMeta; error?: string }> = [];
       for (const m of months) {
         try {
+          if (skipIfUnchanged) {
+            const prev = await latestRun(db, m);
+            const { needed, reason } = await monthNeedsRefresh(db, m, prev);
+            if (!needed) {
+              results.push({ month: m, ok: true, skipped: true, reason, run: prev ?? undefined });
+              console.log(`refresh ${m}: 跳过（${reason}）`);
+              continue;
+            }
+          }
           const { run } = await buildSnapshot(db, m, source, account.name, keep);
           results.push({ month: m, ok: true, run });
           console.log(`refresh ${m}: ${run.agg_rows} 归并行 → ${run.staff_count} 人，GMV ${Math.round(run.total_gmv)}`);
@@ -942,6 +1026,8 @@ Deno.serve(async (req) => {
       const month = str(body.month);
       if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("month 格式应为 YYYY-MM");
       const uploads = await readyUploads(db, month);
+      // 和生成快照一样先自愈：没归并过的历史批次先补上，否则自查每一格都是 0，看不出真实原因
+      const healed = uploads.length ? await ensureAgg(db, uploads) : { built: 0, details: [] as string[] };
       const ctx = await loadAttrContext(db);
 
       // 名字（不分站点）→ 已登记站点集合，用于区分「名字没登记过」和「名字登记在别的站点」
@@ -1055,9 +1141,13 @@ Deno.serve(async (req) => {
       if (total.vid_rows > 0 && total.vid_hit === 0 && ctx.vidRegs.size > 0) {
         hints.push(`广告表里有 ${total.vid_rows} 行带 VID，但没有一个 VID 出现在登记表（登记表共 ${ctx.vidRegs.size} 个 VID）。检查飞书建联表 P 列 / 授权记录 Q 列 / 剪辑表 G 列的 VID 是否真的填了、是否 19 位且以 7 开头。`);
       }
-      const cjkSites = Array.from(registryCountries.keys()).filter((c) => hasCjk(c));
+      // 表头、占位符不算「填错的站点」，不要拿它们去烦用户
+      const cjkSites = Array.from(registryCountries.keys()).filter((c) => hasCjk(c) && !isHeaderLikeSite(c));
       if (cjkSites.length) {
         hints.push(`建联表里有 ${cjkSites.length} 种汉字站点写法（${cjkSites.slice(0, 10).join("、")}）。站点统一用英文简写，含汉字的行永远匹配不上，请到飞书把这些改成 PH / TH / VN / US / MX-AR 这类代码后重新同步。`);
+      }
+      if (healed.built) {
+        hints.push(`本次自查顺带补跑了 ${healed.built} 个批次的归并（这些批次是解耦改造之前上传的，之前没有归并数据）：${healed.details.slice(0, 5).join("；")}`);
       }
       if (total.name_hit_other_site > 0 && total.name_hit_other_site >= total.name_hit_same_site) {
         const upSites = Array.from(new Set(uploads.map((u) => u.country))).join("、");
@@ -1088,6 +1178,7 @@ Deno.serve(async (req) => {
           .sort((a, b) => b.rows - a.rows),
         uploads: perUpload,
         totals: total,
+        healed: healed.built,
         hints,
       });
     }

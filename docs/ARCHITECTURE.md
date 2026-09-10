@@ -25,7 +25,7 @@
 | `/api-test` | API 测试 |
 | `/oauth/tiktok/callback` | TikTok OAuth 回调 |
 | `/api/public/hooks/gmv-max-cron` | **服务端路由**：pg_cron 调用入口，循环驱动 gmv-max-sync 续跑（apikey=anon key 鉴权，5 分钟硬预算） |
-| `/api/public/hooks/attribution-cron` | **服务端路由**：每晚北京 23:30 刷新 GMV 归因结果快照（调 `attribution-upload` 的 `refresh`，默认最近 3 个有批次的月份；apikey 鉴权） |
+| `/api/public/hooks/attribution-cron` | **服务端路由**：每晚北京 23:30 刷新 GMV 归因结果快照（调 `attribution-upload` 的 `refresh`，默认最近 3 个有批次的月份；**cron 带 `skip_if_unchanged`，该月广告表和达人登记都没变化就直接跳过，不重复计算**；apikey 鉴权） |
 | `/api/public/hooks/authorize-cron` | **服务端路由**：每日 08:00 自动授权入口，循环 feishu-read → authorize-batch → feishu-writeback，结束发飞书机器人通知（apikey 鉴权，10 分钟硬预算 / 最多 4 轮） |
 
 `routeTree.gen.ts` 自动生成，禁止手改。
@@ -68,3 +68,25 @@
 - 2026-09-09 Excel 取数口径与诊断：`src/lib/adExcel.ts` 的数字解析由 `parseNumeric` 统一处理（千分位 / 币种符号 / 不换行空格 / 全角数字 / 括号负数），并统计「原文非空但解析不出数字」的金额单元格数——旧实现把这类单元格静默记 0，整列取错时表面看不出异常。`ParsedFile.totals` 新增 `gmvRows`（GMV 非 0 的行数）与 `byCurrency`（按行内「货币」列分组的原币种小计），`ParsedFile.diagnostics` 暴露「缺货币列 / 解析失败单元格 / 未识别表头」，上传页解析后直接告警。**「货币」列已列入 `REQUIRED`，缺失时 `parseAdExcel` 直接 throw 阻断上传**（此前会默认 USD，`findMissingCurrencies` 也不报错，非美元站点 GMV 被当成美元放大几十倍）；列在但单元格为空的行仍按 USD 计并单独告警。业务上目前只应出现 USD / THB（`EXPECTED_CURRENCIES`），迁移 `20260909160000_seed_thb_exchange_rate.sql` 预置 USD=1、THB=32.5。`AttributionReport.non_usd` 每项加 `usd_rate` / `gmv_usd`：`usd_rate=null` 才是「缺汇率未计入」，有值表示已折算计入（旧 UI 一律显示成「未计入」，是误报）。
 
 - 2026-07-11 review implementation: `20260711000000_gmv_attribution_review.sql` adds country-scoped creator identity, configurable USD rates, goal-group fields, and immutable attribution batches/detail snapshots.
+
+## GMV 归因两层存储（表结构备查）
+
+> 以下三张表/两个函数的建表 SQL 已在 Supabase 执行完毕，按项目约定删除了 migration 文件，
+> 结构记录在这里备查。**再有 DB 改动仍然新建 migration 文件，跑完再删。**
+
+- `ad_upload_agg`（**第一层：原始数据**）：`upload_id`(FK→ad_uploads, CASCADE) / `country` / `month` /
+  `vid` / `account_name` / `product_id` / `creative_type` / `currency` / `posted_at`(组内最早) /
+  `rows_count` / `cost` / `gross_revenue` / `orders` / `impressions` / `clicks`；
+  唯一键 `(upload_id, vid, account_name, product_id, creative_type, currency)`，索引 `upload_id` / `(month,country)` / `vid`。
+  **只存可相加的数值**，ROI/CTR/CVR 这类比率不存，出报表时用汇总后的分子分母重算。
+- `attribution_runs`（**第二层：结果快照**）：`month` / `source`(CRON|MANUAL|UPLOAD) / `triggered_by` /
+  `status`(RUNNING|READY|FAILED) / `upload_count` / `agg_rows` / `raw_rows` / `staff_count` /
+  `total_gmv` / `total_cost` / `total_orders` / `summary`(jsonb，完整 AttributionReport) / `error` /
+  `started_at` / `finished_at`；索引 `(month, finished_at desc)` / `(status, started_at desc)`。
+- `attribution_run_rows`（**第二层：快照明细**）：`run_id`(FK→attribution_runs, CASCADE) + 归并行的全部字段 +
+  `cost_usd` / `gmv_usd`（按快照生成时的汇率折算）+ `bucket` / `staff` / `role` / `match_type` /
+  `handover_applied` / `posted_at` / `posted_at_source`；索引 `(run_id,bucket,gmv_usd desc)` / `(run_id,staff,gmv_usd desc)`。
+- RPC `attribution_build_upload_agg(_upload_id uuid) → (agg_rows, raw_rows)`：在数据库内按
+  站点×VID×达人昵称×商品ID×内容类型×币种 重建某批次的归并行（service_role only）。
+- RPC `attribution_runs_prune(_month text, _keep int default 10)`：每月只保留最近 N 条快照（service_role only）。
+- pg_cron job `attribution-snapshot-nightly`：`30 15 * * *`（北京 23:30）→ `/api/public/hooks/attribution-cron`。

@@ -352,6 +352,7 @@ export function UploadView({
                     <TableHead className="text-right">商品卡行数</TableHead>
                     <TableHead>状态</TableHead>
                     <TableHead className="w-64">进度</TableHead>
+                    <TableHead className="w-10"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -407,6 +408,19 @@ export function UploadView({
                             </div>
                           </div>
                         )}
+                      </TableCell>
+                      <TableCell>
+                        {/* 每行都能单独移除，不用为了清掉一条失败记录把整张表清空 */}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2 text-muted-foreground"
+                          title="从列表移除"
+                          onClick={() => uploadQueue.remove(f.id)}
+                          disabled={uploading && (f.status === "uploading" || f.status === "finalizing" || f.status === "queued")}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
