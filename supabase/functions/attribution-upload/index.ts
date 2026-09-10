@@ -433,7 +433,27 @@ Deno.serve(async (req) => {
           .eq("status", "READY");
         if (error) throw new Error(error.message);
         const uploads = (ups ?? []) as (UploadRec & { row_count: number; total_revenue: number; attributed_at: string | null })[];
-        if (!uploads.length) throw new Error(`没有 ${month} 已完成归因的上传批次`);
+        if (!uploads.length) {
+          // 该月没有已完成归因的批次时，返回空报表而不是报错（避免前端白屏）
+          const [targets0, exchangeRates0, staffMeta0] = await Promise.all([
+            loadTargets(db, month),
+            loadExchangeRates(db),
+            loadStaffMeta(db),
+          ]);
+          const { start: s0, end: e0 } = monthRange(month);
+          return json({
+            summary: aggregateResults([], {
+              period: { start: s0, end: e0 },
+              month,
+              targets: targets0,
+              exchangeRates: exchangeRates0,
+              staffMeta: staffMeta0,
+            }),
+            uploads: [],
+            last_synced_at: null,
+            detail_rows: detailFor ? [] : undefined,
+          });
+        }
         // 内存优化：整月合并可能有 10w+ 行，逐批次读取后立刻丢掉原始行（22 列），
         // 只保留聚合所需的 input/result；明细按批次先过滤再合并，避免 worker OOM。
         const allPairs: Array<{ input: AttrInputRow; result: AttrRowResult }> = [];
