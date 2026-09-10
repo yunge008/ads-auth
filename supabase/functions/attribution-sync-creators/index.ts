@@ -13,7 +13,7 @@ import {
   readRange,
 } from "../_shared/feishu.ts";
 import { admin, checkAdminPasscode } from "../_shared/auth.ts";
-import { cellText, parseDate } from "../_shared/cells.ts";
+import { cellText, isPrecisionLostNumber, parseDate } from "../_shared/cells.ts";
 import {
   type RegistryEntry,
   type ReviewItem,
@@ -61,6 +61,17 @@ Deno.serve(async (req) => {
     const token = await getTenantAccessToken();
     const regRows: RegRow[] = [];
     const missing: string[] = [];
+    /** VID 单元格被飞书按数字返回导致丢精度的次数（这些 VID 已经是错值，只能丢弃并提醒改列格式） */
+    let vidPrecisionLost = 0;
+    /** 读一个 VID 单元格：丢精度的直接当空处理，避免把错的 VID 写进登记表 */
+    const readVid = (cell: unknown): string => {
+      if (isPrecisionLostNumber(cell)) {
+        vidPrecisionLost++;
+        return "";
+      }
+      const raw = cellText(cell);
+      return VID_RE.test(raw) ? raw : "";
+    };
     const processedSheets = new Set<string>();
 
     // ---- 1) BD 建联表 + 2) 授权记录归档（主表格）----
@@ -81,8 +92,7 @@ Deno.serve(async (req) => {
         const r = rows[i] ?? [];
         const handleRaw = cellText(r[3]);
         const nicknameRaw = cellText(r[4]);
-        const vidRaw = cellText(r[15]);
-        const vid = VID_RE.test(vidRaw) ? vidRaw : "";
+        const vid = readVid(r[15]);
         const handleNorm = normalizeName(handleRaw);
         const nicknameNorm = normalizeName(nicknameRaw);
         if (!handleNorm && !nicknameNorm && !vid) continue;
@@ -114,8 +124,7 @@ Deno.serve(async (req) => {
         const r = rows[i] ?? [];
         const bd = cellText(r[0]) || "原数据";
         const nicknameRaw = cellText(r[3]);
-        const vidRaw = cellText(r[4]);
-        const vid = VID_RE.test(vidRaw) ? vidRaw : "";
+        const vid = readVid(r[4]);
         const nicknameNorm = normalizeName(nicknameRaw);
         if (!nicknameNorm && !vid) continue;
         regRows.push({
@@ -158,8 +167,8 @@ Deno.serve(async (req) => {
           const r = rows[i] ?? [];
           const who = cellText(r[1]);
           if (!who || who !== t.name) continue; // 与 feishu-read-editors 同规则：B 列同事须等于表名对应姓名
-          const vidRaw = cellText(r[6]);
-          if (!VID_RE.test(vidRaw)) continue;
+          const vid = readVid(r[6]);
+          if (!vid) continue;
           const acctRaw = cellText(r[4]);
           regRows.push({
             source: "EDITOR",
@@ -175,7 +184,7 @@ Deno.serve(async (req) => {
             handle_norm: "",
             nickname_raw: acctRaw,
             nickname_norm: normalizeName(acctRaw),
-            vid: vidRaw,
+            vid,
             registered_sku: cellText(r[5]) || null,
           });
         }
@@ -258,9 +267,11 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({
         registry_rows: regRows.length,
+        registry_vid_rows: regRows.filter((r) => r.vid).length,
         ownership_keys: ownRows.length,
         reviews_open: reviewsOpen ?? 0,
         missing_sheets: missing,
+        vid_precision_lost: vidPrecisionLost,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );

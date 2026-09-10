@@ -139,7 +139,16 @@ export function runAttribution(month: string, view: "admin" | "user", detailFor?
 }
 
 export function syncCreators() {
-  return invokeFn<{ registry_rows: number; ownership_keys: number; reviews_open: number; missing_sheets: string[] }>(
+  return invokeFn<{
+    registry_rows: number;
+    /** 其中带有效 VID 的行数：为 0 说明 VID 强匹配这一层必然全落空 */
+    registry_vid_rows?: number;
+    ownership_keys: number;
+    reviews_open: number;
+    missing_sheets: string[];
+    /** 飞书把 VID 列当数字返回、超出 2^53 丢精度而被丢弃的单元格数 */
+    vid_precision_lost?: number;
+  }>(
     "attribution-sync-creators",
     {},
     { timeout: 300000 },

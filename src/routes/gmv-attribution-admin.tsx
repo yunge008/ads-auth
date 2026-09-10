@@ -100,8 +100,21 @@ function MonthlyView() {
     try {
       if (kind === "creators") {
         const r = await syncCreators();
-        toast.success(`达人登记同步完成：登记 ${r.registry_rows} 行 · 归属 ${r.ownership_keys} 键 · 待审查 ${r.reviews_open}`);
+        toast.success(
+          `达人登记同步完成：登记 ${r.registry_rows} 行（含 VID ${r.registry_vid_rows ?? "?"} 行）· 归属 ${r.ownership_keys} 键 · 待审查 ${r.reviews_open}`,
+        );
         if (r.missing_sheets.length) toast.warning(`缺少 sheet：${r.missing_sheets.join("、")}`);
+        // 飞书把 VID 列当数字返回时，19 位 VID 超出 JS 2^53 精度会被静默改写成末尾补 0 的错值，
+        // 正则照样通过但永远匹配不上——这类单元格已被丢弃，必须让用户去改列格式。
+        if (r.vid_precision_lost) {
+          toast.error(
+            `有 ${r.vid_precision_lost} 个 VID 单元格被飞书当成数字返回、超出精度已被改写成错值（已丢弃不入库）。请把飞书建联表 P 列 / 授权记录 Q 列 / 剪辑表 G 列设为「文本」格式后重新同步，否则这些 VID 永远归因不上。`,
+            { duration: 15000 },
+          );
+        }
+        if (!r.registry_vid_rows) {
+          toast.warning("本次同步没有读到任何有效 VID：VID 强匹配这一层会完全失效，只能靠昵称路径归因。");
+        }
       } else if (kind === "targets") {
         const r = await feishuAction<{ upserted: number; skipped: string[] }>("sync-targets");
         toast.success(`目标同步完成：${r.upserted} 条`);
