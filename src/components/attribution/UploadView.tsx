@@ -339,6 +339,14 @@ export function UploadView({
             {files.length ? (
               <Button size="sm" variant="ghost" onClick={() => uploadQueue.clear()} disabled={uploading}>清空列表</Button>
             ) : null}
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+              <Checkbox
+                checked={replaceExisting}
+                onCheckedChange={(v) => setReplaceExisting(v === true)}
+                disabled={uploading}
+              />
+              同名文件替换旧记录
+            </label>
           </div>
 
           {files.length ? (
