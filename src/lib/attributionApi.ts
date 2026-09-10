@@ -207,6 +207,43 @@ export function siteMismatch(month: string) {
   );
 }
 
+/** 归因口径自查（attribution-upload → action=diagnose）。 */
+export type DiagnoseLayer = {
+  rows: number;
+  sampled: boolean;
+  product_card: number;
+  vid_rows: number;
+  vid_hit: number;
+  no_name: number;
+  name_hit_same_site: number;
+  name_hit_other_site: number;
+  name_never_registered: number;
+  other_site_samples: Array<{ account_name: string; registered_sites: string[] }>;
+};
+
+export type DiagnoseResult = {
+  month: string;
+  sample_limit: number;
+  context: {
+    vid_count: number;
+    ownership_keys: number;
+    manual_alias: number;
+    vid_alias: number;
+    handover_countries: number;
+    review_overrides: number;
+  };
+  upload_countries: string[];
+  registry_countries: Array<{ country: string; keys: number }>;
+  vid_countries: Array<{ country: string; rows: number }>;
+  uploads: Array<{ file_name: string; country: string; status: string } & DiagnoseLayer>;
+  totals: DiagnoseLayer;
+  hints: string[];
+};
+
+export function diagnoseAttribution(month: string) {
+  return invokeFn<DiagnoseResult>("attribution-upload", { action: "diagnose", month }, { timeout: 300000 });
+}
+
 export function unmatchedTrend(month: string) {
   return invokeFn<{ months: string[]; rows: UnmatchedTrendRow[] }>(
     "attribution-upload",

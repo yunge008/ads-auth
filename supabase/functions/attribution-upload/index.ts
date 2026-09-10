@@ -7,6 +7,8 @@
 //   list     { month? } → { uploads }
 //   get      { upload_id, detail_for? } 或 { month, merged:true } → { summary, uploads?, last_synced_at?, detail_rows? }
 //   delete   { upload_id } 或 { upload_ids: [...] } 或 { all: true }（清空全部批次，级联删行）
+//   diagnose      { month, sample_limit? } → 归因口径自查：逐批次统计商品卡/VID命中/昵称同站点命中/昵称异站点/从未登记，
+//                 并给出「哪一层断了」的结论，用于排查「一个人都归不上」
 //   site_mismatch { month } → { rows }：站点按字母精确匹配后仍归 UNMATCHED、但达人名字在建联归属/别名表里
 //                 存在（只是登记在别的站点）的行，按 (上传站点, 达人昵称) 聚合，供人工确认是否该跨站点认人
 //   list_exchange_rates {} → { rates }（含禁用行）
@@ -19,6 +21,7 @@ import {
   type AttrInputRow,
   type AttrRowResult,
   attributeRows,
+  identityKey,
   normalizeCreativeType,
   normalizeName,
   vidToPostedAt,
@@ -87,7 +90,7 @@ function errWithPayload(message: string, payload: Record<string, unknown>): Erro
   return e;
 }
 
-function toInput(uploadId: string, country: string, r: StoredRow): AttrInputRow {
+function toInput(uploadId: string, country: string, r: AttrRow): AttrInputRow {
   let postedAt: string | null = null;
   let postedAtSource: AttrInputRow["postedAtSource"] = null;
   if (r.posted_at) {
@@ -129,6 +132,34 @@ function storedPairs(uploadId: string, country: string, rows: StoredRow[]) {
     };
     return { input, result, stored: r };
   });
+}
+
+/** 归因只需要这 9 列；finalize 读全部 22 列在 10 万行量级会明显拖慢并推高内存。 */
+const ATTR_COLUMNS = "row_no, creative_type, vid, tt_account_name, posted_at, cost, orders, gross_revenue, currency";
+
+type AttrRow = Pick<
+  StoredRow,
+  "row_no" | "creative_type" | "vid" | "tt_account_name" | "posted_at" | "cost" | "orders" | "gross_revenue" | "currency"
+>;
+
+/** finalize 专用：只取归因需要的列，分页拉全量。 */
+async function fetchAttrRows(db: ReturnType<typeof admin>, uploadId: string): Promise<AttrRow[]> {
+  const out: AttrRow[] = [];
+  let from = 0;
+  for (;;) {
+    const { data, error } = await db
+      .from("ad_upload_rows")
+      .select(ATTR_COLUMNS)
+      .eq("upload_id", uploadId)
+      .order("row_no", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(error.message);
+    const rows = (data ?? []) as AttrRow[];
+    out.push(...rows);
+    if (rows.length < PAGE) break;
+    from += PAGE;
+  }
+  return out;
 }
 
 async function fetchAllRows(db: ReturnType<typeof admin>, uploadId: string): Promise<StoredRow[]> {
@@ -346,8 +377,10 @@ Deno.serve(async (req) => {
     if (action === "finalize") {
       const uploadId = str(body.upload_id);
       const upload = await getUpload(db, uploadId);
-      const rows = await fetchAllRows(db, uploadId);
+      const t0 = Date.now();
+      const rows = await fetchAttrRows(db, uploadId);
       if (!rows.length) throw new Error("该批次没有数据行");
+      console.log(`finalize ${uploadId}: 读取 ${rows.length} 行耗时 ${Date.now() - t0}ms`);
 
       const inputs = rows.map((r) => toInput(uploadId, upload.country, r));
 
@@ -365,22 +398,27 @@ Deno.serve(async (req) => {
       const persisted = await persistRunArtifacts(db, run);
       const resultByKey = new Map(run.rows.map((r) => [r.key, r]));
 
-      // 回填 attr_* 列（upsert 携带原列值，幂等）
+      // 回填 attr_* 列。只发「主键 + 4 个归因列」：这些行必然已存在，ON CONFLICT 只会更新带过来的列，
+      // 不必把 22 列原样再传一遍——10 万行时那样的请求体会把 finalize 直接拖到超时（表现就是「卡在上传中」）。
       const writeback = rows.map((r) => {
         const res = resultByKey.get(`u:${uploadId}:${r.row_no}`)!;
         return {
           upload_id: uploadId,
-          ...r,
+          row_no: r.row_no,
           attr_bucket: res.bucket,
           attr_staff: res.staff ?? null,
           attr_source: res.source ?? null,
           attr_match_type: res.matchType ?? null,
         };
       });
-      for (let i = 0; i < writeback.length; i += 500) {
-        const { error } = await db.from("ad_upload_rows").upsert(writeback.slice(i, i + 500), { onConflict: "upload_id,row_no" });
+      const t1 = Date.now();
+      for (let i = 0; i < writeback.length; i += 1000) {
+        const { error } = await db
+          .from("ad_upload_rows")
+          .upsert(writeback.slice(i, i + 1000), { onConflict: "upload_id,row_no" });
         if (error) throw new Error(error.message);
       }
+      console.log(`finalize ${uploadId}: 回填 ${writeback.length} 行耗时 ${Date.now() - t1}ms`);
 
       const pairs = inputs.map((input) => ({ input, result: resultByKey.get(input.key)! }));
       const [targets, staffMeta] = await Promise.all([loadTargets(db, upload.month), loadStaffMeta(db)]);
@@ -692,6 +730,183 @@ Deno.serve(async (req) => {
         deleted += count ?? 0;
       }
       return json({ deleted });
+    }
+
+    // 「为什么一个人都归不上」的自查：把归因瀑布每一层的命中量摊开，直接指出是哪一层断了。
+    if (action === "diagnose") {
+      const month = str(body.month);
+      if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("month 格式应为 YYYY-MM");
+      const perUploadCap = Math.max(1000, Math.min(200000, Math.round(num(body.sample_limit)) || 50000));
+
+      const { data: ups, error } = await db
+        .from("ad_uploads")
+        .select("id, file_name, country, month, status, row_count")
+        .eq("month", month)
+        .order("country", { ascending: true });
+      if (error) throw new Error(error.message);
+      const uploads = (ups ?? []) as Array<UploadRec & { row_count: number }>;
+
+      const ctx = await loadAttrContext(db);
+
+      // 名字（不分站点）→ 已登记站点集合，用于区分「名字没登记过」和「名字登记在别的站点」
+      const sitesByName = new Map<string, Set<string>>();
+      const addName = (key: string) => {
+        const at = key.indexOf("\u001f");
+        const country = at < 0 ? "" : key.slice(0, at);
+        const norm = at < 0 ? key : key.slice(at + 1);
+        if (!norm) return;
+        const set = sitesByName.get(norm) ?? new Set<string>();
+        set.add(country || "（空）");
+        sitesByName.set(norm, set);
+      };
+      for (const k of ctx.ownership.keys()) addName(k);
+      for (const k of ctx.manualAlias.keys()) addName(k);
+      for (const k of ctx.vidAlias.keys()) addName(k);
+
+      const registryCountries = new Map<string, number>();
+      for (const k of ctx.ownership.keys()) {
+        const at = k.indexOf("\u001f");
+        const c = at < 0 ? "（空）" : (k.slice(0, at) || "（空）");
+        registryCountries.set(c, (registryCountries.get(c) ?? 0) + 1);
+      }
+      const vidCountries = new Map<string, number>();
+      for (const regs of ctx.vidRegs.values()) {
+        for (const r of regs) {
+          const c = (r.country || "（空）").toUpperCase();
+          vidCountries.set(c, (vidCountries.get(c) ?? 0) + 1);
+        }
+      }
+
+      type Layer = {
+        rows: number;
+        sampled: boolean;
+        product_card: number;
+        vid_rows: number;
+        vid_hit: number;
+        no_name: number;
+        name_hit_same_site: number;
+        /** 名字登记过、但登记站点和上传站点不一致 → 归因引擎按规则判 UNMATCHED */
+        name_hit_other_site: number;
+        name_never_registered: number;
+        /** 上述「站点对不上」的样本：上传站点 → 登记站点 */
+        other_site_samples: Array<{ account_name: string; registered_sites: string[] }>;
+      };
+      const emptyLayer = (): Layer => ({
+        rows: 0, sampled: false, product_card: 0, vid_rows: 0, vid_hit: 0, no_name: 0,
+        name_hit_same_site: 0, name_hit_other_site: 0, name_never_registered: 0, other_site_samples: [],
+      });
+      const total = emptyLayer();
+
+      const perUpload: Array<{ file_name: string; country: string; status: string } & Layer> = [];
+      for (const u of uploads) {
+        const layer = emptyLayer();
+        let from = 0;
+        for (; from < perUploadCap;) {
+          const { data, error: rowErr } = await db
+            .from("ad_upload_rows")
+            .select("creative_type, vid, tt_account_name")
+            .eq("upload_id", u.id)
+            .order("row_no", { ascending: true })
+            .range(from, Math.min(from + PAGE, perUploadCap) - 1);
+          if (rowErr) throw new Error(rowErr.message);
+          const rows = (data ?? []) as Array<{ creative_type: string; vid: string; tt_account_name: string }>;
+          for (const r of rows) {
+            layer.rows++;
+            if (normalizeCreativeType(r.creative_type) === "product_card") {
+              layer.product_card++;
+              continue;
+            }
+            const vid = r.vid ?? "";
+            if (vid) {
+              layer.vid_rows++;
+              if (ctx.vidRegs.has(vid)) {
+                layer.vid_hit++;
+                continue;
+              }
+            }
+            const norm = normalizeName(r.tt_account_name);
+            if (!norm) {
+              layer.no_name++;
+              continue;
+            }
+            const scoped = identityKey(u.country, norm);
+            if (ctx.manualAlias.has(scoped) || ctx.ownership.has(scoped) || ctx.vidAlias.has(scoped)) {
+              layer.name_hit_same_site++;
+              continue;
+            }
+            const sites = sitesByName.get(norm);
+            if (sites?.size) {
+              layer.name_hit_other_site++;
+              if (layer.other_site_samples.length < 10) {
+                layer.other_site_samples.push({
+                  account_name: (r.tt_account_name ?? "").trim(),
+                  registered_sites: Array.from(sites).slice(0, 5),
+                });
+              }
+            } else {
+              layer.name_never_registered++;
+            }
+          }
+          if (rows.length < PAGE) break;
+          from += PAGE;
+        }
+        layer.sampled = layer.rows >= perUploadCap && (u.row_count ?? 0) > layer.rows;
+        perUpload.push({ file_name: u.file_name, country: u.country, status: u.status, ...layer });
+        total.rows += layer.rows;
+        total.product_card += layer.product_card;
+        total.vid_rows += layer.vid_rows;
+        total.vid_hit += layer.vid_hit;
+        total.no_name += layer.no_name;
+        total.name_hit_same_site += layer.name_hit_same_site;
+        total.name_hit_other_site += layer.name_hit_other_site;
+        total.name_never_registered += layer.name_never_registered;
+        total.sampled = total.sampled || layer.sampled;
+      }
+
+      // 结论：按归因瀑布从上往下，第一条断掉的就是主因
+      const hints: string[] = [];
+      if (!uploads.length) hints.push(`${month} 没有任何上传批次，先上传广告表。`);
+      if (!ctx.vidRegs.size && !ctx.ownership.size) {
+        hints.push("VID 登记表和建联归属表都是空的 —— 说明「同步达人登记」从来没成功跑过（或跑完被清空了）。先点「同步达人登记（建联+归档+剪辑）」，看返回的登记行数是否 > 0。");
+      } else {
+        if (!ctx.vidRegs.size) hints.push("VID 登记为空：staff_vid_map 与 creator_registry 都没有带 VID 的记录，VID 强匹配这一层完全失效。");
+        if (!ctx.ownership.size) hints.push("建联归属为空：creator_ownership 没有记录，昵称匹配这一层完全失效。");
+      }
+      if (total.vid_rows > 0 && total.vid_hit === 0 && ctx.vidRegs.size > 0) {
+        hints.push(`广告表里有 ${total.vid_rows} 行带 VID，但没有一个 VID 出现在登记表（登记表共 ${ctx.vidRegs.size} 个 VID）。检查飞书建联表 P 列 / 授权记录 Q 列 / 剪辑表 G 列的 VID 是否真的填了、是否 19 位且以 7 开头。`);
+      }
+      if (total.name_hit_other_site > 0 && total.name_hit_other_site >= total.name_hit_same_site) {
+        const upSites = Array.from(new Set(uploads.map((u) => u.country))).join("、");
+        const regSites = Array.from(registryCountries.keys()).slice(0, 15).join("、");
+        hints.push(`有 ${total.name_hit_other_site} 行的达人名字在登记表里存在，但登记站点和上传站点对不上，按现行口径一律判「无建联」。上传站点写法：${upSites}；登记表站点写法：${regSites}。两边必须逐字一致（大小写和空格会自动归一，中英文不会）。`);
+      }
+      if (total.name_never_registered > 0 && total.name_hit_same_site === 0 && total.vid_hit === 0) {
+        hints.push(`还有 ${total.name_never_registered} 行的达人名字在建联/别名表里完全查不到，这部分是真正的「无建联达人」。`);
+      }
+      if (!hints.length) hints.push("各层都有命中，归因口径本身没有断点。");
+
+      return json({
+        month,
+        sample_limit: perUploadCap,
+        context: {
+          vid_count: ctx.vidRegs.size,
+          ownership_keys: ctx.ownership.size,
+          manual_alias: ctx.manualAlias.size,
+          vid_alias: ctx.vidAlias.size,
+          handover_countries: ctx.handovers.size,
+          review_overrides: ctx.reviewOverrides.size,
+        },
+        upload_countries: Array.from(new Set(uploads.map((u) => u.country))).sort(),
+        registry_countries: Array.from(registryCountries.entries())
+          .map(([country, keys]) => ({ country, keys }))
+          .sort((a, b) => b.keys - a.keys),
+        vid_countries: Array.from(vidCountries.entries())
+          .map(([country, rows]) => ({ country, rows }))
+          .sort((a, b) => b.rows - a.rows),
+        uploads: perUpload,
+        totals: total,
+        hints,
+      });
     }
 
     if (action === "site_mismatch") {

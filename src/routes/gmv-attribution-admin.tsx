@@ -13,6 +13,7 @@ import { DetailTable } from "@/components/attribution/DetailTable";
 import { ReviewPanel } from "@/components/attribution/ReviewPanel";
 import { UploadView, type Viewing } from "@/components/attribution/UploadView";
 import { SiteMismatchTable } from "@/components/attribution/SiteMismatchTable";
+import { DiagnosePanel } from "@/components/attribution/DiagnosePanel";
 import {
   type AttributionReport,
   type DetailRow,
@@ -127,15 +128,31 @@ function MonthlyView() {
           <CardTitle className="text-base">数据准备</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-wrap items-end gap-2">
-          <Button size="sm" variant="outline" onClick={() => doSync("creators")} disabled={!!busy}>
-            <Users className={`h-4 w-4 mr-1.5 ${busy === "creators" ? "animate-pulse" : ""}`} />同步达人登记（建联+归档+剪辑）
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => doSync("targets")} disabled={!!busy}>
-            <TargetIcon className="h-4 w-4 mr-1.5" />同步 GMV 目标
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => doSync("handovers")} disabled={!!busy}>
-            <ArrowLeftRight className="h-4 w-4 mr-1.5" />同步站点交接
-          </Button>
+          <div className="flex flex-col gap-1">
+            <Button size="sm" variant="outline" onClick={() => doSync("creators")} disabled={!!busy}>
+              <Users className={`h-4 w-4 mr-1.5 ${busy === "creators" ? "animate-pulse" : ""}`} />同步达人登记（建联+归档+剪辑）
+            </Button>
+            <span className="text-[11px] text-muted-foreground max-w-[22rem]">
+              读飞书：各 BD「建联-姓名」sheet（A2:Q）+「授权记录」M3:S + 剪辑表（A2:H）→ 全量重建 creator_registry →
+              按 3 个月保护期解析昵称/用户名归属 → 全量重建 creator_ownership → 冲突写入审查表。归因前必须先跑。
+            </span>
+          </div>
+          <div className="flex flex-col gap-1">
+            <Button size="sm" variant="outline" onClick={() => doSync("targets")} disabled={!!busy}>
+              <TargetIcon className="h-4 w-4 mr-1.5" />同步 GMV 目标
+            </Button>
+            <span className="text-[11px] text-muted-foreground max-w-[18rem]">
+              读飞书「绩效配置表」A2:F（月份/姓名/角色/目标/备注）→ upsert gmv_targets。只影响进度条分母，不影响归因结果。
+            </span>
+          </div>
+          <div className="flex flex-col gap-1">
+            <Button size="sm" variant="outline" onClick={() => doSync("handovers")} disabled={!!busy}>
+              <ArrowLeftRight className="h-4 w-4 mr-1.5" />同步站点交接
+            </Button>
+            <span className="text-[11px] text-muted-foreground max-w-[18rem]">
+              读飞书「绩效配置表」H2:L（站点/原BD/新BD/交接日期/备注）→ 全量重建 site_handovers。按视频发布日在交接日前后改判归属。
+            </span>
+          </div>
           <div className="flex flex-col gap-1 ml-auto">
             <span className="text-xs text-muted-foreground">月份</span>
             <div className="flex items-center gap-2">
@@ -165,9 +182,14 @@ function MonthlyView() {
           <ProgressBoard report={report} mode="admin" onDrill={drill} />
           {detail ? <DetailTable rows={detail.rows} loading={detailLoading} title={detail.title} /> : null}
           <SiteMismatchTable month={month} />
+          <DiagnosePanel month={month} />
         </>
       ) : (
-        <div className="text-sm text-muted-foreground text-center py-16">选择月份后点击「生成报表」</div>
+        <>
+          <div className="text-sm text-muted-foreground text-center py-8">选择月份后点击「生成报表」</div>
+          {/* 报表还没生成、或者生成出来一个人都没有时，自查面板是排查入口，所以这里也要显示 */}
+          <DiagnosePanel month={month} />
+        </>
       )}
     </div>
   );
