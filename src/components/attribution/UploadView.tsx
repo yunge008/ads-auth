@@ -124,6 +124,9 @@ export function UploadView({
     setSelected(on ? new Set(filteredHistory.map((u) => u.id)) : new Set());
 
 
+  // 同名文件默认覆盖旧记录，避免上传被「该文件名已上传过」直接挡下来
+  const [replaceExisting, setReplaceExisting] = React.useState(true);
+
   const onPickFiles = async (list: FileList | null) => {
     if (!list?.length) return;
     await uploadQueue.addFiles(list, (m) => toast.warning(m), (m) => toast.error(m));
@@ -160,7 +163,8 @@ export function UploadView({
 
   const uploadAll = () =>
     uploadQueue.run({
-      onDuplicate: (msg) => window.confirm(`${msg}\n\n是否替换旧记录？`),
+      // 勾选「替换同名旧记录」时直接覆盖；未勾选则提示一次，用户确认后再覆盖
+      onDuplicate: (msg) => replaceExisting || window.confirm(`${msg}\n\n是否替换旧记录？`),
       onMissingRates: promptMissingRates,
       onSuccess: (m) => toast.success(m),
       onError: (m) => toast.error(m),
@@ -335,6 +339,14 @@ export function UploadView({
             {files.length ? (
               <Button size="sm" variant="ghost" onClick={() => uploadQueue.clear()} disabled={uploading}>清空列表</Button>
             ) : null}
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+              <Checkbox
+                checked={replaceExisting}
+                onCheckedChange={(v) => setReplaceExisting(v === true)}
+                disabled={uploading}
+              />
+              同名文件替换旧记录
+            </label>
           </div>
 
           {files.length ? (
