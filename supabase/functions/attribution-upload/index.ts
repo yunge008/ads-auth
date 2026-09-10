@@ -11,8 +11,7 @@
 //   create   { file_name, country, month:'YYYY-MM', note?, force?, replace_existing? } → { upload_id }
 //            站点必须是英文简写（PH / TH / VN / US / MX-AR…），含汉字直接拒收（force=true 可强制）
 //   append   { upload_id, rows: ParsedRow[] } （≤2000 行/批，幂等键 (upload_id,row_no)）
-//   finalize { upload_id } → 校验汇率覆盖（缺失时报错 payload.missing_currencies=[...]）→ 数据库内归并
-//            （RPC attribution_build_upload_agg）→ 现算一次归因返回预览汇总 → 批次置 READY
+//   finalize { upload_id } → 数据库内原子完成归并、汇率校验、金额汇总与置 READY；不读回归并明细
 //   list     { month? } → { uploads }
 //   get      { upload_id, detail_for? } 或 { month, merged:true } → { summary, uploads?, last_synced_at?, detail_rows? }
 //   delete   { upload_id } 或 { upload_ids: [...] } 或 { all: true }
@@ -574,24 +573,24 @@ Deno.serve(async (req) => {
       return json({ inserted: payload.length });
     }
 
-    // 归并 + 置 READY。这里**不写任何归因结果**，返回的 summary 只是「按当下登记数据现算」的即时预览。
+    // 归并 + 置 READY。整个过程留在数据库内，避免把 10 万行级归并结果读回 Worker。
     if (action === "finalize") {
       const uploadId = str(body.upload_id);
-      const upload = await getUpload(db, uploadId);
+      await getUpload(db, uploadId);
 
       const t0 = Date.now();
-      const { data: aggInfo, error: aggErr } = await db.rpc("attribution_build_upload_agg", { _upload_id: uploadId });
-      if (aggErr) throw new Error(`归并失败：${aggErr.message}`);
-      const info = (Array.isArray(aggInfo) ? aggInfo[0] : aggInfo) as { agg_rows: number; raw_rows: number } | null;
+      const { data: finalizeInfo, error: finalizeErr } = await db.rpc("attribution_finalize_upload", { _upload_id: uploadId });
+      if (finalizeErr) throw new Error(`归并失败：${finalizeErr.message}`);
+      const info = (Array.isArray(finalizeInfo) ? finalizeInfo[0] : finalizeInfo) as {
+        agg_rows: number;
+        raw_rows: number;
+        missing_currencies: string[] | null;
+      } | null;
       const rawRows = Number(info?.raw_rows ?? 0);
       if (!rawRows) throw new Error("该批次没有数据行");
       console.log(`finalize ${uploadId}: ${rawRows} 原始行 → ${info?.agg_rows ?? 0} 归并行，耗时 ${Date.now() - t0}ms`);
 
-      const aggRows = await fetchAgg(db, [uploadId]);
-      const inputs = aggRows.map(aggToInput);
-
-      const exchangeRates = await loadExchangeRates(db);
-      const missing = findMissingCurrencies(inputs, exchangeRates);
+      const missing = info?.missing_currencies ?? [];
       if (missing.length) {
         throw errWithPayload(
           `缺少汇率配置：${missing.join("、")}，请先在设置页维护汇率后重试`,
@@ -599,29 +598,7 @@ Deno.serve(async (req) => {
         );
       }
 
-      const { pairs } = await attributeNow(db, aggRows, { persist: true });
-      const [targets, staffMeta] = await Promise.all([loadTargets(db, upload.month), loadStaffMeta(db)]);
-      const summary = aggregateResults(pairs, {
-        period: { start: upload.period_start ?? "", end: upload.period_end ?? "" },
-        month: upload.month,
-        targets,
-        exchangeRates,
-        staffMeta,
-      });
-
-      const { error: upErr } = await db
-        .from("ad_uploads")
-        .update({
-          row_count: rawRows,
-          total_cost: summary.totals.cost,
-          total_revenue: summary.totals.gmv,
-          status: "READY",
-          attributed_at: new Date().toISOString(),
-        })
-        .eq("id", uploadId);
-      if (upErr) throw new Error(upErr.message);
-
-      return json({ summary, row_count: rawRows, agg_rows: aggRows.length });
+      return json({ row_count: rawRows, agg_rows: Number(info?.agg_rows ?? 0) });
     }
 
     if (action === "list") {

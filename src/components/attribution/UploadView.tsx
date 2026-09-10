@@ -173,7 +173,6 @@ export function UploadView({
     setRefinalizing(u.id);
     try {
       const fin = await uploadApi.finalize(u.id);
-      uploadQueue.setResult({ kind: "upload", id: u.id, label: `${u.country} ${u.month}（${u.file_name}）` }, fin.summary);
       toast.success(`${u.file_name}：${fin.row_count} 行已归并${fin.agg_rows ? `为 ${fin.agg_rows} 组` : ""}`);
       await loadHistory();
     } catch (e) {

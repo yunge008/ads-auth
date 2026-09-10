@@ -226,8 +226,6 @@ export const uploadQueue = {
 
     setState({ uploading: true, items: state.items.map((i) => (ready.some((r) => r.id === i.id) ? { ...i, status: "queued", phase: "排队中" } : i)) });
 
-    let lastSummary: AttributionReport | null = null;
-    let lastLabel = "";
     const completedMonths = new Set<string>();
 
     try {
@@ -245,11 +243,8 @@ export const uploadQueue = {
           patchItem(item.id, { status: "finalizing", uploadedRows: rows.length, phase: "服务端归并中（按 VID+达人昵称）" });
           const fin = await finalizeWithRates(uploadId, cb.onMissingRates);
 
-          lastSummary = fin.summary;
-          lastLabel = `${item.country} ${item.month}（${item.fileName}）`;
           completedMonths.add(item.month);
           patchItem(item.id, { status: "done", phase: "完成", finishedAt: Date.now() });
-          setState({ viewing: { kind: "upload", id: uploadId, label: lastLabel } }, { persist: false });
           cb.onSuccess(`${item.fileName}：${fin.row_count} 行已归并${fin.agg_rows ? `为 ${fin.agg_rows} 组` : ""}`);
         } catch (e) {
           const msg = (e as Error).message;
@@ -258,7 +253,7 @@ export const uploadQueue = {
         }
       }
 
-      if (lastSummary) {
+      if (completedMonths.size) {
         // 上传完顺带刷新一次该月的归因快照（第二层），这样月度进度页立刻就能读到新数据
         const months = Array.from(completedMonths);
         if (months.length === 1) {
@@ -268,14 +263,12 @@ export const uploadQueue = {
             const first = r.results?.[0];
             if (first && !first.ok) throw new Error(first.error ?? "快照刷新失败");
             const fresh = await snapshotApi.report(month);
-            setState({ viewing: { kind: "merged", month }, summary: fresh.summary ?? lastSummary }, { persist: false });
+            setState({ viewing: { kind: "merged", month }, summary: fresh.summary }, { persist: false });
             cb.onSuccess(`已刷新 ${month} 全站点归因快照，请查看「归因结果」标签`);
           } catch (e) {
-            setState({ summary: lastSummary }, { persist: false });
             cb.onWarn(`单文件已归并，但整月快照刷新失败：${(e as Error).message}。可在月度进度页点「重新计算」`);
           }
         } else {
-          setState({ summary: lastSummary }, { persist: false });
           cb.onWarn(`本次涉及 ${months.length} 个月份，请到月度进度页按月点「重新计算」刷新快照`);
         }
       }

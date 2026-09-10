@@ -167,7 +167,7 @@ export const uploadApi = {
   append: (upload_id: string, rows: ParsedRow[]) =>
     invokeFn<{ inserted: number }>("attribution-upload", { action: "append", upload_id, rows }, { timeout: 120000 }),
   finalize: (upload_id: string) =>
-    invokeFn<{ summary: AttributionReport; row_count: number; agg_rows?: number }>(
+    invokeFn<{ row_count: number; agg_rows?: number }>(
       "attribution-upload",
       { action: "finalize", upload_id },
       { timeout: 300000 },
