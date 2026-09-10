@@ -14,6 +14,74 @@ export type Database = {
   }
   public: {
     Tables: {
+      ad_upload_agg: {
+        Row: {
+          account_name: string
+          clicks: number
+          cost: number
+          country: string
+          created_at: string
+          creative_type: string
+          currency: string
+          gross_revenue: number
+          id: string
+          impressions: number
+          month: string
+          orders: number
+          posted_at: string | null
+          product_id: string
+          rows_count: number
+          upload_id: string
+          vid: string
+        }
+        Insert: {
+          account_name?: string
+          clicks?: number
+          cost?: number
+          country?: string
+          created_at?: string
+          creative_type?: string
+          currency?: string
+          gross_revenue?: number
+          id?: string
+          impressions?: number
+          month?: string
+          orders?: number
+          posted_at?: string | null
+          product_id?: string
+          rows_count?: number
+          upload_id: string
+          vid?: string
+        }
+        Update: {
+          account_name?: string
+          clicks?: number
+          cost?: number
+          country?: string
+          created_at?: string
+          creative_type?: string
+          currency?: string
+          gross_revenue?: number
+          id?: string
+          impressions?: number
+          month?: string
+          orders?: number
+          posted_at?: string | null
+          product_id?: string
+          rows_count?: number
+          upload_id?: string
+          vid?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ad_upload_agg_upload_id_fkey"
+            columns: ["upload_id"]
+            isOneToOne: false
+            referencedRelation: "ad_uploads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ad_upload_rows: {
         Row: {
           attr_bucket: string | null
@@ -411,6 +479,89 @@ export type Database = {
         }
         Relationships: []
       }
+      attribution_run_rows: {
+        Row: {
+          account_name: string
+          bucket: string
+          cost: number
+          cost_usd: number
+          country: string
+          creative_type: string
+          currency: string
+          gmv_usd: number
+          gross_revenue: number
+          handover_applied: boolean
+          id: string
+          match_type: string | null
+          month: string
+          orders: number
+          posted_at: string | null
+          posted_at_source: string | null
+          product_id: string
+          role: string | null
+          rows_count: number
+          run_id: string
+          staff: string | null
+          vid: string
+        }
+        Insert: {
+          account_name?: string
+          bucket?: string
+          cost?: number
+          cost_usd?: number
+          country?: string
+          creative_type?: string
+          currency?: string
+          gmv_usd?: number
+          gross_revenue?: number
+          handover_applied?: boolean
+          id?: string
+          match_type?: string | null
+          month?: string
+          orders?: number
+          posted_at?: string | null
+          posted_at_source?: string | null
+          product_id?: string
+          role?: string | null
+          rows_count?: number
+          run_id: string
+          staff?: string | null
+          vid?: string
+        }
+        Update: {
+          account_name?: string
+          bucket?: string
+          cost?: number
+          cost_usd?: number
+          country?: string
+          creative_type?: string
+          currency?: string
+          gmv_usd?: number
+          gross_revenue?: number
+          handover_applied?: boolean
+          id?: string
+          match_type?: string | null
+          month?: string
+          orders?: number
+          posted_at?: string | null
+          posted_at_source?: string | null
+          product_id?: string
+          role?: string | null
+          rows_count?: number
+          run_id?: string
+          staff?: string | null
+          vid?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "attribution_run_rows_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "attribution_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       attribution_run_state: {
         Row: {
           active_batch_id: string | null
@@ -448,6 +599,63 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      attribution_runs: {
+        Row: {
+          agg_rows: number
+          error: string | null
+          finished_at: string | null
+          id: string
+          month: string
+          raw_rows: number
+          source: string
+          staff_count: number
+          started_at: string
+          status: string
+          summary: Json | null
+          total_cost: number
+          total_gmv: number
+          total_orders: number
+          triggered_by: string | null
+          upload_count: number
+        }
+        Insert: {
+          agg_rows?: number
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          month: string
+          raw_rows?: number
+          source?: string
+          staff_count?: number
+          started_at?: string
+          status?: string
+          summary?: Json | null
+          total_cost?: number
+          total_gmv?: number
+          total_orders?: number
+          triggered_by?: string | null
+          upload_count?: number
+        }
+        Update: {
+          agg_rows?: number
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          month?: string
+          raw_rows?: number
+          source?: string
+          staff_count?: number
+          started_at?: string
+          status?: string
+          summary?: Json | null
+          total_cost?: number
+          total_gmv?: number
+          total_orders?: number
+          triggered_by?: string | null
+          upload_count?: number
+        }
+        Relationships: []
       }
       authorize_cron_state: {
         Row: {
@@ -1204,6 +1412,17 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      attribution_build_upload_agg: {
+        Args: { _upload_id: string }
+        Returns: {
+          agg_rows: number
+          raw_rows: number
+        }[]
+      }
+      attribution_runs_prune: {
+        Args: { _keep?: number; _month: string }
+        Returns: number
+      }
       attribution_unmatched_trend: {
         Args: { _months: string[] }
         Returns: {
