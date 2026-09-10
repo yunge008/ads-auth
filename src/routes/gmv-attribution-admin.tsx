@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { RotateCw, Users, Target as TargetIcon, ArrowLeftRight, Upload, Download, HelpCircle } from "lucide-react";
+import { RotateCw, RefreshCw, Users, Target as TargetIcon, ArrowLeftRight, Upload, Download, HelpCircle } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
@@ -19,12 +19,14 @@ import {
   type AttributionReport,
   type DetailRow,
   type DrillFilter,
-  lastMonth,
+  type RunMeta,
   exportApi,
   feishuAction,
+  snapshotApi,
   syncCreators,
   uploadApi,
 } from "@/lib/attributionApi";
+import { attributionView } from "@/lib/attributionView";
 
 
 /**
@@ -83,37 +85,120 @@ export const Route = createFileRoute("/gmv-attribution-admin")({
   component: GmvAttributionAdminPage,
 });
 
-function MonthlyView() {
-  const [month, setMonth] = React.useState(lastMonth());
-  const [report, setReport] = React.useState<AttributionReport | null>(null);
-  const [lastSyncedAt, setLastSyncedAt] = React.useState<string | null>(null);
+/** 快照历史：点开才加载，展示这个月跑过哪些快照、谁触发的、各自的口径量级。 */
+function RunHistory({ month }: { month: string }) {
+  const [runs, setRuns] = React.useState<RunMeta[] | null>(null);
   const [loading, setLoading] = React.useState(false);
+  const load = async () => {
+    if (runs || loading) return;
+    setLoading(true);
+    try {
+      const r = await snapshotApi.runs(month, 20);
+      setRuns(r.runs ?? []);
+    } catch (e) {
+      toast.error(`加载快照历史失败：${(e as Error).message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+  // 换月份时清空，避免看到上一个月的历史
+  React.useEffect(() => { setRuns(null); }, [month]);
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={load}>快照历史</Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-[30rem] text-xs">
+        {loading ? (
+          <div className="text-muted-foreground">加载中…</div>
+        ) : !runs?.length ? (
+          <div className="text-muted-foreground">该月还没有快照记录</div>
+        ) : (
+          <div className="space-y-1">
+            {runs.map((r) => (
+              <div key={r.id} className="flex items-center justify-between gap-2 border-b last:border-0 py-1">
+                <span className="tabular-nums">{new Date(r.finished_at ?? r.started_at).toLocaleString()}</span>
+                <span className="text-muted-foreground">
+                  {r.source === "CRON" ? "每晚自动" : r.source === "UPLOAD" ? "上传后" : "手动"}
+                  {r.triggered_by ? `·${r.triggered_by}` : ""}
+                </span>
+                <span className={r.status === "READY" ? "" : "text-destructive"}>
+                  {r.status === "READY" ? `${r.staff_count} 人 / $${Math.round(r.total_gmv).toLocaleString()}` : r.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function MonthlyView() {
+  // 视图状态放模块级 store：切标签页/切路由回来不用重查
+  const views = React.useSyncExternalStore(
+    attributionView.subscribe,
+    attributionView.getSnapshot,
+    attributionView.getServerSnapshot,
+  );
+  const view = views["admin-monthly"];
+  const { month, report, run, detail } = view;
+  const setMonth = (m: string) => attributionView.patch("admin-monthly", { month: m });
+  const [loading, setLoading] = React.useState(false);
+  const [refreshing, setRefreshing] = React.useState(false);
   const [busy, setBusy] = React.useState<string | null>(null);
-  const [detail, setDetail] = React.useState<{ rows: DetailRow[]; title: string } | null>(null);
   const [detailLoading, setDetailLoading] = React.useState(false);
 
-  const load = React.useCallback(async () => {
-    if (!/^\d{4}-\d{2}$/.test(month)) return;
+  /** 默认读该月最新快照（秒开）。 */
+  const load = React.useCallback(async (m: string) => {
+    if (!/^\d{4}-\d{2}$/.test(m)) return;
     setLoading(true);
-    setDetail(null);
+    attributionView.patch("admin-monthly", { detail: null });
     try {
-      const r = await uploadApi.get({ month, merged: true });
-      setReport(r.summary);
-      setLastSyncedAt(r.last_synced_at ?? null);
+      const r = await snapshotApi.report(m);
+      attributionView.patch("admin-monthly", { report: r.summary, run: r.run, loadedAt: Date.now() });
+      if (!r.run) toast.info(`${m} 还没有归因快照，点「重新计算」生成一次（之后每晚会自动刷新）`);
     } catch (e) {
       toast.error(`加载失败：${(e as Error).message}`);
     } finally {
       setLoading(false);
     }
-  }, [month]);
+  }, []);
 
+  /** 按当下的飞书登记数据重跑该月全站点全人员归因，生成一条新快照。 */
+  const refresh = async () => {
+    if (!/^\d{4}-\d{2}$/.test(month)) return;
+    setRefreshing(true);
+    try {
+      const r = await snapshotApi.refresh(month);
+      const first = r.results?.[0];
+      if (first && !first.ok) throw new Error(first.error ?? "重算失败");
+      toast.success(`${month} 归因快照已更新`);
+      await load(month);
+    } catch (e) {
+      toast.error(`重新计算失败：${(e as Error).message}`);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  // 首次进入且还没查过时才自动加载
+  const bootRef = React.useRef(false);
+  React.useEffect(() => {
+    if (bootRef.current || view.report) return;
+    bootRef.current = true;
+    load(view.month);
+  }, [load, view.month, view.report]);
+
+  /** 下钻：直接查快照明细表，不重算。 */
   const drill = async (f: DrillFilter) => {
     const title = f.bucket ? (f.bucket === "PRODUCT_CARD" ? "商品卡明细" : "无建联明细") : `${f.staff} 明细`;
-    setDetail({ rows: [], title });
+    attributionView.patch("admin-monthly", { detail: { rows: [], title } });
     setDetailLoading(true);
     try {
-      const r = await uploadApi.get({ month, merged: true, detail_for: f });
-      setDetail({ rows: r.detail_rows ?? [], title });
+      const r = await snapshotApi.detail({ run_id: run?.id, month, detail_for: f });
+      attributionView.patch("admin-monthly", { detail: { rows: r.detail_rows ?? [], title } });
     } catch (e) {
       toast.error(`加载明细失败：${(e as Error).message}`);
     } finally {
@@ -223,8 +308,11 @@ function MonthlyView() {
             <span className="text-xs text-muted-foreground">月份</span>
             <div className="flex items-center gap-2">
               <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="h-8 w-40" />
-              <Button size="sm" onClick={load} disabled={loading}>
-                <RotateCw className={`h-4 w-4 mr-1.5 ${loading ? "animate-spin" : ""}`} />生成报表
+              <Button size="sm" onClick={() => load(month)} disabled={loading || refreshing}>
+                <RotateCw className={`h-4 w-4 mr-1.5 ${loading ? "animate-spin" : ""}`} />读取快照
+              </Button>
+              <Button size="sm" variant="outline" onClick={refresh} disabled={loading || refreshing} title="按当下的飞书登记数据重跑该月全站点全人员归因，生成一条新快照">
+                <RefreshCw className={`h-4 w-4 mr-1.5 ${refreshing ? "animate-spin" : ""}`} />重新计算
               </Button>
               <Button size="sm" variant="outline" onClick={() => doSync("progress")} disabled={!!busy || !report}>
                 <Upload className="h-4 w-4 mr-1.5" />回写飞书进度
@@ -237,12 +325,25 @@ function MonthlyView() {
         </CardContent>
       </Card>
 
-      <div className="text-xs text-muted-foreground">
-        数据来源：Excel 上传归因（按月合并全部站点） · 最近一次上传归因时间：{lastSyncedAt ? new Date(lastSyncedAt).toLocaleString() : "—"}
+      <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-x-1">
+        数据来源：归因结果快照（每晚 23:30 自动刷新全部近月；也可随时手动重新计算）
+        {run ? (
+          <>
+            {" · "}快照时间：{run.finished_at ? new Date(run.finished_at).toLocaleString() : "—"}
+            （{run.source === "CRON" ? "每晚自动" : run.source === "UPLOAD" ? "上传后" : "手动"}
+            {run.triggered_by ? ` · ${run.triggered_by}` : ""}）
+            {" · "}{run.upload_count} 个批次 / {run.raw_rows.toLocaleString()} 原始行 / {run.agg_rows.toLocaleString()} 归并组
+          </>
+        ) : (
+          " · 该月还没有快照"
+        )}
+        <RunHistory month={month} />
       </div>
 
-      {loading && !report ? (
-        <div className="text-sm text-muted-foreground text-center py-16">归因计算中…</div>
+      {refreshing ? (
+        <div className="text-sm text-muted-foreground text-center py-16">正在重新计算该月全站点归因，请稍候…</div>
+      ) : loading && !report ? (
+        <div className="text-sm text-muted-foreground text-center py-16">读取归因快照…</div>
       ) : report ? (
         <>
           <ProgressBoard report={report} mode="admin" onDrill={drill} />
@@ -252,7 +353,7 @@ function MonthlyView() {
         </>
       ) : (
         <>
-          <div className="text-sm text-muted-foreground text-center py-8">选择月份后点击「生成报表」</div>
+          <div className="text-sm text-muted-foreground text-center py-8">选择月份后点击「读取快照」；该月没有快照时点「重新计算」生成一次</div>
           {/* 报表还没生成、或者生成出来一个人都没有时，自查面板是排查入口，所以这里也要显示 */}
           <DiagnosePanel month={month} />
         </>

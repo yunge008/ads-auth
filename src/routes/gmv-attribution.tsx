@@ -5,11 +5,12 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { RotateCw } from "lucide-react";
+import { RotateCw, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { UnmatchedTrendTable } from "@/components/attribution/UnmatchedTrendTable";
 import { StaffCountryTable } from "@/components/attribution/StaffCountryTable";
-import { type AttributionReport, fmtUsd, lastMonth, uploadApi } from "@/lib/attributionApi";
+import { type AttributionReport, fmtUsd, snapshotApi } from "@/lib/attributionApi";
+import { attributionView } from "@/lib/attributionView";
 
 export const Route = createFileRoute("/gmv-attribution")({
   head: () => ({ meta: [{ title: "GMV 归因 - TikTok授权工具" }] }),
@@ -30,26 +31,57 @@ function UnmatchedSection({ month }: { report: AttributionReport; month: string 
 }
 
 function GmvAttributionPage() {
-  const [month, setMonth] = React.useState(lastMonth());
-  const [report, setReport] = React.useState<AttributionReport | null>(null);
-  const [lastSyncedAt, setLastSyncedAt] = React.useState<string | null>(null);
+  // 视图状态放模块级 store：切路由/切标签页回来不用重查（查一次要跑服务端）
+  const views = React.useSyncExternalStore(
+    attributionView.subscribe,
+    attributionView.getSnapshot,
+    attributionView.getServerSnapshot,
+  );
+  const view = views.user;
+  const { month, report, run } = view;
+  const setMonth = (m: string) => attributionView.patch("user", { month: m });
   const [loading, setLoading] = React.useState(false);
+  const [refreshing, setRefreshing] = React.useState(false);
 
-  const load = React.useCallback(async () => {
-    if (!/^\d{4}-\d{2}$/.test(month)) return;
+  /** 默认读最新快照（秒开），不做即时全量重算。 */
+  const load = React.useCallback(async (m: string) => {
+    if (!/^\d{4}-\d{2}$/.test(m)) return;
     setLoading(true);
     try {
-      const r = await uploadApi.get({ month, merged: true });
-      setReport(r.summary);
-      setLastSyncedAt(r.last_synced_at ?? null);
+      const r = await snapshotApi.report(m);
+      attributionView.patch("user", { report: r.summary, run: r.run, loadedAt: Date.now() });
+      if (!r.run) toast.info(`${m} 还没有归因快照，点「重新计算」生成一次（之后每晚会自动刷新）`);
     } catch (e) {
       toast.error(`加载失败：${(e as Error).message}`);
     } finally {
       setLoading(false);
     }
-  }, [month]);
+  }, []);
 
-  React.useEffect(() => { load(); }, []); // 首次自动加载
+  /** 手动重算：按当下的飞书登记数据重跑该月全站点全人员归因，生成一条新快照。 */
+  const refresh = async () => {
+    if (!/^\d{4}-\d{2}$/.test(month)) return;
+    setRefreshing(true);
+    try {
+      const r = await snapshotApi.refresh(month);
+      const first = r.results?.[0];
+      if (first && !first.ok) throw new Error(first.error ?? "重算失败");
+      toast.success(`${month} 归因快照已更新`);
+      await load(month);
+    } catch (e) {
+      toast.error(`重新计算失败：${(e as Error).message}`);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  // 首次进入且还没查过时才自动加载；已有缓存就直接用
+  const bootRef = React.useRef(false);
+  React.useEffect(() => {
+    if (bootRef.current || view.report) return;
+    bootRef.current = true;
+    load(view.month);
+  }, [load, view.month, view.report]);
 
   const bds = (report?.staff ?? []).filter((s) => s.role === "BD" && s.staff_name?.trim());
   const editors = (report?.staff ?? []).filter((s) => s.role === "EDITOR" && s.staff_name?.trim());
@@ -60,25 +92,35 @@ function GmvAttributionPage() {
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-xl font-semibold tracking-tight">GMV 归因</h2>
-          <p className="text-sm text-muted-foreground mt-1">月度归因进度 · 数据来源：Excel 上传归因（按月合并全部站点）</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            月度归因进度 · 展示每晚自动刷新的归因快照；需要立刻用上最新的飞书登记数据时点「重新计算」
+          </p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
           <div className="flex flex-col gap-1">
             <span className="text-xs text-muted-foreground">月份</span>
             <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="h-8 w-40" />
           </div>
-          <Button size="sm" onClick={load} disabled={loading}>
+          <Button size="sm" onClick={() => load(month)} disabled={loading || refreshing}>
             <RotateCw className={`h-4 w-4 mr-1.5 ${loading ? "animate-spin" : ""}`} />查询
           </Button>
+          <Button size="sm" variant="outline" onClick={refresh} disabled={loading || refreshing} title="按当下的飞书登记数据重跑该月归因，生成一条新快照">
+            <RefreshCw className={`h-4 w-4 mr-1.5 ${refreshing ? "animate-spin" : ""}`} />重新计算
+          </Button>
           <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-            <span>最近一次上传归因时间</span>
-            <span className="tabular-nums">{lastSyncedAt ? new Date(lastSyncedAt).toLocaleString() : "—"}</span>
+            <span>归因快照时间</span>
+            <span className="tabular-nums">
+              {run?.finished_at ? new Date(run.finished_at).toLocaleString() : "—"}
+              {run ? `（${run.source === "CRON" ? "每晚自动" : run.source === "UPLOAD" ? "上传后" : "手动"}）` : ""}
+            </span>
           </div>
         </div>
       </div>
 
-      {loading && !report ? (
-        <div className="text-sm text-muted-foreground text-center py-16">归因计算中…</div>
+      {refreshing ? (
+        <div className="text-sm text-muted-foreground text-center py-16">正在重新计算该月全站点归因，请稍候…</div>
+      ) : loading && !report ? (
+        <div className="text-sm text-muted-foreground text-center py-16">读取归因快照…</div>
       ) : report ? (
         <div className="space-y-4">
           <div className="grid gap-3 md:grid-cols-2 grid-cols-1">

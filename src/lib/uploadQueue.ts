@@ -9,7 +9,7 @@
 // 这类条目标记 restored=true，只作展示）。
 import type { CurrencyTotal, ParsedFile, ParsedRow } from "@/lib/adExcel";
 import { parseAdExcel } from "@/lib/adExcel";
-import { uploadApi, type AttributionReport } from "@/lib/attributionApi";
+import { snapshotApi, uploadApi, type AttributionReport } from "@/lib/attributionApi";
 
 export type QueueStatus = "parsed" | "queued" | "uploading" | "finalizing" | "done" | "failed";
 
@@ -245,18 +245,24 @@ export const uploadQueue = {
       }
 
       if (lastSummary) {
-        const [month] = Array.from(completedMonths);
-        if (completedMonths.size === 1 && month) {
+        // 上传完顺带刷新一次该月的归因快照（第二层），这样月度进度页立刻就能读到新数据
+        const months = Array.from(completedMonths);
+        if (months.length === 1) {
+          const [month] = months;
           try {
-            const merged = await uploadApi.get({ month, merged: true });
-            setState({ viewing: { kind: "merged", month }, summary: merged.summary }, { persist: false });
-            cb.onSuccess(`已展示 ${month} 全站点合并归因结果，请查看「归因结果」标签`);
+            const r = await snapshotApi.refresh(month, "UPLOAD");
+            const first = r.results?.[0];
+            if (first && !first.ok) throw new Error(first.error ?? "快照刷新失败");
+            const fresh = await snapshotApi.report(month);
+            setState({ viewing: { kind: "merged", month }, summary: fresh.summary ?? lastSummary }, { persist: false });
+            cb.onSuccess(`已刷新 ${month} 全站点归因快照，请查看「归因结果」标签`);
           } catch (e) {
             setState({ summary: lastSummary }, { persist: false });
-            cb.onWarn(`单文件归因已完成，但合并展示加载失败：${(e as Error).message}`);
+            cb.onWarn(`单文件已归并，但整月快照刷新失败：${(e as Error).message}。可在月度进度页点「重新计算」`);
           }
         } else {
           setState({ summary: lastSummary }, { persist: false });
+          cb.onWarn(`本次涉及 ${months.length} 个月份，请到月度进度页按月点「重新计算」刷新快照`);
         }
       }
       await cb.onFinished();

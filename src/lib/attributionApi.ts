@@ -218,6 +218,55 @@ export function siteMismatch(month: string) {
   );
 }
 
+// ---------- 第二层：归因结果快照 ----------
+
+/** 一次「全站点全人员」归因快照的元数据。 */
+export type RunMeta = {
+  id: string;
+  month: string;
+  /** CRON=每晚自动刷新 · MANUAL=页面上手动重算 · UPLOAD=上传完成后刷新 */
+  source: string;
+  triggered_by: string | null;
+  status: "RUNNING" | "READY" | "FAILED";
+  upload_count: number;
+  agg_rows: number;
+  raw_rows: number;
+  staff_count: number;
+  total_gmv: number;
+  total_cost: number;
+  total_orders: number;
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
+};
+
+export const snapshotApi = {
+  /** 读该月最新快照（秒开）。run=null 表示该月还没跑过快照。 */
+  report: (month: string) =>
+    invokeFn<{ run: RunMeta | null; summary: AttributionReport | null }>(
+      "attribution-upload",
+      { action: "report", month },
+      { timeout: 60000 },
+    ),
+  /** 重新计算并生成一条新快照（会比较慢，页面上要给等待提示）。 */
+  refresh: (month: string, source = "MANUAL") =>
+    invokeFn<{ months: string[]; results: Array<{ month: string; ok: boolean; run?: RunMeta; error?: string }> }>(
+      "attribution-upload",
+      { action: "refresh", month, source },
+      { timeout: 600000 },
+    ),
+  /** 从快照明细表下钻，不重算。 */
+  detail: (p: { run_id?: string; month?: string; detail_for: DrillFilter }) =>
+    invokeFn<{ detail_rows: DetailRow[]; run_id?: string }>(
+      "attribution-upload",
+      { action: "report_detail", ...p },
+      { timeout: 120000 },
+    ),
+  /** 快照历史。 */
+  runs: (month?: string, limit = 20) =>
+    invokeFn<{ runs: RunMeta[] }>("attribution-upload", { action: "runs", month, limit }, { timeout: 60000 }),
+};
+
 /** 归因口径自查（attribution-upload → action=diagnose）。 */
 export type DiagnoseLayer = {
   /** Excel 原始行数（按归并组的 rows_count 还原） */

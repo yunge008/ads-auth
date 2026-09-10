@@ -21,6 +21,14 @@
 //   list_exchange_rates {} / save_exchange_rate { currency, usd_rate, enabled? }（usd_rate=1 美元兑多少本币）
 //   export_vid_summary { month } → 按 (国家,VID,商品ID) 聚合的唯一 VID 汇总（14 列口径）
 //   unmatched_trend    { month } → 以 month 为最近一个月往前 12 个月，逐月现算 UNMATCHED 桶并按 (国家,昵称) 聚合
+//
+// 【两层存储】第一层 = ad_upload_agg（达人昵称/VID 维度的原始数据）；第二层 = attribution_runs +
+//   attribution_run_rows（一次「全站点全人员」归因的结果快照，带历史）。前台默认读最新快照，秒开；
+//   每晚 cron 刷新一次，也可以手动「立即重算」。
+//   refresh       { month | months[], source?, keep? } → 生成新快照（cron 走 x-cron-key 免口令）
+//   report        { month } → { run, summary }：该月最新一次 READY 快照；没有则 run=null
+//   report_detail { run_id, detail_for } → 从快照明细表下钻，不重算
+//   runs          { month, limit? } → 快照历史
 import { corsHeaders } from "../_shared/feishu.ts";
 import { admin, verifyPasscode } from "../_shared/auth.ts";
 import {
@@ -242,12 +250,157 @@ async function pageAllRows<T>(
   return out;
 }
 
+// ---------- 第二层：归因结果快照 ----------
+
+type RunMeta = {
+  id: string;
+  month: string;
+  source: string;
+  triggered_by: string | null;
+  status: string;
+  upload_count: number;
+  agg_rows: number;
+  raw_rows: number;
+  staff_count: number;
+  total_gmv: number;
+  total_cost: number;
+  total_orders: number;
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
+};
+
+const RUN_META_COLUMNS =
+  "id, month, source, triggered_by, status, upload_count, agg_rows, raw_rows, staff_count, total_gmv, total_cost, total_orders, error, started_at, finished_at";
+
+/**
+ * 跑一次某月的「全站点全人员」归因并落成快照。
+ * 归因本身仍然是按当下的飞书登记数据现算的，只是把结果固化下来供前台秒开；
+ * 想要最新口径就再刷一次快照，不需要碰上传数据。
+ */
+async function buildSnapshot(
+  db: ReturnType<typeof admin>,
+  month: string,
+  source: string,
+  triggeredBy: string,
+  keep: number,
+): Promise<{ run: RunMeta; summary: unknown }> {
+  const { data: created, error: insErr } = await db
+    .from("attribution_runs")
+    .insert({ month, source, triggered_by: triggeredBy, status: "RUNNING" })
+    .select(RUN_META_COLUMNS)
+    .single();
+  if (insErr) throw new Error(insErr.message);
+  const runId = (created as RunMeta).id;
+
+  try {
+    const uploads = await readyUploads(db, month);
+    const { start, end } = monthRange(month);
+    const [targets, exchangeRates, staffMeta] = await Promise.all([
+      loadTargets(db, month),
+      loadExchangeRates(db),
+      loadStaffMeta(db),
+    ]);
+    const aggRows = uploads.length ? await fetchAgg(db, uploads.map((u) => u.id)) : [];
+    const { pairs } = aggRows.length
+      ? await attributeNow(db, aggRows, { persist: true })
+      : { pairs: [] as LivePair[] };
+    const summary = aggregateResults(pairs, { period: { start, end }, month, targets, exchangeRates, staffMeta });
+
+    // 明细快照：一行 = 一个归并组的归因结果，下钻直接查这张表
+    const detailRows = pairs.map(({ input, result, agg }) => {
+      const cur = (input.currency || "USD").toUpperCase();
+      const rate = exchangeRates.get(cur) ?? (cur === "USD" ? 1 : 0);
+      return {
+        run_id: runId,
+        month,
+        country: result.country || input.country || "",
+        vid: input.vid,
+        account_name: input.accountName,
+        product_id: agg.product_id ?? "",
+        creative_type: input.creativeType,
+        currency: cur,
+        rows_count: agg.rows_count ?? 0,
+        cost: input.cost,
+        gross_revenue: input.grossRevenue,
+        orders: input.orders,
+        cost_usd: rate ? input.cost / rate : 0,
+        gmv_usd: rate ? input.grossRevenue / rate : 0,
+        bucket: result.bucket,
+        staff: result.staff ?? null,
+        role: result.source ?? null,
+        match_type: result.matchType ?? null,
+        handover_applied: result.handoverApplied ?? false,
+        posted_at: input.postedAt,
+        posted_at_source: input.postedAtSource,
+      };
+    });
+    for (let i = 0; i < detailRows.length; i += 1000) {
+      const { error } = await db.from("attribution_run_rows").insert(detailRows.slice(i, i + 1000));
+      if (error) throw new Error(error.message);
+    }
+
+    const rawRows = uploads.reduce((n, u) => n + (u.row_count ?? 0), 0);
+    const { data: done, error: updErr } = await db
+      .from("attribution_runs")
+      .update({
+        status: "READY",
+        upload_count: uploads.length,
+        agg_rows: aggRows.length,
+        raw_rows: rawRows,
+        staff_count: summary.staff.length,
+        total_gmv: summary.totals.gmv,
+        total_cost: summary.totals.cost,
+        total_orders: summary.totals.orders,
+        summary,
+        finished_at: new Date().toISOString(),
+      })
+      .eq("id", runId)
+      .select(RUN_META_COLUMNS)
+      .single();
+    if (updErr) throw new Error(updErr.message);
+
+    await db.rpc("attribution_runs_prune", { _month: month, _keep: keep });
+    return { run: done as RunMeta, summary };
+  } catch (e) {
+    await db
+      .from("attribution_runs")
+      .update({ status: "FAILED", error: (e as Error).message, finished_at: new Date().toISOString() })
+      .eq("id", runId);
+    throw e;
+  }
+}
+
+/** 某月最新一次成功的快照。 */
+async function latestRun(db: ReturnType<typeof admin>, month: string): Promise<RunMeta | null> {
+  const { data, error } = await db
+    .from("attribution_runs")
+    .select(RUN_META_COLUMNS)
+    .eq("month", month)
+    .eq("status", "READY")
+    .order("finished_at", { ascending: false })
+    .limit(1);
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as RunMeta[];
+  return rows[0] ?? null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    const account = await verifyPasscode(req, "gmv-attribution-admin");
+    // cron 免口令：pg_cron 经服务端路由带上 x-cron-key（vault secret），只允许用于 refresh
+    const cronKey = req.headers.get("x-cron-key") ?? "";
+    let cronAuthed = false;
+    if (cronKey) {
+      const { data: ok } = await admin().rpc("verify_gmv_cron_key", { _key: cronKey });
+      if (ok === true) cronAuthed = true;
+    }
     const body = (await req.json()) as Record<string, unknown>;
     const action = str(body.action);
+    if (cronAuthed && action !== "refresh") throw new Error("cron 只允许调用 refresh");
+    const account = cronAuthed
+      ? { name: "cron" }
+      : await verifyPasscode(req, "gmv-attribution-admin");
     const db = admin();
 
     if (action === "create") {
@@ -472,6 +625,123 @@ Deno.serve(async (req) => {
         upload,
         detail_rows: detailFor ? detailFromPairs(pairs, detailFor) : undefined,
       });
+    }
+
+    // ---------- 第二层：快照 ----------
+
+    // 生成新快照。cron 每晚跑一次全部近月；页面上「立即重算」跑当前月。
+    if (action === "refresh") {
+      const keep = Math.max(1, Math.min(50, Math.round(num(body.keep)) || 10));
+      const source = str(body.source) || (cronAuthed ? "CRON" : "MANUAL");
+      let months: string[] = Array.isArray(body.months)
+        ? (body.months as unknown[]).map(str).filter((m) => /^\d{4}-\d{2}$/.test(m))
+        : [];
+      const single = str(body.month);
+      if (single) {
+        if (!/^\d{4}-\d{2}$/.test(single)) throw new Error("month 格式应为 YYYY-MM");
+        months = [single];
+      }
+      if (!months.length) {
+        // 不指定月份 = 刷新「有已完成批次的最近 N 个月」，cron 走这条路
+        const lookback = Math.max(1, Math.min(24, Math.round(num(body.lookback_months)) || 3));
+        const { data, error } = await db
+          .from("ad_uploads")
+          .select("month")
+          .eq("status", "READY")
+          .order("month", { ascending: false })
+          .limit(2000);
+        if (error) throw new Error(error.message);
+        const seen: string[] = [];
+        for (const r of (data ?? []) as { month: string }[]) {
+          if (r.month && !seen.includes(r.month)) seen.push(r.month);
+        }
+        months = seen.slice(0, lookback);
+      }
+
+      const results: Array<{ month: string; ok: boolean; run?: RunMeta; error?: string }> = [];
+      for (const m of months) {
+        try {
+          const { run } = await buildSnapshot(db, m, source, account.name, keep);
+          results.push({ month: m, ok: true, run });
+          console.log(`refresh ${m}: ${run.agg_rows} 归并行 → ${run.staff_count} 人，GMV ${Math.round(run.total_gmv)}`);
+        } catch (e) {
+          results.push({ month: m, ok: false, error: (e as Error).message });
+          console.error(`refresh ${m} 失败`, e);
+        }
+      }
+      return json({ months, results });
+    }
+
+    // 前台默认入口：读该月最新快照，不重算。run=null 表示还没跑过，前端提示「立即重算」。
+    if (action === "report") {
+      const month = str(body.month);
+      if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("month 格式应为 YYYY-MM");
+      const run = await latestRun(db, month);
+      if (!run) return json({ run: null, summary: null });
+      const { data, error } = await db.from("attribution_runs").select("summary").eq("id", run.id).single();
+      if (error) throw new Error(error.message);
+      return json({ run, summary: (data as { summary: unknown }).summary });
+    }
+
+    // 快照明细下钻：直接查快照明细表，不重算
+    if (action === "report_detail") {
+      const f = (body.detail_for ?? {}) as { staff?: string; role?: string; bucket?: string };
+      let runId = str(body.run_id);
+      if (!runId) {
+        const month = str(body.month);
+        if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("run_id 或 month 必填");
+        const run = await latestRun(db, month);
+        if (!run) return json({ detail_rows: [] });
+        runId = run.id;
+      }
+      let q = db
+        .from("attribution_run_rows")
+        .select("vid, account_name, product_id, creative_type, country, currency, rows_count, cost, gross_revenue, orders, gmv_usd, cost_usd, bucket, staff, role, match_type, handover_applied, posted_at, posted_at_source")
+        .eq("run_id", runId)
+        .order("gmv_usd", { ascending: false })
+        .limit(DETAIL_CAP);
+      if (f.bucket) {
+        q = q.eq("bucket", f.bucket);
+      } else if (f.staff) {
+        q = q.eq("bucket", "STAFF").eq("staff", f.staff);
+        if (f.role) q = q.eq("role", f.role);
+      } else {
+        return json({ detail_rows: [] });
+      }
+      const { data, error } = await q;
+      if (error) throw new Error(error.message);
+      // 明细里的金额统一按快照生成时的汇率折美元，和进度板口径一致
+      const rows = ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+        vid: r.vid,
+        account_name: r.account_name,
+        product_id: r.product_id,
+        creative_type: r.creative_type,
+        country: r.country,
+        currency: r.currency,
+        rows_count: r.rows_count,
+        gmv: num(r.gmv_usd),
+        cost: num(r.cost_usd),
+        orders: Math.round(num(r.orders)),
+        bucket: r.bucket,
+        staff: r.staff,
+        source: r.role,
+        match_type: r.match_type,
+        handover_applied: r.handover_applied,
+        posted_at: r.posted_at,
+        posted_at_source: r.posted_at_source,
+      }));
+      return json({ detail_rows: rows, run_id: runId });
+    }
+
+    // 快照历史
+    if (action === "runs") {
+      const month = str(body.month);
+      const limit = Math.max(1, Math.min(50, Math.round(num(body.limit)) || 20));
+      let q = db.from("attribution_runs").select(RUN_META_COLUMNS).order("started_at", { ascending: false }).limit(limit);
+      if (month) q = q.eq("month", month);
+      const { data, error } = await q;
+      if (error) throw new Error(error.message);
+      return json({ runs: data ?? [] });
     }
 
     if (action === "list_exchange_rates") {
