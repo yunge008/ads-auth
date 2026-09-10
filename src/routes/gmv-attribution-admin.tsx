@@ -15,6 +15,7 @@ import { ReviewPanel } from "@/components/attribution/ReviewPanel";
 import { UploadView, type Viewing } from "@/components/attribution/UploadView";
 import { SiteMismatchTable } from "@/components/attribution/SiteMismatchTable";
 import { DiagnosePanel } from "@/components/attribution/DiagnosePanel";
+import { DataPrepPanel } from "@/components/attribution/DataPrepPanel";
 import {
   type AttributionReport,
   type DetailRow,
@@ -247,6 +248,9 @@ function MonthlyView() {
             { duration: 15000 },
           );
         }
+        if (r.follower_rows) {
+          toast.info(`顺带读到 ${r.follower_rows} 行达人粉丝量（已入库，前台暂不展示）`);
+        }
         if (r.cjk_sites?.length) {
           const sample = r.cjk_sites.slice(0, 6).map((c) => `${c.site}(${c.rows})`).join("、");
           toast.error(
@@ -339,6 +343,8 @@ function MonthlyView() {
         )}
         <RunHistory month={month} />
       </div>
+
+      <DataPrepPanel month={month} />
 
       {refreshing ? (
         <div className="text-sm text-muted-foreground text-center py-16">正在重新计算该月全站点归因，请稍候…</div>

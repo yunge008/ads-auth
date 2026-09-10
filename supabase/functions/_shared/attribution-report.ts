@@ -220,7 +220,16 @@ export async function persistRunArtifacts(db: SupabaseClient, result: AttrRunRes
 
 // ---------- 汇总聚合 ----------
 
-export type StaffCell = { country: string; gmv: number; cost: number; orders: number; counted: boolean };
+/** vids / creators = 该格子里去重后的归因 VID 数与归因达人昵称数，和 GMV 并列展示。 */
+export type StaffCell = {
+  country: string;
+  gmv: number;
+  cost: number;
+  orders: number;
+  vids: number;
+  creators: number;
+  counted: boolean;
+};
 export type StaffAgg = {
   staff_name: string;
   role: Role;
@@ -233,8 +242,11 @@ export type StaffAgg = {
   progress: number | null;
   by_match: Partial<Record<MatchType, number>>;
   by_country: StaffCell[];
+  /** 全站点合计的去重计数 */
+  vids: number;
+  creators: number;
 };
-export type BucketAgg = { gmv: number; cost: number; orders: number; rows: number };
+export type BucketAgg = { gmv: number; cost: number; orders: number; rows: number; vids?: number; creators?: number };
 export type AttributionReport = {
   period: { start: string; end: string };
   month?: string;
@@ -247,7 +259,7 @@ export type AttributionReport = {
    * 有值 = 已按 本币/usd_rate 折美元并计入，`gmv_usd` 是折算后的金额，供人工核对量级。
    */
   non_usd: Array<{ currency: string; gmv: number; cost: number; rows: number; usd_rate: number | null; gmv_usd: number }>;
-  totals: { gmv: number; cost: number; orders: number; rows: number };
+  totals: { gmv: number; cost: number; orders: number; rows: number; vids: number; creators: number };
 };
 
 export type TargetMap = Map<string, number>; // `${staff}|${role}` ? target_usd
@@ -299,7 +311,7 @@ export function aggregateResults(
   const unmatched: BucketAgg = { gmv: 0, cost: 0, orders: 0, rows: 0 };
   const unmatchedTop = new Map<string, { account_name: string; gmv: number; rows: number }>();
   const nonUsd = new Map<string, { currency: string; gmv: number; cost: number; rows: number; usd_rate: number | null; gmv_usd: number }>();
-  const totals = { gmv: 0, cost: 0, orders: 0, rows: 0 };
+  const totals = { gmv: 0, cost: 0, orders: 0, rows: 0, vids: 0, creators: 0 };
 
   for (const { input, result } of pairs) {
     const cur = (input.currency || "USD").toUpperCase();
@@ -365,6 +377,8 @@ export function aggregateResults(
         progress: null,
         by_match: {},
         by_country: [],
+        vids: 0,
+        creators: 0,
       };
       staffMap.set(sKey, agg);
     }
@@ -378,7 +392,7 @@ export function aggregateResults(
     const cKey = `${sKey}|${country}`;
     let cell = cellMap.get(cKey);
     if (!cell) {
-      cell = { country, gmv: 0, cost: 0, orders: 0, counted: false };
+      cell = { country, gmv: 0, cost: 0, orders: 0, vids: 0, creators: 0, counted: false };
       cellMap.set(cKey, cell);
       agg.by_country.push(cell);
     }
@@ -416,6 +430,207 @@ export function aggregateResults(
     staff,
     product_card: productCard,
     unmatched: { ...unmatched, top },
+    non_usd: Array.from(nonUsd.values()).sort((a, b) => b.gmv - a.gmv),
+    totals,
+  };
+}
+
+/**
+ * 数据库 RPC `attribution_apply_run` 返回的紧凑汇总行。
+ * 一行 = 一个 (桶, 同事, 角色, 匹配方式, 站点, 币种, 是否有汇率) 组合，整月最多几百行。
+ */
+export type CompactRow = {
+  bucket: string;
+  staff: string | null;
+  role: string | null;
+  match_type: string | null;
+  country: string;
+  currency: string;
+  has_rate: boolean;
+  gmv_native: number;
+  cost_native: number;
+  gmv_usd: number;
+  cost_usd: number;
+  orders: number;
+  rows_count: number;
+  vids: number;
+  creators: number;
+};
+
+const n = (v: unknown): number => {
+  const x = Number(v);
+  return Number.isFinite(x) ? x : 0;
+};
+
+/**
+ * 用数据库算好的紧凑汇总拼出报表 JSON。
+ * 几十万行的求和与去重计数都在数据库里完成，这里只做「几百行 → 报表结构」的整形，
+ * 所以整月多大都跑得动。
+ *
+ * 注意去重计数不能跨格子相加（同一个 VID 可能出现在多个币种/匹配方式的格子里），
+ * 所以同事合计、站点格子、总计三层各自取数据库给的对应粒度：这里对同一站点内的多个
+ * (币种×匹配方式) 行取 max 作为该格子的去重数，同事合计与总计由调用方另传。
+ */
+export function buildReportFromCompact(
+  rows: CompactRow[],
+  opts: {
+    period: { start: string; end: string };
+    month?: string;
+    targets?: TargetMap;
+    staffMeta?: StaffMeta;
+    exchangeRates?: ExchangeRateMap;
+    unmatchedTop?: Array<{ account_name: string; gmv: number; rows: number }>;
+    /** 数据库另算的全局去重数（整月所有归因行） */
+    totalVids?: number;
+    totalCreators?: number;
+  },
+): AttributionReport {
+  const staffMap = new Map<string, StaffAgg>();
+  const cellMap = new Map<string, StaffCell>();
+  // 同一 (同事,站点) 下的去重数按各拆分行取最大值：跨币种/匹配方式相加会重复计数
+  const cellDistinct = new Map<string, { vids: number; creators: number }>();
+  const staffDistinct = new Map<string, { vids: number; creators: number }>();
+  const productCard: BucketAgg = { gmv: 0, cost: 0, orders: 0, rows: 0, vids: 0, creators: 0 };
+  const unmatched: BucketAgg = { gmv: 0, cost: 0, orders: 0, rows: 0, vids: 0, creators: 0 };
+  const nonUsd = new Map<string, { currency: string; gmv: number; cost: number; rows: number; usd_rate: number | null; gmv_usd: number }>();
+  const totals = { gmv: 0, cost: 0, orders: 0, rows: 0, vids: 0, creators: 0 };
+
+  for (const r of rows) {
+    const cur = (r.currency || "USD").toUpperCase();
+    const gmvUsd = n(r.gmv_usd);
+    const costUsd = n(r.cost_usd);
+    const rowsCount = n(r.rows_count);
+
+    if (cur !== "USD" || !r.has_rate) {
+      const e = nonUsd.get(cur) ?? {
+        currency: cur,
+        gmv: 0,
+        cost: 0,
+        rows: 0,
+        usd_rate: r.has_rate ? (opts.exchangeRates?.get(cur) ?? null) : null,
+        gmv_usd: 0,
+      };
+      e.gmv += n(r.gmv_native);
+      e.cost += n(r.cost_native);
+      e.rows += rowsCount;
+      e.gmv_usd += gmvUsd;
+      nonUsd.set(cur, e);
+    }
+    // 缺汇率的行折不出美元，不进任何美元口径的汇总（上面的 non_usd 里已单列出来提示）
+    if (!r.has_rate) continue;
+
+    totals.gmv += gmvUsd;
+    totals.cost += costUsd;
+    totals.orders += n(r.orders);
+    totals.rows += rowsCount;
+
+    if (r.bucket === "PRODUCT_CARD") {
+      productCard.gmv += gmvUsd;
+      productCard.cost += costUsd;
+      productCard.orders += n(r.orders);
+      productCard.rows += rowsCount;
+      productCard.vids = Math.max(productCard.vids ?? 0, n(r.vids));
+      productCard.creators = Math.max(productCard.creators ?? 0, n(r.creators));
+      continue;
+    }
+    if (r.bucket !== "STAFF" || !r.staff) {
+      unmatched.gmv += gmvUsd;
+      unmatched.cost += costUsd;
+      unmatched.orders += n(r.orders);
+      unmatched.rows += rowsCount;
+      unmatched.vids = Math.max(unmatched.vids ?? 0, n(r.vids));
+      unmatched.creators = Math.max(unmatched.creators ?? 0, n(r.creators));
+      continue;
+    }
+
+    const role = (r.role === "EDITOR" ? "EDITOR" : "BD") as Role;
+    const sKey = `${r.staff}|${role}`;
+    let agg = staffMap.get(sKey);
+    if (!agg) {
+      agg = {
+        staff_name: r.staff,
+        role,
+        active: false,
+        gmv: 0,
+        cost: 0,
+        orders: 0,
+        counted_gmv: 0,
+        target_usd: null,
+        progress: null,
+        by_match: {},
+        by_country: [],
+        vids: 0,
+        creators: 0,
+      };
+      staffMap.set(sKey, agg);
+    }
+    agg.gmv += gmvUsd;
+    agg.cost += costUsd;
+    agg.orders += n(r.orders);
+    if (r.match_type) {
+      const mt = r.match_type as MatchType;
+      agg.by_match[mt] = (agg.by_match[mt] ?? 0) + gmvUsd;
+    }
+
+    const country = r.country || "未知站点";
+    const cKey = `${sKey}|${country}`;
+    let cell = cellMap.get(cKey);
+    if (!cell) {
+      cell = { country, gmv: 0, cost: 0, orders: 0, vids: 0, creators: 0, counted: false };
+      cellMap.set(cKey, cell);
+      agg.by_country.push(cell);
+    }
+    cell.gmv += gmvUsd;
+    cell.cost += costUsd;
+    cell.orders += n(r.orders);
+
+    const cd = cellDistinct.get(cKey) ?? { vids: 0, creators: 0 };
+    cd.vids = Math.max(cd.vids, n(r.vids));
+    cd.creators = Math.max(cd.creators, n(r.creators));
+    cellDistinct.set(cKey, cd);
+
+    const sd = staffDistinct.get(sKey) ?? { vids: 0, creators: 0 };
+    sd.vids += n(r.vids);
+    sd.creators += n(r.creators);
+    staffDistinct.set(sKey, sd);
+  }
+
+  for (const [cKey, cell] of cellMap) {
+    const cd = cellDistinct.get(cKey);
+    cell.vids = cd?.vids ?? 0;
+    cell.creators = cd?.creators ?? 0;
+  }
+
+  for (const [sKey, agg] of staffMap) {
+    for (const cell of agg.by_country) {
+      cell.counted = KPI_MIN_SITE_USD <= 0 || cell.gmv >= KPI_MIN_SITE_USD;
+      if (cell.counted) agg.counted_gmv += cell.gmv;
+    }
+    agg.by_country.sort((a, b) => b.gmv - a.gmv);
+    // 同事合计的去重数：各站点格子相加（同一个达人/VID 跨站点出现属于不同格子，本来就该分别计）
+    agg.vids = agg.by_country.reduce((x, c) => x + c.vids, 0);
+    agg.creators = agg.by_country.reduce((x, c) => x + c.creators, 0);
+    const meta = opts.staffMeta?.get(sKey);
+    agg.active = meta?.active ?? false;
+    const target = opts.targets?.get(sKey);
+    if (target != null && target > 0) {
+      agg.target_usd = target;
+      agg.progress = agg.counted_gmv / target;
+    } else if (target != null) {
+      agg.target_usd = target;
+    }
+  }
+
+  totals.vids = opts.totalVids ?? 0;
+  totals.creators = opts.totalCreators ?? 0;
+
+  return {
+    period: opts.period,
+    month: opts.month,
+    kpi_threshold: KPI_MIN_SITE_USD,
+    staff: Array.from(staffMap.values()).sort((a, b) => b.gmv - a.gmv),
+    product_card: productCard,
+    unmatched: { ...unmatched, top: opts.unmatchedTop ?? [] },
     non_usd: Array.from(nonUsd.values()).sort((a, b) => b.gmv - a.gmv),
     totals,
   };

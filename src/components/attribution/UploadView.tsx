@@ -334,7 +334,7 @@ export function UploadView({
               <FileUp className="h-4 w-4 mr-1.5" />选择文件（可多选）
             </Button>
             <Button size="sm" onClick={uploadAll} disabled={uploading || !files.some((f) => f.status === "parsed" && !f.restored)}>
-              {uploading ? <RotateCw className="h-4 w-4 mr-1.5 animate-spin" /> : null}上传并归因
+              {uploading ? <RotateCw className="h-4 w-4 mr-1.5 animate-spin" /> : null}上传解析数据
             </Button>
             {files.length ? (
               <Button size="sm" variant="ghost" onClick={() => uploadQueue.clear()} disabled={uploading}>清空列表</Button>
@@ -518,10 +518,11 @@ export function UploadView({
           </div>
         </CardHeader>
         <CardContent>
-          <Tabs defaultValue="list">
+          {/* 默认显示上传状态矩阵：一眼看出哪个站点整月没传，比逐条翻列表快 */}
+          <Tabs defaultValue="matrix">
             <TabsList>
-              <TabsTrigger value="list">列表</TabsTrigger>
               <TabsTrigger value="matrix">上传状态矩阵</TabsTrigger>
+              <TabsTrigger value="list">列表</TabsTrigger>
             </TabsList>
             <TabsContent value="list" className="mt-3 space-y-2">
               <div className="border rounded-md overflow-x-auto">

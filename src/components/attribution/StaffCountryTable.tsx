@@ -37,6 +37,7 @@ export function StaffCountryTable({
               <TableHead className="whitespace-nowrap">角色</TableHead>
               <TableHead className="whitespace-nowrap">状态</TableHead>
               <TableHead className="text-right whitespace-nowrap">合计 GMV</TableHead>
+              <TableHead className="text-right whitespace-nowrap">VID / 达人</TableHead>
               {mode === "admin" ? (
                 <>
                   <TableHead className="text-right whitespace-nowrap">目标</TableHead>
@@ -69,6 +70,9 @@ export function StaffCountryTable({
                     <Badge variant="outline">{s.active ? "在职" : "已离职"}</Badge>
                   </TableCell>
                   <TableCell className="text-right tabular-nums font-semibold">${fmtUsd(s.gmv)}</TableCell>
+                  <TableCell className="text-right tabular-nums text-xs whitespace-nowrap">
+                    {s.vids ?? 0} / {s.creators ?? 0}
+                  </TableCell>
                   {mode === "admin" ? (
                     <>
                       <TableCell className="text-right tabular-nums text-xs">
@@ -87,7 +91,17 @@ export function StaffCountryTable({
                         className={`text-right tabular-nums text-xs ${cell && !cell.counted ? "opacity-50" : ""}`}
                         title={cell && !cell.counted ? "低于 KPI 阈值，不计入进度" : undefined}
                       >
-                        {cell ? `$${fmtUsd(cell.gmv)}` : "—"}
+                        {cell ? (
+                          <>
+                            <div>${fmtUsd(cell.gmv)}</div>
+                            {/* 归因口径：和 GMV 并列展示去重后的 VID 数 / 达人数 */}
+                            <div className="text-[11px] text-muted-foreground">
+                              {cell.vids ?? 0} VID / {cell.creators ?? 0} 达人
+                            </div>
+                          </>
+                        ) : (
+                          "—"
+                        )}
                       </TableCell>
                     );
                   })}

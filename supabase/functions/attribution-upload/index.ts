@@ -28,6 +28,7 @@
 //   report        { month } → { run, summary }：该月最新一次 READY 快照；没有则 run=null
 //   report_detail { run_id, detail_for } → 从快照明细表下钻，不重算
 //   runs          { month, limit? } → 快照历史
+//   registry_matrix {} / targets { month? } / handovers {} → 「数据准备」面板：达人登记矩阵、GMV 目标、站点交接
 import { corsHeaders } from "../_shared/feishu.ts";
 import { admin, verifyPasscode } from "../_shared/auth.ts";
 import {
@@ -44,7 +45,9 @@ import {
   vidToPostedAt,
 } from "../_shared/attribution.ts";
 import {
+  type CompactRow,
   aggregateResults,
+  buildReportFromCompact,
   findMissingCurrencies,
   loadAttrContext,
   loadExchangeRates,
@@ -153,6 +156,57 @@ async function fetchAgg(db: ReturnType<typeof admin>, uploadIds: string[]): Prom
       if (rows.length < PAGE) break;
       from += PAGE;
     }
+  }
+  return out;
+}
+
+/** 流式读归并行：整月可能有几十万行，逐页处理完就丢，不整块驻留内存。 */
+async function streamAgg(
+  db: ReturnType<typeof admin>,
+  uploadIds: string[],
+  onPage: (rows: AggRow[]) => void,
+): Promise<number> {
+  let total = 0;
+  for (let i = 0; i < uploadIds.length; i += 50) {
+    const ids = uploadIds.slice(i, i + 50);
+    let from = 0;
+    for (;;) {
+      const { data, error } = await db
+        .from("ad_upload_agg")
+        .select(AGG_COLUMNS)
+        .in("upload_id", ids)
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (error) throw new Error(error.message);
+      const rows = (data ?? []) as AggRow[];
+      onPage(rows);
+      total += rows.length;
+      if (rows.length < PAGE) break;
+      from += PAGE;
+    }
+  }
+  return total;
+}
+
+/** 从某次快照里取「无建联」明细（已按 GMV 降序，取前 cap 行足够做诊断）。 */
+async function fetchRunUnmatched(
+  db: ReturnType<typeof admin>,
+  runId: string,
+  cap = 20000,
+): Promise<Array<{ country: string; account_name: string; gmv_usd: number; rows_count: number }>> {
+  const out: Array<{ country: string; account_name: string; gmv_usd: number; rows_count: number }> = [];
+  for (let from = 0; from < cap; from += PAGE) {
+    const { data, error } = await db
+      .from("attribution_run_rows")
+      .select("country, account_name, gmv_usd, rows_count")
+      .eq("run_id", runId)
+      .eq("bucket", "UNMATCHED")
+      .order("gmv_usd", { ascending: false })
+      .range(from, Math.min(from + PAGE, cap) - 1);
+    if (error) throw new Error(error.message);
+    const rows = (data ?? []) as typeof out;
+    out.push(...rows);
+    if (rows.length < PAGE) break;
   }
   return out;
 }
@@ -360,64 +414,150 @@ async function buildSnapshot(
   const runId = (created as RunMeta).id;
 
   try {
+    const t0 = Date.now();
     const uploads = await readyUploads(db, month);
-    // 历史批次可能还没归并过（解耦改造之前 finalize 的），这里自动补上，否则会算出一张全 0 的报表
+    // 历史批次可能还没归并过（解耦改造之前 finalize 的），先补上，否则会算出一张全 0 的报表
     if (uploads.length) {
       const healed = await ensureAgg(db, uploads);
       if (healed.built) console.log(`buildSnapshot ${month}: 补归并 ${healed.built} 个批次`);
     }
+
     const { start, end } = monthRange(month);
     const [targets, exchangeRates, staffMeta] = await Promise.all([
       loadTargets(db, month),
       loadExchangeRates(db),
       loadStaffMeta(db),
     ]);
-    const aggRows = uploads.length ? await fetchAgg(db, uploads.map((u) => u.id)) : [];
-    const { pairs } = aggRows.length
-      ? await attributeNow(db, aggRows, { persist: true })
-      : { pairs: [] as LivePair[] };
-    const summary = aggregateResults(pairs, { period: { start, end }, month, targets, exchangeRates, staffMeta });
 
-    // 明细快照：一行 = 一个归并组的归因结果，下钻直接查这张表
-    const detailRows = pairs.map(({ input, result, agg }) => {
-      const cur = (input.currency || "USD").toUpperCase();
-      const rate = exchangeRates.get(cur) ?? (cur === "USD" ? 1 : 0);
+    // ---- 1) 拉「需要判定的去重键」----
+    // 判定只跟 (站点, VID, 达人昵称, 内容类型) 有关，跟商品ID/币种/金额无关，
+    // 所以这里的行数比归并表小一个量级——整月几十万归并行通常只有几万个判定键。
+    type KeyRow = { country: string; vid: string; account_name: string; creative_type: string; posted_at: string | null };
+    const keys: KeyRow[] = [];
+    if (uploads.length) {
+      const KEY_PAGE = 5000;
+      for (let offset = 0; ; offset += KEY_PAGE) {
+        const { data, error } = await db.rpc("attribution_month_keys", {
+          _month: month,
+          _limit: KEY_PAGE,
+          _offset: offset,
+        });
+        if (error) throw new Error(`读取判定键失败：${error.message}`);
+        const page = (data ?? []) as KeyRow[];
+        keys.push(...page);
+        if (page.length < KEY_PAGE) break;
+      }
+    }
+    const tKeys = Date.now();
+    console.log(`buildSnapshot ${month}: ${uploads.length} 个批次 / ${keys.length} 个判定键，读取耗时 ${tKeys - t0}ms`);
+
+    // ---- 2) 跑归因引擎（一次性，保证别名投票口径不被分片打散）----
+    const inputs: AttrInputRow[] = keys.map((k, i) => {
+      let postedAt: string | null = null;
+      let postedAtSource: AttrInputRow["postedAtSource"] = null;
+      if (k.posted_at) {
+        postedAt = k.posted_at;
+        postedAtSource = "sheet";
+      } else if (k.vid) {
+        const d = vidToPostedAt(k.vid);
+        if (d) {
+          postedAt = d.toISOString();
+          postedAtSource = "vid";
+        }
+      }
       return {
-        run_id: runId,
-        month,
-        country: result.country || input.country || "",
-        vid: input.vid,
-        account_name: input.accountName,
-        product_id: agg.product_id ?? "",
-        creative_type: input.creativeType,
-        currency: cur,
-        rows_count: agg.rows_count ?? 0,
-        cost: input.cost,
-        gross_revenue: input.grossRevenue,
-        orders: input.orders,
-        cost_usd: rate ? input.cost / rate : 0,
-        gmv_usd: rate ? input.grossRevenue / rate : 0,
-        bucket: result.bucket,
-        staff: result.staff ?? null,
-        role: result.source ?? null,
-        match_type: result.matchType ?? null,
-        handover_applied: result.handoverApplied ?? false,
-        posted_at: input.postedAt,
-        posted_at_source: input.postedAtSource,
+        key: `k:${i}`,
+        creativeType: normalizeCreativeType(k.creative_type),
+        vid: k.vid ?? "",
+        accountName: k.account_name ?? "",
+        country: k.country ?? "",
+        postedAt,
+        postedAtSource,
+        // 判定与金额无关，这里给 0 即可；金额在数据库里 JOIN 回去
+        currency: "USD",
+        cost: 0,
+        grossRevenue: 0,
+        orders: 0,
       };
     });
-    for (let i = 0; i < detailRows.length; i += 1000) {
-      const { error } = await db.from("attribution_run_rows").insert(detailRows.slice(i, i + 1000));
-      if (error) throw new Error(error.message);
-    }
+    const ctx = await loadAttrContext(db);
+    const engineRun = attributeRows(inputs, ctx);
+    await persistRunArtifacts(db, engineRun);
+    const resultByKey = new Map(engineRun.rows.map((r) => [r.key, r]));
+    const tEngine = Date.now();
+    console.log(`buildSnapshot ${month}: 引擎耗时 ${tEngine - tKeys}ms`);
 
-    const rawRows = uploads.reduce((n, u) => n + (u.row_count ?? 0), 0);
+    // ---- 3) 判定结果落库 ----
+    if (keys.length) {
+      const keyRows = keys.map((k, i) => {
+        const res = resultByKey.get(`k:${i}`);
+        return {
+          run_id: runId,
+          country: k.country ?? "",
+          vid: k.vid ?? "",
+          account_name: k.account_name ?? "",
+          creative_type: k.creative_type ?? "",
+          bucket: res?.bucket ?? "UNMATCHED",
+          staff: res?.staff ?? null,
+          role: res?.source ?? null,
+          match_type: res?.matchType ?? null,
+          handover_applied: res?.handoverApplied ?? false,
+        };
+      });
+      const KEY_INSERT = 2000;
+      for (let i = 0; i < keyRows.length; i += KEY_INSERT) {
+        const { error } = await db.from("attribution_run_keys").insert(keyRows.slice(i, i + KEY_INSERT));
+        if (error) throw new Error(`写入判定结果失败：${error.message}`);
+      }
+    }
+    const tWrite = Date.now();
+    console.log(`buildSnapshot ${month}: 判定结果写入耗时 ${tWrite - tEngine}ms`);
+
+    // ---- 4) 数据库内聚合：落明细 + 返回紧凑汇总 ----
+    const { data: compactData, error: applyErr } = await db.rpc("attribution_apply_run", {
+      _run_id: runId,
+      _month: month,
+    });
+    if (applyErr) throw new Error(`聚合失败：${applyErr.message}`);
+    const compact = (compactData ?? []) as CompactRow[];
+    console.log(`buildSnapshot ${month}: 聚合耗时 ${Date.now() - tWrite}ms，紧凑汇总 ${compact.length} 行`);
+
+    const { data: topData, error: topErr } = await db.rpc("attribution_run_unmatched_top", {
+      _run_id: runId,
+      _limit: 200,
+    });
+    if (topErr) throw new Error(topErr.message);
+    const unmatchedTop = ((topData ?? []) as Array<{ account_name: string; gmv: number; rows_count: number }>).map((r) => ({
+      account_name: r.account_name,
+      gmv: num(r.gmv),
+      rows: num(r.rows_count),
+    }));
+
+    // 整月全局去重数：紧凑汇总里的 vids/creators 是分格子的，不能相加当总数
+    const { data: keyCount } = await db.rpc("attribution_month_key_count", { _month: month });
+    const totalVids = new Set(keys.filter((k) => k.vid).map((k) => k.vid)).size;
+    const totalCreators = new Set(
+      keys.map((k) => normalizeName(k.account_name)).filter(Boolean),
+    ).size;
+
+    const summary = buildReportFromCompact(compact, {
+      period: { start, end },
+      month,
+      targets,
+      staffMeta,
+      exchangeRates,
+      unmatchedTop,
+      totalVids,
+      totalCreators,
+    });
+
+    const rawRows = uploads.reduce((acc, u) => acc + (u.row_count ?? 0), 0);
     const { data: done, error: updErr } = await db
       .from("attribution_runs")
       .update({
         status: "READY",
         upload_count: uploads.length,
-        agg_rows: aggRows.length,
+        agg_rows: Number(keyCount ?? keys.length),
         raw_rows: rawRows,
         staff_count: summary.staff.length,
         total_gmv: summary.totals.gmv,
@@ -432,6 +572,7 @@ async function buildSnapshot(
     if (updErr) throw new Error(updErr.message);
 
     await db.rpc("attribution_runs_prune", { _month: month, _keep: keep });
+    console.log(`buildSnapshot ${month}: 总耗时 ${Date.now() - t0}ms`);
     return { run: done as RunMeta, summary };
   } catch (e) {
     await db
@@ -618,38 +759,39 @@ Deno.serve(async (req) => {
     if (action === "get") {
       const detailFor = (body.detail_for ?? null) as { staff?: string; role?: string; bucket?: string } | null;
 
+      // merged 视图等价于「读该月最新快照」：整月几十万归并行不可能在一个请求里现算，
+      // 这里直接复用快照，口径与 report 完全一致。
       if (body.merged) {
         const month = str(body.month);
         if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("merged 视图需要 month（YYYY-MM）");
         const uploads = await readyUploads(db, month);
-        const { start, end } = monthRange(month);
-        const [targets, exchangeRates, staffMeta] = await Promise.all([
-          loadTargets(db, month),
-          loadExchangeRates(db),
-          loadStaffMeta(db),
-        ]);
-        if (!uploads.length) {
-          // 该月没有批次时返回空报表而不是报错（避免前端白屏）
+        const run = await latestRun(db, month);
+        if (!run) {
+          const { start, end } = monthRange(month);
+          const [targets, exchangeRates, staffMeta] = await Promise.all([
+            loadTargets(db, month),
+            loadExchangeRates(db),
+            loadStaffMeta(db),
+          ]);
           return json({
             summary: aggregateResults([], { period: { start, end }, month, targets, exchangeRates, staffMeta }),
-            uploads: [],
+            uploads,
             last_synced_at: null,
             detail_rows: detailFor ? [] : undefined,
           });
         }
-        const aggRows = await fetchAgg(db, uploads.map((u) => u.id));
-        // 「生成报表」是显式动作，这里顺带把新推断的别名与审查项落库
-        const { pairs } = await attributeNow(db, aggRows, { persist: true });
-        const summary = aggregateResults(pairs, { period: { start, end }, month, targets, exchangeRates, staffMeta });
-        const lastSyncedAt = uploads.reduce<string | null>(
-          (acc, u) => (u.attributed_at && (!acc || u.attributed_at > acc) ? u.attributed_at : acc),
-          null,
-        );
+        const { data: runRow, error: runErr } = await db
+          .from("attribution_runs")
+          .select("summary")
+          .eq("id", run.id)
+          .single();
+        if (runErr) throw new Error(runErr.message);
         return json({
-          summary,
+          summary: (runRow as { summary: unknown }).summary,
           uploads,
-          last_synced_at: lastSyncedAt,
-          detail_rows: detailFor ? detailFromPairs(pairs, detailFor) : undefined,
+          last_synced_at: run.finished_at,
+          run,
+          detail_rows: detailFor ? [] : undefined,
         });
       }
 
@@ -805,6 +947,53 @@ Deno.serve(async (req) => {
       return json({ runs: data ?? [] });
     }
 
+    // ---------- 数据准备进度（前台「数据准备」面板） ----------
+
+    // 达人登记矩阵：一人一行 × 站点列，格子 = 归因 VID 数 / 达人数（都去重）
+    if (action === "registry_matrix") {
+      const { data, error } = await db.rpc("attribution_registry_matrix");
+      if (error) throw new Error(error.message);
+      const rows = (data ?? []) as Array<{
+        staff_name: string;
+        role: string;
+        country: string;
+        vids: number;
+        creators: number;
+      }>;
+      const { data: staffRows, error: staffErr } = await db.from("staff_sheets").select("name, role, active");
+      if (staffErr) throw new Error(staffErr.message);
+      return json({
+        rows,
+        staff: (staffRows ?? []) as Array<{ name: string; role: string; active: boolean }>,
+      });
+    }
+
+    // GMV 目标（按月）
+    if (action === "targets") {
+      const month = str(body.month);
+      let q = db
+        .from("gmv_targets")
+        .select("month, staff_name, role, target_usd, note")
+        .order("staff_name", { ascending: true })
+        .limit(1000);
+      if (month) q = q.eq("month", month);
+      const { data, error } = await q;
+      if (error) throw new Error(error.message);
+      return json({ targets: data ?? [] });
+    }
+
+    // 站点交接
+    if (action === "handovers") {
+      const { data, error } = await db
+        .from("site_handovers")
+        .select("country, from_bd, to_bd, handover_date, note")
+        .order("country", { ascending: true })
+        .order("handover_date", { ascending: true })
+        .limit(1000);
+      if (error) throw new Error(error.message);
+      return json({ handovers: data ?? [] });
+    }
+
     if (action === "list_exchange_rates") {
       const { data, error } = await db
         .from("gmv_exchange_rates")
@@ -838,7 +1027,6 @@ Deno.serve(async (req) => {
       if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("month 格式应为 YYYY-MM");
       const uploads = await readyUploads(db, month);
       if (!uploads.length) throw new Error(`没有 ${month} 已完成上传的批次`);
-      const aggRows = await fetchAgg(db, uploads.map((u) => u.id));
       const exchangeRates = await loadExchangeRates(db);
 
       type Group = {
@@ -853,10 +1041,10 @@ Deno.serve(async (req) => {
         accountNameCounts: Map<string, number>;
       };
       const groups = new Map<string, Group>();
-      for (const r of aggRows) {
+      const consume = (r: AggRow) => {
         const cur = (r.currency || "USD").toUpperCase();
         const rate = exchangeRates.get(cur) ?? (cur === "USD" ? 1 : 0);
-        if (!rate) continue; // 理论上不会发生：finalize 已强制要求补齐汇率
+        if (!rate) return; // 理论上不会发生：finalize 已强制要求补齐汇率
         const key = `${r.country}|${r.vid}|${r.product_id ?? ""}`;
         let g = groups.get(key);
         if (!g) {
@@ -873,7 +1061,10 @@ Deno.serve(async (req) => {
         g.clicks += Math.round(num(r.clicks));
         const name = (r.account_name ?? "").trim() || "（无账号）";
         g.accountNameCounts.set(name, (g.accountNameCounts.get(name) ?? 0) + (r.rows_count || 1));
-      }
+      };
+      await streamAgg(db, uploads.map((u) => u.id), (page) => {
+        for (const r of page) consume(r);
+      });
 
       const productIds = Array.from(new Set(Array.from(groups.values()).map((g) => g.product_id).filter(Boolean)));
       const skuByKey = new Map<string, string>();
@@ -919,6 +1110,7 @@ Deno.serve(async (req) => {
     }
 
     // 12 个月无建联趋势：逐月现算（归并后每月只有几千行，够快），不再依赖已废弃的 attr_bucket
+    // 12 个月无建联趋势：逐月读该月最新快照的明细，不重算（没有快照的月份留空）
     if (action === "unmatched_trend") {
       const anchorMonth = str(body.month);
       if (!/^\d{4}-\d{2}$/.test(anchorMonth)) throw new Error("month 格式应为 YYYY-MM");
@@ -930,32 +1122,27 @@ Deno.serve(async (req) => {
           months.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`);
         }
       }
-      const exchangeRates = await loadExchangeRates(db);
-      const ctx = await loadAttrContext(db); // 12 个月共用一次上下文
       type Agg = { country: string; account_name: string; byMonth: Map<string, number> };
       const aggMap = new Map<string, Agg>();
+      const missingSnapshots: string[] = [];
       for (const trendMonth of months) {
-        const uploads = await readyUploads(db, trendMonth);
-        if (!uploads.length) continue;
-        const aggRows = await fetchAgg(db, uploads.map((u) => u.id));
-        const inputs = aggRows.map(aggToInput);
-        const run = attributeRows(inputs, ctx);
-        const byKey = new Map(run.rows.map((r) => [r.key, r]));
-        for (const input of inputs) {
-          if (byKey.get(input.key)?.bucket !== "UNMATCHED") continue;
-          const name = input.accountName.trim();
+        const run = await latestRun(db, trendMonth);
+        if (!run) {
+          missingSnapshots.push(trendMonth);
+          continue;
+        }
+        const rows = await fetchRunUnmatched(db, run.id, 5000);
+        for (const r of rows) {
+          const name = (r.account_name ?? "").trim();
           const norm = normalizeName(name);
           if (!norm) continue;
-          const cur = (input.currency || "USD").toUpperCase();
-          const rate = exchangeRates.get(cur) ?? (cur === "USD" ? 1 : 0);
-          if (!rate) continue;
-          const key = `${input.country}|${norm}`;
+          const key = `${r.country}|${norm}`;
           let agg = aggMap.get(key);
           if (!agg) {
-            agg = { country: input.country, account_name: name, byMonth: new Map() };
+            agg = { country: r.country, account_name: name, byMonth: new Map() };
             aggMap.set(key, agg);
           }
-          agg.byMonth.set(trendMonth, (agg.byMonth.get(trendMonth) ?? 0) + input.grossRevenue / rate);
+          agg.byMonth.set(trendMonth, (agg.byMonth.get(trendMonth) ?? 0) + num(r.gmv_usd));
         }
       }
       const rowsOut = Array.from(aggMap.values())
@@ -971,7 +1158,7 @@ Deno.serve(async (req) => {
         })
         .filter((r) => r.total > 0)
         .sort((a, b) => b.total - a.total);
-      return json({ months, rows: rowsOut });
+      return json({ months, rows: rowsOut, missing_snapshots: missingSnapshots });
     }
 
     if (action === "delete") {
@@ -999,11 +1186,14 @@ Deno.serve(async (req) => {
     }
 
     // 「为什么一个人都归不上」的自查：把归因瀑布每一层的命中量摊开，直接指出是哪一层断了。
+    // 「为什么一个人都归不上」的自查：把归因瀑布每一层的命中量摊开，直接指出是哪一层断了。
+    // 统计单位是「判定键」（站点 × VID × 达人昵称 × 内容类型 去重后），和归因引擎的输入完全一致；
+    // 整月几十万归并行不在这里拉，只拉去重后的判定键。
     if (action === "diagnose") {
       const month = str(body.month);
       if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("month 格式应为 YYYY-MM");
       const uploads = await readyUploads(db, month);
-      // 和生成快照一样先自愈：没归并过的历史批次先补上，否则自查每一格都是 0，看不出真实原因
+      // 和生成快照一样先自愈：没归并过的历史批次先补上，否则自查每一格都是 0
       const healed = uploads.length ? await ensureAgg(db, uploads) : { built: 0, details: [] as string[] };
       const ctx = await loadAttrContext(db);
 
@@ -1034,10 +1224,9 @@ Deno.serve(async (req) => {
       }
 
       type Layer = {
-        rows: number;
-        agg_rows: number;
+        keys: number;
         product_card: number;
-        vid_rows: number;
+        vid_keys: number;
         vid_hit: number;
         no_name: number;
         name_hit_same_site: number;
@@ -1047,64 +1236,78 @@ Deno.serve(async (req) => {
         other_site_samples: Array<{ account_name: string; registered_sites: string[] }>;
       };
       const emptyLayer = (): Layer => ({
-        rows: 0, agg_rows: 0, product_card: 0, vid_rows: 0, vid_hit: 0, no_name: 0,
+        keys: 0, product_card: 0, vid_keys: 0, vid_hit: 0, no_name: 0,
         name_hit_same_site: 0, name_hit_other_site: 0, name_never_registered: 0, other_site_samples: [],
       });
       const total = emptyLayer();
-      const perUpload: Array<{ file_name: string; country: string; status: string } & Layer> = [];
+      const bySite = new Map<string, Layer>();
 
-      for (const u of uploads) {
-        const layer = emptyLayer();
-        const aggRows = await fetchAgg(db, [u.id]);
-        for (const r of aggRows) {
-          const n = r.rows_count || 1;
-          layer.rows += n;
-          layer.agg_rows++;
-          if (normalizeCreativeType(r.creative_type) === "product_card") {
-            layer.product_card += n;
-            continue;
-          }
-          if (r.vid) {
-            layer.vid_rows += n;
-            if (ctx.vidRegs.has(r.vid)) {
-              layer.vid_hit += n;
+      type KeyRow = { country: string; vid: string; account_name: string; creative_type: string };
+      if (uploads.length) {
+        const KEY_PAGE = 5000;
+        for (let offset = 0; ; offset += KEY_PAGE) {
+          const { data, error } = await db.rpc("attribution_month_keys", {
+            _month: month,
+            _limit: KEY_PAGE,
+            _offset: offset,
+          });
+          if (error) throw new Error(`读取判定键失败：${error.message}`);
+          const page = (data ?? []) as KeyRow[];
+          for (const r of page) {
+            const site = r.country || "（空）";
+            const layer = bySite.get(site) ?? emptyLayer();
+            bySite.set(site, layer);
+            const bump = (f: keyof Layer) => {
+              (layer[f] as number)++;
+              (total[f] as number)++;
+            };
+            bump("keys");
+            if (normalizeCreativeType(r.creative_type) === "product_card") {
+              bump("product_card");
               continue;
             }
-          }
-          const norm = normalizeName(r.account_name);
-          if (!norm) {
-            layer.no_name += n;
-            continue;
-          }
-          const scoped = identityKey(u.country, norm);
-          if (ctx.manualAlias.has(scoped) || ctx.ownership.has(scoped) || ctx.vidAlias.has(scoped)) {
-            layer.name_hit_same_site += n;
-            continue;
-          }
-          const sites = sitesByName.get(norm);
-          if (sites?.size) {
-            layer.name_hit_other_site += n;
-            if (layer.other_site_samples.length < 10) {
-              layer.other_site_samples.push({
-                account_name: (r.account_name ?? "").trim(),
-                registered_sites: Array.from(sites).slice(0, 5),
-              });
+            if (r.vid) {
+              bump("vid_keys");
+              if (ctx.vidRegs.has(r.vid)) {
+                bump("vid_hit");
+                continue;
+              }
             }
-          } else {
-            layer.name_never_registered += n;
+            const norm = normalizeName(r.account_name);
+            if (!norm) {
+              bump("no_name");
+              continue;
+            }
+            const scoped = identityKey(site, norm);
+            if (ctx.manualAlias.has(scoped) || ctx.ownership.has(scoped) || ctx.vidAlias.has(scoped)) {
+              bump("name_hit_same_site");
+              continue;
+            }
+            const sites = sitesByName.get(norm);
+            if (sites?.size) {
+              bump("name_hit_other_site");
+              if (layer.other_site_samples.length < 10) {
+                layer.other_site_samples.push({
+                  account_name: (r.account_name ?? "").trim(),
+                  registered_sites: Array.from(sites).slice(0, 5),
+                });
+              }
+            } else {
+              bump("name_never_registered");
+            }
           }
+          if (page.length < KEY_PAGE) break;
         }
-        perUpload.push({ file_name: u.file_name, country: u.country, status: u.status, ...layer });
-        total.rows += layer.rows;
-        total.agg_rows += layer.agg_rows;
-        total.product_card += layer.product_card;
-        total.vid_rows += layer.vid_rows;
-        total.vid_hit += layer.vid_hit;
-        total.no_name += layer.no_name;
-        total.name_hit_same_site += layer.name_hit_same_site;
-        total.name_hit_other_site += layer.name_hit_other_site;
-        total.name_never_registered += layer.name_never_registered;
       }
+
+      // 每个站点的原始行数（从批次表拿，不用扫明细）
+      const rawBySite = new Map<string, number>();
+      for (const u of uploads) {
+        rawBySite.set(u.country, (rawBySite.get(u.country) ?? 0) + (u.row_count ?? 0));
+      }
+      const perSite = Array.from(bySite.entries())
+        .map(([country, l]) => ({ country, raw_rows: rawBySite.get(country) ?? 0, ...l }))
+        .sort((a, b) => b.keys - a.keys);
 
       // 结论：按归因瀑布从上往下，第一条断掉的就是主因
       const hints: string[] = [];
@@ -1115,24 +1318,23 @@ Deno.serve(async (req) => {
         if (!ctx.vidRegs.size) hints.push("VID 登记为空：staff_vid_map 与 creator_registry 都没有带 VID 的记录，VID 强匹配这一层完全失效。");
         if (!ctx.ownership.size) hints.push("建联归属为空：creator_ownership 没有记录，昵称匹配这一层完全失效。");
       }
-      if (total.vid_rows > 0 && total.vid_hit === 0 && ctx.vidRegs.size > 0) {
-        hints.push(`广告表里有 ${total.vid_rows} 行带 VID，但没有一个 VID 出现在登记表（登记表共 ${ctx.vidRegs.size} 个 VID）。检查飞书建联表 P 列 / 授权记录 Q 列 / 剪辑表 G 列的 VID 是否真的填了、是否 19 位且以 7 开头。`);
+      if (total.vid_keys > 0 && total.vid_hit === 0 && ctx.vidRegs.size > 0) {
+        hints.push(`广告表里有 ${total.vid_keys} 个带 VID 的判定键，但没有一个 VID 出现在登记表（登记表共 ${ctx.vidRegs.size} 个 VID）。检查飞书建联表 P 列 / 授权记录 Q 列 / 剪辑表 G 列的 VID 是否真的填了、是否 19 位且以 7 开头。`);
       }
-      // 表头、占位符不算「填错的站点」，不要拿它们去烦用户
       const cjkSites = Array.from(registryCountries.keys()).filter((c) => hasCjk(c) && !isHeaderLikeSite(c));
       if (cjkSites.length) {
         hints.push(`建联表里有 ${cjkSites.length} 种汉字站点写法（${cjkSites.slice(0, 10).join("、")}）。站点统一用英文简写，含汉字的行永远匹配不上，请到飞书把这些改成 PH / TH / VN / US / MX-AR 这类代码后重新同步。`);
       }
-      if (healed.built) {
-        hints.push(`本次自查顺带补跑了 ${healed.built} 个批次的归并（这些批次是解耦改造之前上传的，之前没有归并数据）：${healed.details.slice(0, 5).join("；")}`);
-      }
       if (total.name_hit_other_site > 0 && total.name_hit_other_site >= total.name_hit_same_site) {
         const upSites = Array.from(new Set(uploads.map((u) => u.country))).join("、");
         const regSites = Array.from(registryCountries.keys()).slice(0, 15).join("、");
-        hints.push(`有 ${total.name_hit_other_site} 行的达人名字在登记表里存在，但登记站点和上传站点对不上，按现行口径一律判「无建联」。上传站点写法：${upSites}；登记表站点写法：${regSites}。两边必须逐字一致。`);
+        hints.push(`有 ${total.name_hit_other_site} 个判定键的达人名字在登记表里存在，但登记站点和上传站点对不上，按现行口径一律判「无建联」。上传站点写法：${upSites}；登记表站点写法：${regSites}。两边必须逐字一致。`);
       }
       if (total.name_never_registered > 0 && total.name_hit_same_site === 0 && total.vid_hit === 0) {
-        hints.push(`还有 ${total.name_never_registered} 行的达人名字在建联/别名表里完全查不到，这部分是真正的「无建联达人」。`);
+        hints.push(`还有 ${total.name_never_registered} 个判定键的达人名字在建联/别名表里完全查不到，这部分是真正的「无建联达人」。`);
+      }
+      if (healed.built) {
+        hints.push(`本次自查顺带补跑了 ${healed.built} 个批次的归并：${healed.details.slice(0, 5).join("；")}`);
       }
       if (!hints.length) hints.push("各层都有命中，归因口径本身没有断点。");
 
@@ -1153,7 +1355,7 @@ Deno.serve(async (req) => {
         vid_countries: Array.from(vidCountries.entries())
           .map(([country, rows]) => ({ country, rows }))
           .sort((a, b) => b.rows - a.rows),
-        uploads: perUpload,
+        sites: perSite,
         totals: total,
         healed: healed.built,
         hints,
@@ -1163,8 +1365,8 @@ Deno.serve(async (req) => {
     if (action === "site_mismatch") {
       const month = str(body.month);
       if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("month 格式应为 YYYY-MM");
-      const uploads = await readyUploads(db, month);
-      if (!uploads.length) throw new Error(`没有 ${month} 已完成上传的批次`);
+      const run = await latestRun(db, month);
+      if (!run) throw new Error(`${month} 还没有归因快照，请先点「重新计算」`);
 
       // 建联归属 + 别名，按「归一化名字」建索引（不含站点），只用于诊断、不参与归因
       type Owner = { bd: string; country: string; source: string };
@@ -1191,10 +1393,8 @@ Deno.serve(async (req) => {
         }
       }
 
-      const exchangeRates = await loadExchangeRates(db);
-      const aggRows = await fetchAgg(db, uploads.map((u) => u.id));
-      const { pairs } = await attributeNow(db, aggRows);
-
+      // 直接读快照里的「无建联」明细，不重算
+      const unmatchedRows = await fetchRunUnmatched(db, run.id);
       type Miss = {
         upload_country: string;
         account_name: string;
@@ -1203,26 +1403,23 @@ Deno.serve(async (req) => {
         registered: Owner[];
       };
       const missMap = new Map<string, Miss>();
-      for (const { input, result, agg } of pairs) {
-        if (result.bucket !== "UNMATCHED") continue;
-        const raw = (input.accountName ?? "").trim();
+      for (const r of unmatchedRows) {
+        const raw = (r.account_name ?? "").trim();
         const norm = normalizeName(raw);
         if (!norm) continue;
         const owners = byName.get(norm);
         if (!owners?.length) continue; // 名字压根没登记过 → 是真的无建联，不进这张表
-        const cur = (input.currency || "USD").toUpperCase();
-        const rate = exchangeRates.get(cur) ?? (cur === "USD" ? 1 : 0);
-        const key = `${input.country}|${norm}`;
+        const key = `${r.country}|${norm}`;
         let m = missMap.get(key);
         if (!m) {
-          m = { upload_country: input.country, account_name: raw, rows: 0, gmv_usd: 0, registered: owners };
+          m = { upload_country: r.country, account_name: raw, rows: 0, gmv_usd: 0, registered: owners };
           missMap.set(key, m);
         }
-        m.rows += agg.rows_count || 1;
-        if (rate) m.gmv_usd += input.grossRevenue / rate;
+        m.rows += num(r.rows_count) || 1;
+        m.gmv_usd += num(r.gmv_usd);
       }
       const rowsOut = Array.from(missMap.values()).sort((a, b) => b.gmv_usd - a.gmv_usd);
-      return json({ month, rows: rowsOut });
+      return json({ month, run_id: run.id, rows: rowsOut });
     }
 
     throw new Error(`未知 action: ${action}`);

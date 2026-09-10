@@ -27,6 +27,30 @@ import {
 import { persistRunArtifacts } from "../_shared/attribution-report.ts";
 
 const VID_RE = /^7\d{18}$/;
+
+/** 表头里认这些词就是「粉丝量」列（前台暂不展示，先把数据存下来）。 */
+const FOLLOWER_HEADER_RE = /(粉丝|fans|follower)/i;
+
+/**
+ * 粉丝量单元格 → 整数。兼容「12.3万」「1.2w」「850K」「1,234」这些写法。
+ * 存的是绝对值，前台要按 K 显示时自己除。
+ */
+function parseFollowerCount(v: unknown): number | null {
+  const raw = cellText(v);
+  if (!raw) return null;
+  const t = raw.normalize("NFKC").replace(/[\s,]/g, "");
+  const m = t.match(/^([\d.]+)\s*(万|w|W|k|K|m|M)?/);
+  if (!m) return null;
+  const base = Number(m[1]);
+  if (!Number.isFinite(base)) return null;
+  const unit = m[2] ?? "";
+  const mult = unit === "万" || unit === "w" || unit === "W" ? 10000
+    : unit === "k" || unit === "K" ? 1000
+    : unit === "m" || unit === "M" ? 1000000
+    : 1;
+  const n = Math.round(base * mult);
+  return n >= 0 && n < 1e12 ? n : null;
+}
 const LOG_SHEET_TITLE = "授权记录";
 
 type RegRow = {
@@ -45,6 +69,7 @@ type RegRow = {
   nickname_norm: string;
   vid: string;
   registered_sku: string | null;
+  follower_count: number | null;
 };
 
 Deno.serve(async (req) => {
@@ -99,8 +124,17 @@ Deno.serve(async (req) => {
         missing.push(t.sheet_name);
         continue;
       }
-      // 17 列 × 250 行 ≈ 4250 cells，低于飞书 ~5000 上限
-      const rows = await readRange(token, mainToken, `${sid}!A2:Q`, 250);
+      // 先读表头找「粉丝量」列：各人的建联表列位并不完全一致，写死列号迟早读错
+      let followerIdx = -1;
+      try {
+        const header = await readRange(token, mainToken, `${sid}!A1:Z1`);
+        const cells = header[0] ?? [];
+        followerIdx = cells.findIndex((c) => FOLLOWER_HEADER_RE.test(cellText(c)));
+      } catch {
+        /* 读不到表头就当没有粉丝量列，不影响主流程 */
+      }
+      // 26 列 × 180 行 ≈ 4680 cells，低于飞书 ~5000 上限
+      const rows = await readRange(token, mainToken, `${sid}!A2:Z`, 180);
       processedSheets.add(t.sheet_name);
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i] ?? [];
@@ -126,6 +160,7 @@ Deno.serve(async (req) => {
           nickname_norm: nicknameNorm,
           vid,
           registered_sku: cellText(r[10]) || null,
+          follower_count: followerIdx >= 0 ? parseFollowerCount(r[followerIdx]) : null,
         });
       }
     }
@@ -157,6 +192,7 @@ Deno.serve(async (req) => {
           nickname_norm: nicknameNorm,
           vid,
           registered_sku: cellText(r[6]) || null,
+          follower_count: null,
         });
       }
     } else {
@@ -200,6 +236,7 @@ Deno.serve(async (req) => {
             nickname_norm: normalizeName(acctRaw),
             vid,
             registered_sku: cellText(r[5]) || null,
+            follower_count: null,
           });
         }
       }
@@ -238,6 +275,14 @@ Deno.serve(async (req) => {
         handleGroups.set(groupKey, arr);
       }
     }
+    // 昵称 → 已知粉丝量（同名多行取最大值，缺失为 null）
+    const followerByNick = new Map<string, number>();
+    for (const r of bdRows) {
+      if (r.follower_count == null || !r.nickname_norm) continue;
+      const k = identityKey(r.country, r.nickname_norm);
+      followerByNick.set(k, Math.max(followerByNick.get(k) ?? 0, r.follower_count));
+    }
+
     const nickRes = resolveOwnership(nickGroups, "NICKNAME");
     const handleRes = resolveOwnership(handleGroups, "HANDLE");
 
@@ -263,7 +308,11 @@ Deno.serve(async (req) => {
       if (error) throw new Error(error.message);
     }
     const ownRows = [
-      ...nickRes.owners.map((o) => ({ key_type: "NICKNAME", ...ownRow(o) })),
+      ...nickRes.owners.map((o) => ({
+        key_type: "NICKNAME",
+        ...ownRow(o),
+        follower_count: followerByNick.get(identityKey(o.country, o.matchKey)) ?? null,
+      })),
       ...handleRes.owners.map((o) => ({ key_type: "HANDLE", ...ownRow(o) })),
     ];
     for (let i = 0; i < ownRows.length; i += 500) {
@@ -286,6 +335,7 @@ Deno.serve(async (req) => {
         reviews_open: reviewsOpen ?? 0,
         missing_sheets: missing,
         vid_precision_lost: vidPrecisionLost,
+        follower_rows: regRows.filter((r) => r.follower_count != null).length,
         cjk_sites: Array.from(cjkSites.entries())
           .map(([site, rows]) => ({ site, rows }))
           .sort((a, b) => b.rows - a.rows)

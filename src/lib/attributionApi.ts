@@ -6,7 +6,16 @@ export type Role = "BD" | "EDITOR";
 export type MatchType = "VID" | "ALIAS_MANUAL" | "REGISTRY" | "ALIAS_VID";
 export type BucketKey = "PRODUCT_CARD" | "UNMATCHED";
 
-export type StaffCell = { country: string; gmv: number; cost: number; orders: number; counted: boolean };
+/** vids / creators = 去重后的归因 VID 数与归因达人昵称数，和 GMV 并列。 */
+export type StaffCell = {
+  country: string;
+  gmv: number;
+  cost: number;
+  orders: number;
+  vids: number;
+  creators: number;
+  counted: boolean;
+};
 export type StaffAgg = {
   staff_name: string;
   role: Role;
@@ -19,8 +28,10 @@ export type StaffAgg = {
   progress: number | null;
   by_match: Partial<Record<MatchType, number>>;
   by_country: StaffCell[];
+  vids: number;
+  creators: number;
 };
-export type BucketAgg = { gmv: number; cost: number; orders: number; rows: number };
+export type BucketAgg = { gmv: number; cost: number; orders: number; rows: number; vids?: number; creators?: number };
 export type AttributionReport = {
   period: { start: string; end: string };
   month?: string;
@@ -30,7 +41,7 @@ export type AttributionReport = {
   unmatched: BucketAgg & { top: Array<{ account_name: string; gmv: number; rows: number }> };
   // usd_rate=null → 缺汇率、未计入任何汇总；有值 → 已折美元计入，gmv_usd 是折算结果
   non_usd: Array<{ currency: string; gmv: number; cost: number; rows: number; usd_rate: number | null; gmv_usd: number }>;
-  totals: { gmv: number; cost: number; orders: number; rows: number };
+  totals: { gmv: number; cost: number; orders: number; rows: number; vids: number; creators: number };
 };
 
 /** 明细行 = 一个归并组（VID × 达人昵称 × 商品ID × 内容类型 × 币种），rows_count 是它合并了多少条 Excel 原始行。 */
@@ -150,6 +161,8 @@ export function syncCreators() {
     vid_precision_lost?: number;
     /** 含汉字的站点写法（站点统一用英文简写，这些行永远匹配不上） */
     cjk_sites?: Array<{ site: string; rows: number }>;
+    /** 读到粉丝量的登记行数（数据先存下来，前台暂不展示） */
+    follower_rows?: number;
   }>(
     "attribution-sync-creators",
     {},
@@ -267,14 +280,31 @@ export const snapshotApi = {
     invokeFn<{ runs: RunMeta[] }>("attribution-upload", { action: "runs", month, limit }, { timeout: 60000 }),
 };
 
+// ---------- 数据准备进度面板 ----------
+
+export type RegistryMatrixRow = { staff_name: string; role: string; country: string; vids: number; creators: number };
+export type StaffRow = { name: string; role: string; active: boolean };
+export type TargetRow = { month: string; staff_name: string; role: string; target_usd: number; note: string | null };
+export type HandoverRow = { country: string; from_bd: string; to_bd: string; handover_date: string; note: string | null };
+
+export const dataPrepApi = {
+  registryMatrix: () =>
+    invokeFn<{ rows: RegistryMatrixRow[]; staff: StaffRow[] }>(
+      "attribution-upload",
+      { action: "registry_matrix" },
+      { timeout: 120000 },
+    ),
+  targets: (month?: string) =>
+    invokeFn<{ targets: TargetRow[] }>("attribution-upload", { action: "targets", month }, { timeout: 60000 }),
+  handovers: () => invokeFn<{ handovers: HandoverRow[] }>("attribution-upload", { action: "handovers" }, { timeout: 60000 }),
+};
+
 /** 归因口径自查（attribution-upload → action=diagnose）。 */
 export type DiagnoseLayer = {
-  /** Excel 原始行数（按归并组的 rows_count 还原） */
-  rows: number;
-  /** 归并后的组数 */
-  agg_rows: number;
+  /** 判定键数 = 站点 × VID × 达人昵称 × 内容类型 去重后的条数（归因引擎的输入单位） */
+  keys: number;
   product_card: number;
-  vid_rows: number;
+  vid_keys: number;
   vid_hit: number;
   no_name: number;
   name_hit_same_site: number;
@@ -296,9 +326,9 @@ export type DiagnoseResult = {
   upload_countries: string[];
   registry_countries: Array<{ country: string; keys: number }>;
   vid_countries: Array<{ country: string; rows: number }>;
-  uploads: Array<{ file_name: string; country: string; status: string } & DiagnoseLayer>;
+  /** 按站点分组的逐层命中量 */
+  sites: Array<{ country: string; raw_rows: number } & DiagnoseLayer>;
   totals: DiagnoseLayer;
-  /** 本次自查顺带补跑归并的批次数（解耦改造之前上传、没有归并数据的历史批次） */
   healed?: number;
   hints: string[];
 };

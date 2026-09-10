@@ -29,7 +29,13 @@ export function ProgressBoard({
           <CardHeader className="pb-1">
             <CardTitle className="text-xs font-normal text-muted-foreground">总归因 GMV（USD）</CardTitle>
           </CardHeader>
-          <CardContent className="text-xl font-semibold tabular-nums">${fmtUsd(report.totals.gmv)}</CardContent>
+          <CardContent className="text-xl font-semibold tabular-nums">
+            ${fmtUsd(report.totals.gmv)}
+            {/* 归因口径：整月去重后的 VID 数与达人昵称数，和 GMV 并列 */}
+            <div className="text-xs font-normal text-muted-foreground mt-0.5">
+              {(report.totals.vids ?? 0).toLocaleString()} 个归因 VID · {(report.totals.creators ?? 0).toLocaleString()} 个归因达人
+            </div>
+          </CardContent>
         </Card>
         {mode === "admin" ? (
           <>
