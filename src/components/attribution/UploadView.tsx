@@ -124,6 +124,9 @@ export function UploadView({
     setSelected(on ? new Set(filteredHistory.map((u) => u.id)) : new Set());
 
 
+  // 同名文件默认覆盖旧记录，避免上传被「该文件名已上传过」直接挡下来
+  const [replaceExisting, setReplaceExisting] = React.useState(true);
+
   const onPickFiles = async (list: FileList | null) => {
     if (!list?.length) return;
     await uploadQueue.addFiles(list, (m) => toast.warning(m), (m) => toast.error(m));
