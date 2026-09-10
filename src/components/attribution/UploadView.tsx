@@ -160,7 +160,8 @@ export function UploadView({
 
   const uploadAll = () =>
     uploadQueue.run({
-      onDuplicate: (msg) => window.confirm(`${msg}\n\n是否替换旧记录？`),
+      // 勾选「替换同名旧记录」时直接覆盖；未勾选则提示一次，用户确认后再覆盖
+      onDuplicate: (msg) => replaceExisting || window.confirm(`${msg}\n\n是否替换旧记录？`),
       onMissingRates: promptMissingRates,
       onSuccess: (m) => toast.success(m),
       onError: (m) => toast.error(m),
