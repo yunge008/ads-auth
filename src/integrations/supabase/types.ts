@@ -1217,6 +1217,10 @@ export type Database = {
         Args: { _months: string[] }
         Returns: Json
       }
+      attribution_upload_rows_update: {
+        Args: { _rows: Json; _upload_id: string }
+        Returns: number
+      }
       attribution_uploads_delete_all: { Args: never; Returns: number }
       get_gmv_cron_secret: { Args: never; Returns: string }
       gmv_attr_monthly_agg: {
