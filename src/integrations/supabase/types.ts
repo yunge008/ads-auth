@@ -1497,6 +1497,10 @@ export type Database = {
           vids: number
         }[]
       }
+      attribution_backfill_agg_usd: {
+        Args: { _limit?: number }
+        Returns: number
+      }
       attribution_build_upload_agg: {
         Args: { _upload_id: string }
         Returns: {
