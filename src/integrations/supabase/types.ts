@@ -479,6 +479,53 @@ export type Database = {
         }
         Relationships: []
       }
+      attribution_run_keys: {
+        Row: {
+          account_name: string
+          bucket: string
+          country: string
+          creative_type: string
+          handover_applied: boolean
+          match_type: string | null
+          role: string | null
+          run_id: string
+          staff: string | null
+          vid: string
+        }
+        Insert: {
+          account_name?: string
+          bucket?: string
+          country?: string
+          creative_type?: string
+          handover_applied?: boolean
+          match_type?: string | null
+          role?: string | null
+          run_id: string
+          staff?: string | null
+          vid?: string
+        }
+        Update: {
+          account_name?: string
+          bucket?: string
+          country?: string
+          creative_type?: string
+          handover_applied?: boolean
+          match_type?: string | null
+          role?: string | null
+          run_id?: string
+          staff?: string | null
+          vid?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "attribution_run_keys_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "attribution_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       attribution_run_rows: {
         Row: {
           account_name: string
@@ -491,6 +538,7 @@ export type Database = {
           gmv_usd: number
           gross_revenue: number
           handover_applied: boolean
+          has_rate: boolean
           id: string
           match_type: string | null
           month: string
@@ -515,6 +563,7 @@ export type Database = {
           gmv_usd?: number
           gross_revenue?: number
           handover_applied?: boolean
+          has_rate?: boolean
           id?: string
           match_type?: string | null
           month?: string
@@ -539,6 +588,7 @@ export type Database = {
           gmv_usd?: number
           gross_revenue?: number
           handover_applied?: boolean
+          has_rate?: boolean
           id?: string
           match_type?: string | null
           month?: string
@@ -841,6 +891,7 @@ export type Database = {
           display_name: string | null
           evidence: Json | null
           first_register_date: string | null
+          follower_count: number | null
           id: string
           key_type: string
           match_key: string
@@ -856,6 +907,7 @@ export type Database = {
           display_name?: string | null
           evidence?: Json | null
           first_register_date?: string | null
+          follower_count?: number | null
           id?: string
           key_type: string
           match_key: string
@@ -871,6 +923,7 @@ export type Database = {
           display_name?: string | null
           evidence?: Json | null
           first_register_date?: string | null
+          follower_count?: number | null
           id?: string
           key_type?: string
           match_key?: string
@@ -886,6 +939,7 @@ export type Database = {
         Row: {
           country: string
           created_at: string
+          follower_count: number | null
           handle_norm: string
           handle_raw: string
           id: string
@@ -906,6 +960,7 @@ export type Database = {
         Insert: {
           country?: string
           created_at?: string
+          follower_count?: number | null
           handle_norm?: string
           handle_raw?: string
           id?: string
@@ -926,6 +981,7 @@ export type Database = {
         Update: {
           country?: string
           created_at?: string
+          follower_count?: number | null
           handle_norm?: string
           handle_raw?: string
           id?: string
@@ -1412,6 +1468,26 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      attribution_apply_run: {
+        Args: { _month: string; _run_id: string }
+        Returns: {
+          bucket: string
+          cost_native: number
+          cost_usd: number
+          country: string
+          creators: number
+          currency: string
+          gmv_native: number
+          gmv_usd: number
+          has_rate: boolean
+          match_type: string
+          orders: number
+          role: string
+          rows_count: number
+          staff: string
+          vids: number
+        }[]
+      }
       attribution_build_upload_agg: {
         Args: { _upload_id: string }
         Returns: {
@@ -1427,6 +1503,35 @@ export type Database = {
           raw_rows: number
           total_cost_usd: number
           total_revenue_usd: number
+        }[]
+      }
+      attribution_month_key_count: { Args: { _month: string }; Returns: number }
+      attribution_month_keys: {
+        Args: { _limit?: number; _month: string; _offset?: number }
+        Returns: {
+          account_name: string
+          country: string
+          creative_type: string
+          posted_at: string
+          vid: string
+        }[]
+      }
+      attribution_registry_matrix: {
+        Args: never
+        Returns: {
+          country: string
+          creators: number
+          role: string
+          staff_name: string
+          vids: number
+        }[]
+      }
+      attribution_run_unmatched_top: {
+        Args: { _limit?: number; _run_id: string }
+        Returns: {
+          account_name: string
+          gmv: number
+          rows_count: number
         }[]
       }
       attribution_runs_prune: {
