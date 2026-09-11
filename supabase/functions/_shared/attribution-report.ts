@@ -453,6 +453,17 @@ export type CompactRow = {
   cost_usd: number;
   orders: number;
   rows_count: number;
+  /** 恒为 0：去重计数改由 attribution_run_distinct 按「只按同事+国家」的口径单独给 */
+  vids: number;
+  creators: number;
+};
+
+/** attribution_run_distinct 的一行。scope = CELL(同事×国家) / STAFF(同事) / TOTAL(整月)。 */
+export type DistinctRow = {
+  scope: "CELL" | "STAFF" | "TOTAL";
+  staff: string | null;
+  role: string | null;
+  country: string | null;
   vids: number;
   creators: number;
 };
@@ -480,16 +491,26 @@ export function buildReportFromCompact(
     staffMeta?: StaffMeta;
     exchangeRates?: ExchangeRateMap;
     unmatchedTop?: Array<{ account_name: string; gmv: number; rows: number }>;
-    /** 数据库另算的全局去重数（整月所有归因行） */
-    totalVids?: number;
-    totalCreators?: number;
+    /** 数据库按「只按同事+国家」口径算出的精确去重数（CELL / STAFF / TOTAL 三个粒度） */
+    distinct?: DistinctRow[];
   },
 ): AttributionReport {
   const staffMap = new Map<string, StaffAgg>();
   const cellMap = new Map<string, StaffCell>();
-  // 同一 (同事,站点) 下的去重数按各拆分行取最大值：跨币种/匹配方式相加会重复计数
+  // 去重数一律用数据库按 (同事, 国家) 算好的精确值，绝不在这里相加或取最大值估算
   const cellDistinct = new Map<string, { vids: number; creators: number }>();
   const staffDistinct = new Map<string, { vids: number; creators: number }>();
+  let totalDistinct = { vids: 0, creators: 0 };
+  for (const d of opts.distinct ?? []) {
+    const role = d.role === "EDITOR" ? "EDITOR" : "BD";
+    if (d.scope === "TOTAL") {
+      totalDistinct = { vids: n(d.vids), creators: n(d.creators) };
+    } else if (d.scope === "STAFF" && d.staff) {
+      staffDistinct.set(`${d.staff}|${role}`, { vids: n(d.vids), creators: n(d.creators) });
+    } else if (d.scope === "CELL" && d.staff) {
+      cellDistinct.set(`${d.staff}|${role}|${d.country || "未知站点"}`, { vids: n(d.vids), creators: n(d.creators) });
+    }
+  }
   const productCard: BucketAgg = { gmv: 0, cost: 0, orders: 0, rows: 0, vids: 0, creators: 0 };
   const unmatched: BucketAgg = { gmv: 0, cost: 0, orders: 0, rows: 0, vids: 0, creators: 0 };
   const nonUsd = new Map<string, { currency: string; gmv: number; cost: number; rows: number; usd_rate: number | null; gmv_usd: number }>();
@@ -501,6 +522,7 @@ export function buildReportFromCompact(
     const costUsd = n(r.cost_usd);
     const rowsCount = n(r.rows_count);
 
+    // 归并时就已折美元；这里只为「非美元币种」留一份原币种对照，缺汇率的单独标出来
     if (cur !== "USD" || !r.has_rate) {
       const e = nonUsd.get(cur) ?? {
         currency: cur,
@@ -583,16 +605,6 @@ export function buildReportFromCompact(
     cell.gmv += gmvUsd;
     cell.cost += costUsd;
     cell.orders += n(r.orders);
-
-    const cd = cellDistinct.get(cKey) ?? { vids: 0, creators: 0 };
-    cd.vids = Math.max(cd.vids, n(r.vids));
-    cd.creators = Math.max(cd.creators, n(r.creators));
-    cellDistinct.set(cKey, cd);
-
-    const sd = staffDistinct.get(sKey) ?? { vids: 0, creators: 0 };
-    sd.vids += n(r.vids);
-    sd.creators += n(r.creators);
-    staffDistinct.set(sKey, sd);
   }
 
   for (const [cKey, cell] of cellMap) {
@@ -607,9 +619,10 @@ export function buildReportFromCompact(
       if (cell.counted) agg.counted_gmv += cell.gmv;
     }
     agg.by_country.sort((a, b) => b.gmv - a.gmv);
-    // 同事合计的去重数：各站点格子相加（同一个达人/VID 跨站点出现属于不同格子，本来就该分别计）
-    agg.vids = agg.by_country.reduce((x, c) => x + c.vids, 0);
-    agg.creators = agg.by_country.reduce((x, c) => x + c.creators, 0);
+    // 同事合计：用数据库按同事粒度单独去重的结果（不是把各站点格子相加）
+    const sd = staffDistinct.get(sKey);
+    agg.vids = sd?.vids ?? 0;
+    agg.creators = sd?.creators ?? 0;
     const meta = opts.staffMeta?.get(sKey);
     agg.active = meta?.active ?? false;
     const target = opts.targets?.get(sKey);
@@ -621,8 +634,8 @@ export function buildReportFromCompact(
     }
   }
 
-  totals.vids = opts.totalVids ?? 0;
-  totals.creators = opts.totalCreators ?? 0;
+  totals.vids = totalDistinct.vids;
+  totals.creators = totalDistinct.creators;
 
   return {
     period: opts.period,

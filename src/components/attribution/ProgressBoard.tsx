@@ -31,7 +31,7 @@ export function ProgressBoard({
           </CardHeader>
           <CardContent className="text-xl font-semibold tabular-nums">
             ${fmtUsd(report.totals.gmv)}
-            {/* 归因口径：整月去重后的 VID 数与达人昵称数，和 GMV 并列 */}
+            {/* 归因口径：整月合并全部文件后去重的 VID 数与达人昵称数（只统计已归到人的部分） */}
             <div className="text-xs font-normal text-muted-foreground mt-0.5">
               {(report.totals.vids ?? 0).toLocaleString()} 个归因 VID · {(report.totals.creators ?? 0).toLocaleString()} 个归因达人
             </div>

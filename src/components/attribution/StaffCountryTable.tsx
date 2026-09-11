@@ -37,7 +37,9 @@ export function StaffCountryTable({
               <TableHead className="whitespace-nowrap">角色</TableHead>
               <TableHead className="whitespace-nowrap">状态</TableHead>
               <TableHead className="text-right whitespace-nowrap">合计 GMV</TableHead>
-              <TableHead className="text-right whitespace-nowrap">VID / 达人</TableHead>
+              <TableHead className="text-right whitespace-nowrap" title="整月合并全部文件后，按「同事」去重的归因 VID 数 / 达人昵称数">
+                VID / 达人
+              </TableHead>
               {mode === "admin" ? (
                 <>
                   <TableHead className="text-right whitespace-nowrap">目标</TableHead>
@@ -94,7 +96,7 @@ export function StaffCountryTable({
                         {cell ? (
                           <>
                             <div>${fmtUsd(cell.gmv)}</div>
-                            {/* 归因口径：和 GMV 并列展示去重后的 VID 数 / 达人数 */}
+                            {/* 归因口径：按 (同事, 国家) 对整月合并后的集合去重，不掺任何其它字段 */}
                             <div className="text-[11px] text-muted-foreground">
                               {cell.vids ?? 0} VID / {cell.creators ?? 0} 达人
                             </div>

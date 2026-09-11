@@ -2,7 +2,8 @@
 //
 // 【口径：上传与归因彻底解耦】
 //   上传阶段只做两件事：把原始行落库（ad_upload_rows），再按 (VID, 达人昵称, 商品ID, 内容类型, 币种)
-//   在数据库里归并成 ad_upload_agg（10 万行级 → 几千行）。**不计算、不存储任何归因结果。**
+//   在数据库里归并成 ad_upload_agg，并**在归并那一刻就按后台汇率折成 USD 存下来**（gmv_usd/cost_usd/usd_rate）。
+//   **不计算、不存储任何归因结果。** 汇率改了跑 RPC attribution_rebuild_agg_usd(month) 就地重算，不用重传。
 //   归因一律在出报表的那一刻现算：重新 loadAttrContext() 读当下的 creator_registry / creator_ownership /
 //   creator_alias / site_handovers / attribution_review，再跑引擎。所以「同步达人登记」之后不需要重传、
 //   不需要重跑批次，刷新报表就是新结果。ad_upload_rows.attr_* 四列已废弃，只留历史痕迹，不再读写。
@@ -46,6 +47,7 @@ import {
 } from "../_shared/attribution.ts";
 import {
   type CompactRow,
+  type DistinctRow,
   aggregateResults,
   buildReportFromCompact,
   findMissingCurrencies,
@@ -78,10 +80,14 @@ type AggRow = {
   orders: number;
   impressions: number;
   clicks: number;
+  /** 归并时按后台汇率折好的美元金额（usd_rate 为 null = 当时缺该币种汇率） */
+  usd_rate: number | null;
+  gmv_usd: number;
+  cost_usd: number;
 };
 
 const AGG_COLUMNS =
-  "id, upload_id, country, month, vid, account_name, product_id, creative_type, currency, posted_at, rows_count, cost, gross_revenue, orders, impressions, clicks";
+  "id, upload_id, country, month, vid, account_name, product_id, creative_type, currency, posted_at, rows_count, cost, gross_revenue, orders, impressions, clicks, usd_rate, gmv_usd, cost_usd";
 
 type UploadRec = {
   id: string;
@@ -422,6 +428,13 @@ async function buildSnapshot(
       if (healed.built) console.log(`buildSnapshot ${month}: 补归并 ${healed.built} 个批次`);
     }
 
+    // 汇率是在归并时折算并存下来的；如果之后改过汇率，这里就地重算该月的美元金额（只更新汇率变了的行）
+    {
+      const { data: fixed, error } = await db.rpc("attribution_rebuild_agg_usd", { _month: month });
+      if (error) throw new Error(`按最新汇率重算美元金额失败：${error.message}`);
+      if (Number(fixed ?? 0) > 0) console.log(`buildSnapshot ${month}: 汇率变更，重算了 ${fixed} 行的美元金额`);
+    }
+
     const { start, end } = monthRange(month);
     const [targets, exchangeRates, staffMeta] = await Promise.all([
       loadTargets(db, month),
@@ -533,12 +546,12 @@ async function buildSnapshot(
       rows: num(r.rows_count),
     }));
 
-    // 整月全局去重数：紧凑汇总里的 vids/creators 是分格子的，不能相加当总数
+    // 去重计数：口径固定为「只按 (同事, 国家)」，由数据库一次算出三个粒度，前端不做任何相加估算
+    const { data: distinctData, error: distinctErr } = await db.rpc("attribution_run_distinct", { _run_id: runId });
+    if (distinctErr) throw new Error(`去重计数失败：${distinctErr.message}`);
+    const distinct = (distinctData ?? []) as DistinctRow[];
+
     const { data: keyCount } = await db.rpc("attribution_month_key_count", { _month: month });
-    const totalVids = new Set(keys.filter((k) => k.vid).map((k) => k.vid)).size;
-    const totalCreators = new Set(
-      keys.map((k) => normalizeName(k.account_name)).filter(Boolean),
-    ).size;
 
     const summary = buildReportFromCompact(compact, {
       period: { start, end },
@@ -547,8 +560,7 @@ async function buildSnapshot(
       staffMeta,
       exchangeRates,
       unmatchedTop,
-      totalVids,
-      totalCreators,
+      distinct,
     });
 
     const rawRows = uploads.reduce((acc, u) => acc + (u.row_count ?? 0), 0);
@@ -1027,8 +1039,6 @@ Deno.serve(async (req) => {
       if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("month 格式应为 YYYY-MM");
       const uploads = await readyUploads(db, month);
       if (!uploads.length) throw new Error(`没有 ${month} 已完成上传的批次`);
-      const exchangeRates = await loadExchangeRates(db);
-
       type Group = {
         country: string;
         vid: string;
@@ -1042,9 +1052,7 @@ Deno.serve(async (req) => {
       };
       const groups = new Map<string, Group>();
       const consume = (r: AggRow) => {
-        const cur = (r.currency || "USD").toUpperCase();
-        const rate = exchangeRates.get(cur) ?? (cur === "USD" ? 1 : 0);
-        if (!rate) return; // 理论上不会发生：finalize 已强制要求补齐汇率
+        // 归并层已按当时的后台汇率折好美元，这里直接相加，不再做汇率分支
         const key = `${r.country}|${r.vid}|${r.product_id ?? ""}`;
         let g = groups.get(key);
         if (!g) {
@@ -1054,8 +1062,8 @@ Deno.serve(async (req) => {
           };
           groups.set(key, g);
         }
-        g.gmvUsd += num(r.gross_revenue) / rate;
-        g.costUsd += num(r.cost) / rate;
+        g.gmvUsd += num(r.gmv_usd);
+        g.costUsd += num(r.cost_usd);
         g.orders += Math.round(num(r.orders));
         g.impressions += Math.round(num(r.impressions));
         g.clicks += Math.round(num(r.clicks));
