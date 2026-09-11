@@ -24,7 +24,7 @@ export function ProgressBoard({
   const editors = report.staff.filter((s) => s.role === "EDITOR");
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 md:grid-cols-4 grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-5 grid-cols-2">
         <Card>
           <CardHeader className="pb-1">
             <CardTitle className="text-xs font-normal text-muted-foreground">总归因 GMV（USD）</CardTitle>
@@ -44,6 +44,13 @@ export function ProgressBoard({
                 <CardTitle className="text-xs font-normal text-muted-foreground">商品卡</CardTitle>
               </CardHeader>
               <CardContent className="text-xl font-semibold tabular-nums">${fmtUsd(report.product_card.gmv)}</CardContent>
+            </Card>
+            {/* 「其他」= 创意类型无法识别的行：不归人，但 GMV 已入库，这里单列出来免得被当成漏数 */}
+            <Card className={onDrill ? "cursor-pointer hover:bg-muted/40" : ""} onClick={() => onDrill?.({ bucket: "OTHER" })}>
+              <CardHeader className="pb-1">
+                <CardTitle className="text-xs font-normal text-muted-foreground">其他类型</CardTitle>
+              </CardHeader>
+              <CardContent className="text-xl font-semibold tabular-nums">${fmtUsd(report.other?.gmv ?? 0)}</CardContent>
             </Card>
             <Card className={onDrill ? "cursor-pointer hover:bg-muted/40" : ""} onClick={() => onDrill?.({ bucket: "UNMATCHED" })}>
               <CardHeader className="pb-1">

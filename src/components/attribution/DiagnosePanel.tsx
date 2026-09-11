@@ -40,7 +40,7 @@ export function DiagnosePanel({ month }: { month: string }) {
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          按归因瀑布逐层统计：商品卡 → VID 强匹配 → 昵称（站点必须一致）→ 无建联。哪一层命中为 0，问题就在哪一层。
+          按归因瀑布逐层统计：商品卡 / 其他类型（不归人）→ VID 强匹配（直播不走这层）→ 昵称（站点必须一致）→ 无建联。哪一层命中为 0，问题就在哪一层。
           统计单位是「判定键」（站点 × VID × 达人昵称 × 内容类型 去重后），与归因引擎的输入完全一致。
           统计用的是当下的飞书登记数据，和报表口径完全一致。
         </p>
@@ -96,6 +96,7 @@ export function DiagnosePanel({ month }: { month: string }) {
                   <TableHead className="text-right">原始行数</TableHead>
                   <TableHead className="text-right">判定键数</TableHead>
                   <TableHead className="text-right">商品卡</TableHead>
+                  <TableHead className="text-right">其他类型</TableHead>
                   <TableHead className="text-right">带VID / VID命中</TableHead>
                   <TableHead className="text-right">昵称·同站点命中</TableHead>
                   <TableHead className="text-right">昵称·登记在别站点</TableHead>
@@ -110,6 +111,7 @@ export function DiagnosePanel({ month }: { month: string }) {
                     <TableCell className="text-right tabular-nums">{n(u.raw_rows)}</TableCell>
                     <TableCell className="text-right tabular-nums">{n(u.keys)}</TableCell>
                     <TableCell className="text-right tabular-nums">{n(u.product_card)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{n(u.other_type)}</TableCell>
                     <TableCell className="text-right tabular-nums">
                       {n(u.vid_keys)} / <span className={u.vid_hit ? "" : "text-destructive"}>{n(u.vid_hit)}</span>
                     </TableCell>
@@ -128,6 +130,7 @@ export function DiagnosePanel({ month }: { month: string }) {
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{n(data.totals.keys)}</TableCell>
                   <TableCell className="text-right tabular-nums">{n(data.totals.product_card)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{n(data.totals.other_type)}</TableCell>
                   <TableCell className="text-right tabular-nums">{n(data.totals.vid_keys)} / {n(data.totals.vid_hit)}</TableCell>
                   <TableCell className="text-right tabular-nums">{n(data.totals.name_hit_same_site)}</TableCell>
                   <TableCell className="text-right tabular-nums">{n(data.totals.name_hit_other_site)}</TableCell>

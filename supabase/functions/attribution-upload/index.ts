@@ -551,6 +551,21 @@ async function buildSnapshot(
     if (distinctErr) throw new Error(`去重计数失败：${distinctErr.message}`);
     const distinct = (distinctData ?? []) as DistinctRow[];
 
+    // 内容类型占比（商品卡 / 直播 / 视频 / 其他 × 站点），所有行都入库，这里只是分类汇总
+    const { data: byTypeData, error: byTypeErr } = await db.rpc("attribution_run_by_type", { _run_id: runId });
+    if (byTypeErr) throw new Error(`内容类型汇总失败：${byTypeErr.message}`);
+    const byType = ((byTypeData ?? []) as Array<Record<string, unknown>>).map((r) => ({
+      country: str(r.country),
+      creative_type: str(r.creative_type),
+      bucket: str(r.bucket),
+      gmv: num(r.gmv_usd),
+      cost: num(r.cost_usd),
+      orders: Math.round(num(r.orders)),
+      rows: Math.round(num(r.rows_count)),
+      vids: Math.round(num(r.vids)),
+      creators: Math.round(num(r.creators)),
+    }));
+
     const { data: keyCount } = await db.rpc("attribution_month_key_count", { _month: month });
 
     const summary = buildReportFromCompact(compact, {
@@ -562,6 +577,8 @@ async function buildSnapshot(
       unmatchedTop,
       distinct,
     });
+    // 内容类型占比挂在报表里一起存进快照，前端不用再单独查
+    (summary as unknown as { by_type: typeof byType }).by_type = byType;
 
     const rawRows = uploads.reduce((acc, u) => acc + (u.row_count ?? 0), 0);
     const { data: done, error: updErr } = await db
@@ -1234,6 +1251,8 @@ Deno.serve(async (req) => {
       type Layer = {
         keys: number;
         product_card: number;
+        /** 无法识别的创意类型（不归人，但金额已入库） */
+        other_type: number;
         vid_keys: number;
         vid_hit: number;
         no_name: number;
@@ -1244,7 +1263,7 @@ Deno.serve(async (req) => {
         other_site_samples: Array<{ account_name: string; registered_sites: string[] }>;
       };
       const emptyLayer = (): Layer => ({
-        keys: 0, product_card: 0, vid_keys: 0, vid_hit: 0, no_name: 0,
+        keys: 0, product_card: 0, other_type: 0, vid_keys: 0, vid_hit: 0, no_name: 0,
         name_hit_same_site: 0, name_hit_other_site: 0, name_never_registered: 0, other_site_samples: [],
       });
       const total = emptyLayer();
@@ -1270,11 +1289,17 @@ Deno.serve(async (req) => {
               (total[f] as number)++;
             };
             bump("keys");
-            if (normalizeCreativeType(r.creative_type) === "product_card") {
+            const ctype = normalizeCreativeType(r.creative_type);
+            if (ctype === "product_card") {
               bump("product_card");
               continue;
             }
-            if (r.vid) {
+            if (ctype === "other") {
+              bump("other_type");
+              continue;
+            }
+            // 直播只走昵称路径，不参与 VID 强匹配
+            if (ctype !== "live" && r.vid) {
               bump("vid_keys");
               if (ctx.vidRegs.has(r.vid)) {
                 bump("vid_hit");

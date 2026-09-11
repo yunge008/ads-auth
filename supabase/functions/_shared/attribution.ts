@@ -1,8 +1,14 @@
 // GMV 归因引擎（纯函数，无 IO）。月度报表(attribution-run)与 Excel 上传(attribution-upload)共用。
 //
+// 【入库口径】广告表的每一行都入库，不筛掉任何内容类型，只是按「创意作品类型」分四类走不同的归因路径：
+//   · 商品卡片 → PRODUCT_CARD 桶：不归人，但 GMV/成本照样统计，可按站点看占比
+//   · 直播     → 只走达人昵称路径，且只归 BD（不走 VID 强匹配）
+//   · 视频     → VID 强匹配（BD 与剪辑都可）+ 达人昵称路径（仅 BD）
+//   · 其他     → OTHER 桶：不归人，同样保留 GMV/成本（类型无法识别时落这里，不再默认当成视频）
+//
 // 归因瀑布（一行数据全局只归一个人）：
-//   1. 商品卡 → PRODUCT_CARD 桶（不归人）
-//   2. VID 强匹配（staff_vid_map ∪ 授权记录归档，BD/EDITOR）→ 该同事；双登记冲突进审查表
+//   1. 商品卡 → PRODUCT_CARD 桶；无法识别的类型 → OTHER 桶（都不归人）
+//   2. VID 强匹配（staff_vid_map ∪ 授权记录归档，BD/EDITOR）→ 该同事；双登记冲突进审查表（直播不走这层）
 //   3. 昵称路径（仅 BD）：人工别名 > 建联表归属（保护期解析）> VID 推断别名；再叠加站点交接分段
 //   4. 都不中 → UNMATCHED（无建联达人）
 //
@@ -13,8 +19,8 @@
 
 export type Role = "BD" | "EDITOR";
 export type MatchType = "VID" | "ALIAS_MANUAL" | "REGISTRY" | "ALIAS_VID";
-export type Bucket = "STAFF" | "PRODUCT_CARD" | "UNMATCHED";
-export type CreativeType = "video" | "product_card" | "live" | "unknown";
+export type Bucket = "STAFF" | "PRODUCT_CARD" | "OTHER" | "UNMATCHED";
+export type CreativeType = "video" | "product_card" | "live" | "other";
 
 // ---------- 归一化 ----------
 
@@ -89,18 +95,22 @@ export function splitIdentityKey(key: string): { country: string; normalizedName
   return at < 0 ? { country: "", normalizedName: key } : { country: key.slice(0, at), normalizedName: key.slice(at + 1) };
 }
 
+/**
+ * 创意作品类型归一化：中英文都认。
+ * 认不出来的一律归 "other"（以前是默认当成视频，会把「其他」类型的 GMV 混进视频口径里）。
+ */
 export function normalizeCreativeType(raw: string | null | undefined): CreativeType {
   const s = (raw ?? "").trim();
-  if (!s) return "unknown";
+  if (!s) return "other";
   const low = s.toLowerCase();
   if (low === "视频" || low === "video") return "video";
-  if (low === "商品卡片" || low === "product card" || low === "商品卡") return "product_card";
+  if (low === "商品卡片" || low === "product card" || low === "product_card" || low === "商品卡") return "product_card";
   if (low === "直播" || low === "live") return "live";
   const up = s.toUpperCase();
   if (up.includes("CARD") || s.includes("商品卡")) return "product_card";
   if (up.includes("LIVE") || s.includes("直播")) return "live";
   if (up.includes("VIDEO") || s.includes("视频")) return "video";
-  return "video";
+  return "other";
 }
 
 /** TikTok 视频 ID 高 32 位 = Unix 秒时间戳（样本 99.7% 与实际发布时间 ±2 天吻合）。 */
@@ -427,8 +437,18 @@ export function attributeRows(rows: AttrInputRow[], ctx: AttrContext): AttrRunRe
 
   // ---- Pass 1 ----
   for (const row of rows) {
+    // 商品卡与无法识别的类型：不归人，但金额已经在库里，报表按桶单独展示
     if (row.creativeType === "product_card") {
       results.push({ key: row.key, bucket: "PRODUCT_CARD", country: row.country });
+      continue;
+    }
+    if (row.creativeType === "other") {
+      results.push({ key: row.key, bucket: "OTHER", country: row.country });
+      continue;
+    }
+    // 直播只按达人名称归 BD，不走 VID 强匹配（直播的 VID 不代表达人归属）
+    if (row.creativeType === "live") {
+      pending.push(row);
       continue;
     }
     const regs = row.vid ? ctx.vidRegs.get(row.vid) : undefined;

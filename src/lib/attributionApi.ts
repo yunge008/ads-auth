@@ -4,7 +4,7 @@ import type { ParsedRow } from "@/lib/adExcel";
 
 export type Role = "BD" | "EDITOR";
 export type MatchType = "VID" | "ALIAS_MANUAL" | "REGISTRY" | "ALIAS_VID";
-export type BucketKey = "PRODUCT_CARD" | "UNMATCHED";
+export type BucketKey = "PRODUCT_CARD" | "OTHER" | "UNMATCHED";
 
 /** vids / creators = 去重后的归因 VID 数与归因达人昵称数，和 GMV 并列。 */
 export type StaffCell = {
@@ -38,6 +38,10 @@ export type AttributionReport = {
   kpi_threshold: number;
   staff: StaffAgg[];
   product_card: BucketAgg;
+  /** 无法识别的创意类型（不归人，但金额照样统计） */
+  other?: BucketAgg;
+  /** 内容类型占比：站点 × 内容类型 × 桶。所有行都入库，这里是分类汇总 */
+  by_type?: TypeMixRow[];
   unmatched: BucketAgg & { top: Array<{ account_name: string; gmv: number; rows: number }> };
   // usd_rate=null → 缺汇率、未计入任何汇总；有值 → 已折美元计入，gmv_usd 是折算结果
   non_usd: Array<{ currency: string; gmv: number; cost: number; rows: number; usd_rate: number | null; gmv_usd: number }>;
@@ -67,6 +71,19 @@ export type DetailRow = {
 };
 
 export type DrillFilter = { staff?: string; role?: Role; bucket?: BucketKey };
+
+/** 内容类型占比的一行（站点 × 内容类型 × 归因桶）。 */
+export type TypeMixRow = {
+  country: string;
+  creative_type: string;
+  bucket: string;
+  gmv: number;
+  cost: number;
+  orders: number;
+  rows: number;
+  vids: number;
+  creators: number;
+};
 
 export type ExchangeRateRec = {
   currency: string;
@@ -304,6 +321,7 @@ export type DiagnoseLayer = {
   /** 判定键数 = 站点 × VID × 达人昵称 × 内容类型 去重后的条数（归因引擎的输入单位） */
   keys: number;
   product_card: number;
+  other_type: number;
   vid_keys: number;
   vid_hit: number;
   no_name: number;

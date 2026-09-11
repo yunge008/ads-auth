@@ -253,6 +253,8 @@ export type AttributionReport = {
   kpi_threshold: number;
   staff: StaffAgg[];
   product_card: BucketAgg;
+  /** 无法识别的创意类型（不归人，但金额照样统计） */
+  other: BucketAgg;
   unmatched: BucketAgg & { top: Array<{ account_name: string; gmv: number; rows: number }> };
   /**
    * 每个非美元币种一行。`usd_rate` 为 null = 缺汇率、这些行未计入任何汇总；
@@ -308,6 +310,7 @@ export function aggregateResults(
   const staffMap = new Map<string, StaffAgg>();
   const cellMap = new Map<string, StaffCell>(); // `${staff}|${role}|${country}`
   const productCard: BucketAgg = { gmv: 0, cost: 0, orders: 0, rows: 0 };
+  const other: BucketAgg = { gmv: 0, cost: 0, orders: 0, rows: 0 };
   const unmatched: BucketAgg = { gmv: 0, cost: 0, orders: 0, rows: 0 };
   const unmatchedTop = new Map<string, { account_name: string; gmv: number; rows: number }>();
   const nonUsd = new Map<string, { currency: string; gmv: number; cost: number; rows: number; usd_rate: number | null; gmv_usd: number }>();
@@ -345,6 +348,13 @@ export function aggregateResults(
       productCard.cost += costUsd;
       productCard.orders += input.orders;
       productCard.rows++;
+      continue;
+    }
+    if (result.bucket === "OTHER") {
+      other.gmv += gmvUsd;
+      other.cost += costUsd;
+      other.orders += input.orders;
+      other.rows++;
       continue;
     }
     if (result.bucket === "UNMATCHED") {
@@ -429,6 +439,7 @@ export function aggregateResults(
     kpi_threshold: KPI_MIN_SITE_USD,
     staff,
     product_card: productCard,
+    other,
     unmatched: { ...unmatched, top },
     non_usd: Array.from(nonUsd.values()).sort((a, b) => b.gmv - a.gmv),
     totals,
@@ -512,6 +523,7 @@ export function buildReportFromCompact(
     }
   }
   const productCard: BucketAgg = { gmv: 0, cost: 0, orders: 0, rows: 0, vids: 0, creators: 0 };
+  const other: BucketAgg = { gmv: 0, cost: 0, orders: 0, rows: 0, vids: 0, creators: 0 };
   const unmatched: BucketAgg = { gmv: 0, cost: 0, orders: 0, rows: 0, vids: 0, creators: 0 };
   const nonUsd = new Map<string, { currency: string; gmv: number; cost: number; rows: number; usd_rate: number | null; gmv_usd: number }>();
   const totals = { gmv: 0, cost: 0, orders: 0, rows: 0, vids: 0, creators: 0 };
@@ -551,8 +563,13 @@ export function buildReportFromCompact(
       productCard.cost += costUsd;
       productCard.orders += n(r.orders);
       productCard.rows += rowsCount;
-      productCard.vids = Math.max(productCard.vids ?? 0, n(r.vids));
-      productCard.creators = Math.max(productCard.creators ?? 0, n(r.creators));
+      continue;
+    }
+    if (r.bucket === "OTHER") {
+      other.gmv += gmvUsd;
+      other.cost += costUsd;
+      other.orders += n(r.orders);
+      other.rows += rowsCount;
       continue;
     }
     if (r.bucket !== "STAFF" || !r.staff) {
@@ -560,8 +577,6 @@ export function buildReportFromCompact(
       unmatched.cost += costUsd;
       unmatched.orders += n(r.orders);
       unmatched.rows += rowsCount;
-      unmatched.vids = Math.max(unmatched.vids ?? 0, n(r.vids));
-      unmatched.creators = Math.max(unmatched.creators ?? 0, n(r.creators));
       continue;
     }
 
@@ -643,6 +658,7 @@ export function buildReportFromCompact(
     kpi_threshold: KPI_MIN_SITE_USD,
     staff: Array.from(staffMap.values()).sort((a, b) => b.gmv - a.gmv),
     product_card: productCard,
+    other,
     unmatched: { ...unmatched, top: opts.unmatchedTop ?? [] },
     non_usd: Array.from(nonUsd.values()).sort((a, b) => b.gmv - a.gmv),
     totals,
@@ -663,6 +679,7 @@ export function applyUserView(report: AttributionReport): AttributionReport {
       }))
       .filter((s) => s.by_country.length > 0),
     product_card: { gmv: 0, cost: 0, orders: 0, rows: 0 },
+    other: { gmv: 0, cost: 0, orders: 0, rows: 0 },
     unmatched: { gmv: 0, cost: 0, orders: 0, rows: 0, top: [] },
     non_usd: [],
   };

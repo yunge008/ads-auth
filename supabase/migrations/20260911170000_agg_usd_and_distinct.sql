@@ -91,16 +91,19 @@ BEGIN
     CASE WHEN rate.usd_rate IS NULL THEN 0 ELSE s.gross_revenue / rate.usd_rate END,
     CASE WHEN rate.usd_rate IS NULL THEN 0 ELSE s.cost / rate.usd_rate END
   FROM src s
-  LEFT JOIN LATERAL (
-    -- USD 恒等于 1；其它币种取后台启用中的汇率，缺失则为 NULL（该组不计入美元口径）
-    SELECT CASE
-             WHEN s.currency = 'USD' THEN coalesce(er.usd_rate, 1)
-             ELSE er.usd_rate
-           END AS usd_rate
-    FROM (SELECT 1) AS one
+  -- 先把「本批次出现的币种 → 汇率」做成一张小表再 JOIN。
+  -- USD 恒等于 1；其它币种取后台启用中的汇率，缺失则为 NULL（该组不计入美元口径）。
+  LEFT JOIN (
+    SELECT c.currency,
+           CASE WHEN c.currency = 'USD' THEN coalesce(er.usd_rate, 1) ELSE er.usd_rate END AS usd_rate
+    FROM (
+      SELECT DISTINCT upper(coalesce(nullif(btrim(r2.currency), ''), 'USD')) AS currency
+      FROM public.ad_upload_rows r2
+      WHERE r2.upload_id = _upload_id
+    ) c
     LEFT JOIN public.gmv_exchange_rates er
-      ON er.currency = s.currency AND er.enabled = true AND er.usd_rate > 0
-  ) AS rate ON true;
+      ON er.currency = c.currency AND er.enabled = true AND er.usd_rate > 0
+  ) AS rate ON rate.currency = s.currency;
 
   GET DIAGNOSTICS _agg = ROW_COUNT;
   RETURN QUERY SELECT _agg, _raw;
@@ -121,20 +124,21 @@ AS $$
 DECLARE
   n integer;
 BEGIN
+  -- 注意：UPDATE 的目标表不能被 FROM 里的 LATERAL 反向引用（42P10），
+  -- 所以先把「币种 → 汇率」做成一张小表，再按币种 JOIN 回来。
   UPDATE public.ad_upload_agg a
   SET usd_rate = rate.usd_rate,
       gmv_usd = CASE WHEN rate.usd_rate IS NULL THEN 0 ELSE a.gross_revenue / rate.usd_rate END,
       cost_usd = CASE WHEN rate.usd_rate IS NULL THEN 0 ELSE a.cost / rate.usd_rate END
-  FROM LATERAL (
-    SELECT CASE
-             WHEN a.currency = 'USD' THEN coalesce(er.usd_rate, 1)
-             ELSE er.usd_rate
-           END AS usd_rate
-    FROM (SELECT 1) AS one
+  FROM (
+    SELECT c.currency,
+           CASE WHEN c.currency = 'USD' THEN coalesce(er.usd_rate, 1) ELSE er.usd_rate END AS usd_rate
+    FROM (SELECT DISTINCT currency FROM public.ad_upload_agg WHERE month = _month) c
     LEFT JOIN public.gmv_exchange_rates er
-      ON er.currency = a.currency AND er.enabled = true AND er.usd_rate > 0
+      ON er.currency = c.currency AND er.enabled = true AND er.usd_rate > 0
   ) AS rate
-  WHERE a.month = _month
+  WHERE rate.currency = a.currency
+    AND a.month = _month
     AND (a.usd_rate IS DISTINCT FROM rate.usd_rate);
   GET DIAGNOSTICS n = ROW_COUNT;
   RETURN n;
@@ -149,16 +153,15 @@ UPDATE public.ad_upload_agg a
 SET usd_rate = rate.usd_rate,
     gmv_usd = CASE WHEN rate.usd_rate IS NULL THEN 0 ELSE a.gross_revenue / rate.usd_rate END,
     cost_usd = CASE WHEN rate.usd_rate IS NULL THEN 0 ELSE a.cost / rate.usd_rate END
-FROM LATERAL (
-  SELECT CASE
-           WHEN a.currency = 'USD' THEN coalesce(er.usd_rate, 1)
-           ELSE er.usd_rate
-         END AS usd_rate
-  FROM (SELECT 1) AS one
+FROM (
+  SELECT c.currency,
+         CASE WHEN c.currency = 'USD' THEN coalesce(er.usd_rate, 1) ELSE er.usd_rate END AS usd_rate
+  FROM (SELECT DISTINCT currency FROM public.ad_upload_agg) c
   LEFT JOIN public.gmv_exchange_rates er
-    ON er.currency = a.currency AND er.enabled = true AND er.usd_rate > 0
+    ON er.currency = c.currency AND er.enabled = true AND er.usd_rate > 0
 ) AS rate
-WHERE a.usd_rate IS NULL;
+WHERE rate.currency = a.currency
+  AND a.usd_rate IS NULL;
 
 -- ---------- 2. 聚合：只加 USD，不再做汇率分支 ----------
 
@@ -272,3 +275,36 @@ GRANT EXECUTE ON FUNCTION public.attribution_run_distinct(uuid) TO service_role;
 
 CREATE INDEX IF NOT EXISTS attribution_run_rows_run_staff_country_idx
   ON public.attribution_run_rows(run_id, staff, country);
+
+-- ---------- 4. 内容类型占比（商品卡 / 直播 / 视频 / 其他） ----------
+
+-- 所有行都入库、只是分类不同：商品卡与「其他」不归人，但 GMV 照样存着，
+-- 需要看「整个国家的 GMV 各自占多少」时查这个。
+CREATE OR REPLACE FUNCTION public.attribution_run_by_type(_run_id uuid)
+RETURNS TABLE (
+  country text, creative_type text, bucket text,
+  gmv_usd numeric, cost_usd numeric, orders bigint, rows_count bigint, vids integer, creators integer
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+SET statement_timeout = '120s'
+AS $$
+  SELECT
+    r.country,
+    r.creative_type,
+    r.bucket,
+    sum(r.gmv_usd),
+    sum(r.cost_usd),
+    sum(r.orders)::bigint,
+    sum(r.rows_count)::bigint,
+    count(DISTINCT r.vid) FILTER (WHERE r.vid <> '')::integer,
+    count(DISTINCT lower(btrim(r.account_name))) FILTER (WHERE btrim(r.account_name) <> '')::integer
+  FROM public.attribution_run_rows r
+  WHERE r.run_id = _run_id
+  GROUP BY r.country, r.creative_type, r.bucket;
+$$;
+
+REVOKE ALL ON FUNCTION public.attribution_run_by_type(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.attribution_run_by_type(uuid) TO service_role;

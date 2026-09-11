@@ -16,6 +16,7 @@ import { UploadView, type Viewing } from "@/components/attribution/UploadView";
 import { SiteMismatchTable } from "@/components/attribution/SiteMismatchTable";
 import { DiagnosePanel } from "@/components/attribution/DiagnosePanel";
 import { DataPrepPanel } from "@/components/attribution/DataPrepPanel";
+import { TypeMixPanel } from "@/components/attribution/TypeMixPanel";
 import {
   type AttributionReport,
   type DetailRow,
@@ -194,7 +195,7 @@ function MonthlyView() {
 
   /** 下钻：直接查快照明细表，不重算。 */
   const drill = async (f: DrillFilter) => {
-    const title = f.bucket ? (f.bucket === "PRODUCT_CARD" ? "商品卡明细" : "无建联明细") : `${f.staff} 明细`;
+    const title = f.bucket ? (f.bucket === "PRODUCT_CARD" ? "商品卡明细" : f.bucket === "OTHER" ? "其他类型明细" : "无建联明细") : `${f.staff} 明细`;
     attributionView.patch("admin-monthly", { detail: { rows: [], title } });
     setDetailLoading(true);
     try {
@@ -354,6 +355,7 @@ function MonthlyView() {
         <>
           <ProgressBoard report={report} mode="admin" onDrill={drill} />
           {detail ? <DetailTable rows={detail.rows} loading={detailLoading} title={detail.title} /> : null}
+          {report.by_type?.length ? <TypeMixPanel rows={report.by_type} /> : null}
           <SiteMismatchTable month={month} />
           <DiagnosePanel month={month} />
         </>
@@ -382,7 +384,7 @@ function UploadResultView() {
 
   const drill = async (f: DrillFilter) => {
     if (!result) return;
-    const title = f.bucket ? (f.bucket === "PRODUCT_CARD" ? "商品卡明细" : "无建联明细") : `${f.staff} 明细`;
+    const title = f.bucket ? (f.bucket === "PRODUCT_CARD" ? "商品卡明细" : f.bucket === "OTHER" ? "其他类型明细" : "无建联明细") : `${f.staff} 明细`;
     setDetail({ rows: [], title });
     setDetailLoading(true);
     try {

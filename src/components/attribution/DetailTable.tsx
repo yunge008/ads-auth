@@ -9,7 +9,7 @@ import { type DetailRow, MATCH_LABELS, fmtUsd2 } from "@/lib/attributionApi";
 
 const PAGE_SIZE = 20;
 
-const TYPE_LABELS: Record<string, string> = { video: "视频", product_card: "商品卡", live: "直播", unknown: "—" };
+const TYPE_LABELS: Record<string, string> = { video: "视频", product_card: "商品卡", live: "直播", other: "其他" };
 
 export function DetailTable({ rows, loading, title }: { rows: DetailRow[]; loading?: boolean; title?: string }) {
   const [page, setPage] = React.useState(1);
@@ -55,7 +55,8 @@ export function DetailTable({ rows, loading, title }: { rows: DetailRow[]; loadi
                 <TableCell className="text-xs">
                   {r.bucket === "STAFF"
                     ? `${r.staff}（${r.match_type ? MATCH_LABELS[r.match_type] ?? r.match_type : "—"}${r.handover_applied ? "·交接" : ""}）`
-                    : r.bucket === "PRODUCT_CARD" ? "商品卡" : "无建联"}
+                    : r.bucket === "PRODUCT_CARD" ? "商品卡"
+                    : r.bucket === "OTHER" ? "其他类型" : "无建联"}
                 </TableCell>
                 <TableCell className="text-xs tabular-nums">
                   {r.posted_at ? r.posted_at.slice(0, 10) : "—"}
