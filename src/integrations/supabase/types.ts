@@ -19,10 +19,12 @@ export type Database = {
           account_name: string
           clicks: number
           cost: number
+          cost_usd: number
           country: string
           created_at: string
           creative_type: string
           currency: string
+          gmv_usd: number
           gross_revenue: number
           id: string
           impressions: number
@@ -32,16 +34,19 @@ export type Database = {
           product_id: string
           rows_count: number
           upload_id: string
+          usd_rate: number | null
           vid: string
         }
         Insert: {
           account_name?: string
           clicks?: number
           cost?: number
+          cost_usd?: number
           country?: string
           created_at?: string
           creative_type?: string
           currency?: string
+          gmv_usd?: number
           gross_revenue?: number
           id?: string
           impressions?: number
@@ -51,16 +56,19 @@ export type Database = {
           product_id?: string
           rows_count?: number
           upload_id: string
+          usd_rate?: number | null
           vid?: string
         }
         Update: {
           account_name?: string
           clicks?: number
           cost?: number
+          cost_usd?: number
           country?: string
           created_at?: string
           creative_type?: string
           currency?: string
+          gmv_usd?: number
           gross_revenue?: number
           id?: string
           impressions?: number
@@ -70,6 +78,7 @@ export type Database = {
           product_id?: string
           rows_count?: number
           upload_id?: string
+          usd_rate?: number | null
           vid?: string
         }
         Relationships: [
@@ -1488,6 +1497,10 @@ export type Database = {
           vids: number
         }[]
       }
+      attribution_backfill_agg_usd: {
+        Args: { _limit?: number }
+        Returns: number
+      }
       attribution_build_upload_agg: {
         Args: { _upload_id: string }
         Returns: {
@@ -1516,6 +1529,7 @@ export type Database = {
           vid: string
         }[]
       }
+      attribution_rebuild_agg_usd: { Args: { _month: string }; Returns: number }
       attribution_registry_matrix: {
         Args: never
         Returns: {
@@ -1523,6 +1537,31 @@ export type Database = {
           creators: number
           role: string
           staff_name: string
+          vids: number
+        }[]
+      }
+      attribution_run_by_type: {
+        Args: { _run_id: string }
+        Returns: {
+          bucket: string
+          cost_usd: number
+          country: string
+          creative_type: string
+          creators: number
+          gmv_usd: number
+          orders: number
+          rows_count: number
+          vids: number
+        }[]
+      }
+      attribution_run_distinct: {
+        Args: { _run_id: string }
+        Returns: {
+          country: string
+          creators: number
+          role: string
+          scope: string
+          staff: string
           vids: number
         }[]
       }
