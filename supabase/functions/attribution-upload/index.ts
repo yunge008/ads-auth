@@ -30,6 +30,7 @@
 //   report_detail { run_id, detail_for } → 从快照明细表下钻，不重算
 //   runs          { month, limit? } → 快照历史
 //   registry_matrix {} / targets { month? } / handovers {} → 「数据准备」面板：达人登记矩阵、GMV 目标、站点交接
+//   reconcile { month } → 金额对账：归并层 vs 快照层按内容类型/桶并排，定位数据丢在哪一步
 import { corsHeaders } from "../_shared/feishu.ts";
 import { admin, verifyPasscode } from "../_shared/auth.ts";
 import {
@@ -1392,6 +1393,41 @@ Deno.serve(async (req) => {
         totals: total,
         healed: healed.built,
         hints,
+      });
+    }
+
+    // 金额对账：归并层 vs 快照层，定位「数据丢到哪了」
+    if (action === "reconcile") {
+      const month = str(body.month);
+      if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("month 格式应为 YYYY-MM");
+      const run = await latestRun(db, month);
+      const { data, error } = await db.rpc("attribution_month_reconcile", {
+        _month: month,
+        _run_id: run?.id ?? null,
+      });
+      if (error) throw new Error(error.message);
+      const rows = ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+        scope: str(r.scope),
+        creative_type: str(r.creative_type),
+        bucket: str(r.bucket),
+        rows: Math.round(num(r.rows_count)),
+        keys: Math.round(num(r.keys_count)),
+        gmv_usd: num(r.gmv_usd),
+        gmv_native: num(r.gmv_native),
+        no_rate_rows: Math.round(num(r.no_rate_rows)),
+      }));
+      // 批次层的原始行数与金额（上传时算好的），用来确认「上传本身有没有少」
+      const uploads = await readyUploads(db, month);
+      return json({
+        month,
+        run,
+        rows,
+        uploads: uploads.map((u) => ({
+          file_name: u.file_name,
+          country: u.country,
+          row_count: u.row_count,
+          total_revenue: u.total_revenue,
+        })),
       });
     }
 

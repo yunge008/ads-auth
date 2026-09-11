@@ -25,6 +25,17 @@ import { buildMonthlyReport } from "../_shared/attribution-report.ts";
 const SHEET_PROGRESS = "\u7ee9\u6548\u7edf\u8ba1\u8bb0\u5f55";
 const SHEET_REVIEWS = "\u5f52\u56e0\u5ba1\u67e5";
 const SHEET_CONFIG = "\u7ee9\u6548\u914d\u7f6e\u8868";
+
+/**
+ * 「绩效配置表」（GMV 目标 A:F / 站点交接 H:L）在**另一个**飞书表格里，不是主表格。
+ * 可用 secret FEISHU_PERF_SPREADSHEET_TOKEN 覆盖（填 token 或整条 sheets 链接都行）。
+ */
+const PERF_SPREADSHEET_DEFAULT = "WOVdw1QOSiW4iVk1bYoclPEDnRe";
+function perfSpreadsheetToken(): string {
+  const raw = (Deno.env.get("FEISHU_PERF_SPREADSHEET_TOKEN") ?? "").trim();
+  const m = raw.match(/\/sheets\/([A-Za-z0-9]+)/);
+  return (m?.[1] ?? raw) || PERF_SPREADSHEET_DEFAULT;
+}
 const SHEET_OWNERSHIP = "\u5f52\u56e0\u8bb0\u5f55";
 
 const TYPE_LABELS: Record<string, string> = {
@@ -181,26 +192,43 @@ Deno.serve(async (req) => {
 
     const token = await getTenantAccessToken();
     const ss = getSpreadsheetToken();
-    const sheets = await listSheets(token, ss);
+
     // 表名容错：忽略首尾/中间空格与全角空格，并支持历史别名（人工改过表名也能对上）。
     const normTitle = (t: string) => t.replace(/[\s\u00a0\u3000]/g, "").trim();
-    const byName = new Map(sheets.map((s) => [normTitle(s.title), s.sheet_id]));
     const SHEET_ALIASES: Record<string, string[]> = {
       [SHEET_PROGRESS]: ["归因进度", "绩效统计", "绩效记录"],
       [SHEET_REVIEWS]: ["归因审查表", "审查"],
-      [SHEET_CONFIG]: ["绩效配置", "GMV目标", "目标配置表", "站点交接"],
+      [SHEET_CONFIG]: ["绩效配置", "GMV目标", "目标配置表", "站点交接", "配置表"],
       [SHEET_OWNERSHIP]: ["达人归因表", "归因记录表"],
     };
-    const sheetId = (title: string) => {
-      for (const cand of [title, ...(SHEET_ALIASES[title] ?? [])]) {
-        const sid = byName.get(normTitle(cand));
-        if (sid) return sid;
+    /** 针对某一个飞书表格建一个 sheet 名 → sheet_id 的解析器；找不到时把该表格里现有的 sheet 全列出来。 */
+    const makeSheetResolver = (sheets: Array<{ sheet_id: string; title: string }>, label: string) => {
+      const byName = new Map(sheets.map((s) => [normTitle(s.title), s.sheet_id]));
+      return (title: string) => {
+        for (const cand of [title, ...(SHEET_ALIASES[title] ?? [])]) {
+          const sid = byName.get(normTitle(cand));
+          if (sid) return sid;
+        }
+        throw new Error(
+          `${label}里没有 sheet「${title}」，请先手动创建并填好表头。该表格现有的 sheet：${
+            sheets.map((s) => s.title).join("、") || "（空）"
+          }`,
+        );
+      };
+    };
+
+    const mainSheets = await listSheets(token, ss);
+    const sheetId = makeSheetResolver(mainSheets, "飞书主表格");
+
+    /** 绩效配置表在另一个表格里，用到时才去查 sheet 列表。 */
+    let perfCache: { ss: string; sheetId: (t: string) => string } | null = null;
+    const perfSheet = async () => {
+      if (!perfCache) {
+        const pss = perfSpreadsheetToken();
+        const sheets = await listSheets(token, pss);
+        perfCache = { ss: pss, sheetId: makeSheetResolver(sheets, `飞书绩效配置表格（${pss}）`) };
       }
-      throw new Error(
-        `飞书表格缺少 sheet「${title}」，请先手动创建并填好表头。当前表格里的 sheet：${
-          sheets.map((s) => s.title).join("、") || "（空）"
-        }`,
-      );
+      return perfCache;
     };
 
     // ---------- 归因进度快照 ----------
@@ -405,8 +433,9 @@ Deno.serve(async (req) => {
 
     // ---------- 目标同步 ----------
     if (action === "sync-targets") {
-      const sid = sheetId(SHEET_CONFIG);
-      const rows = await readRange(token, ss, `${sid}!A2:F`);
+      const perf = await perfSheet();
+      const sid = perf.sheetId(SHEET_CONFIG);
+      const rows = await readRange(token, perf.ss, `${sid}!A2:F`);
       const payload: Array<{ month: string; staff_name: string; role: string; target_usd: number; material_target: number; sites: string[]; target_group_id: string; note: string | null }> = [];
       const skipped: string[] = [];
       for (let i = 0; i < rows.length; i++) {
@@ -431,13 +460,14 @@ Deno.serve(async (req) => {
         const { error } = await db.from("gmv_targets").upsert(finalRows.slice(i, i + 500), { onConflict: "month,staff_name,role,target_group_id" });
         if (error) throw new Error(error.message);
       }
-      return json({ upserted: finalRows.length, skipped });
+      return json({ upserted: finalRows.length, skipped, spreadsheet: perf.ss });
     }
 
     // ---------- 站点交接同步 ----------
     if (action === "sync-handovers") {
-      const sid = sheetId(SHEET_CONFIG);
-      const rows = await readRange(token, ss, `${sid}!H2:L`);
+      const perf = await perfSheet();
+      const sid = perf.sheetId(SHEET_CONFIG);
+      const rows = await readRange(token, perf.ss, `${sid}!H2:L`);
       const payload: Array<{ country: string; from_bd: string; to_bd: string; handover_date: string; note: string | null }> = [];
       const skipped: string[] = [];
       for (let i = 0; i < rows.length; i++) {
@@ -464,7 +494,7 @@ Deno.serve(async (req) => {
         const { error } = await db.from("site_handovers").insert(finalRows);
         if (error) throw new Error(error.message);
       }
-      return json({ synced: finalRows.length, skipped });
+      return json({ synced: finalRows.length, skipped, spreadsheet: perf.ss });
     }
 
     // ---------- 达人归因表镜像（覆盖写） ----------

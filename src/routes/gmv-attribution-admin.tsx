@@ -15,6 +15,7 @@ import { ReviewPanel } from "@/components/attribution/ReviewPanel";
 import { UploadView, type Viewing } from "@/components/attribution/UploadView";
 import { SiteMismatchTable } from "@/components/attribution/SiteMismatchTable";
 import { DiagnosePanel } from "@/components/attribution/DiagnosePanel";
+import { ReconcilePanel } from "@/components/attribution/ReconcilePanel";
 import { DataPrepPanel } from "@/components/attribution/DataPrepPanel";
 import { TypeMixPanel } from "@/components/attribution/TypeMixPanel";
 import {
@@ -358,12 +359,14 @@ function MonthlyView() {
           {report.by_type?.length ? <TypeMixPanel rows={report.by_type} /> : null}
           <SiteMismatchTable month={month} />
           <DiagnosePanel month={month} />
+          <ReconcilePanel month={month} />
         </>
       ) : (
         <>
           <div className="text-sm text-muted-foreground text-center py-8">选择月份后点击「读取快照」；该月没有快照时点「重新计算」生成一次</div>
-          {/* 报表还没生成、或者生成出来一个人都没有时，自查面板是排查入口，所以这里也要显示 */}
+          {/* 报表还没生成、或者生成出来一个人都没有时，自查/对账面板是排查入口，所以这里也要显示 */}
           <DiagnosePanel month={month} />
+          <ReconcilePanel month={month} />
         </>
       )}
     </div>

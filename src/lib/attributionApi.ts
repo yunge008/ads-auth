@@ -351,6 +351,29 @@ export type DiagnoseResult = {
   hints: string[];
 };
 
+/** 金额对账的一行：scope=AGG 归并层 / RUN 快照层。 */
+export type ReconcileRow = {
+  scope: "AGG" | "RUN";
+  creative_type: string;
+  bucket: string;
+  rows: number;
+  keys: number;
+  gmv_usd: number;
+  gmv_native: number;
+  no_rate_rows: number;
+};
+
+export type ReconcileResult = {
+  month: string;
+  run: RunMeta | null;
+  rows: ReconcileRow[];
+  uploads: Array<{ file_name: string; country: string; row_count: number; total_revenue: number }>;
+};
+
+export function reconcileAttribution(month: string) {
+  return invokeFn<ReconcileResult>("attribution-upload", { action: "reconcile", month }, { timeout: 120000 });
+}
+
 export function diagnoseAttribution(month: string) {
   return invokeFn<DiagnoseResult>("attribution-upload", { action: "diagnose", month }, { timeout: 300000 });
 }
