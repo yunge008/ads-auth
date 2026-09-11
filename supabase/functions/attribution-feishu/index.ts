@@ -182,11 +182,25 @@ Deno.serve(async (req) => {
     const token = await getTenantAccessToken();
     const ss = getSpreadsheetToken();
     const sheets = await listSheets(token, ss);
-    const byName = new Map(sheets.map((s) => [s.title, s.sheet_id]));
+    // 表名容错：忽略首尾/中间空格与全角空格，并支持历史别名（人工改过表名也能对上）。
+    const normTitle = (t: string) => t.replace(/[\s\u00a0\u3000]/g, "").trim();
+    const byName = new Map(sheets.map((s) => [normTitle(s.title), s.sheet_id]));
+    const SHEET_ALIASES: Record<string, string[]> = {
+      [SHEET_PROGRESS]: ["归因进度", "绩效统计", "绩效记录"],
+      [SHEET_REVIEWS]: ["归因审查表", "审查"],
+      [SHEET_CONFIG]: ["绩效配置", "GMV目标", "目标配置表", "站点交接"],
+      [SHEET_OWNERSHIP]: ["达人归因表", "归因记录表"],
+    };
     const sheetId = (title: string) => {
-      const sid = byName.get(title);
-      if (!sid) throw new Error(`飞书表格缺少 sheet「${title}」，请先手动创建并填好表头`);
-      return sid;
+      for (const cand of [title, ...(SHEET_ALIASES[title] ?? [])]) {
+        const sid = byName.get(normTitle(cand));
+        if (sid) return sid;
+      }
+      throw new Error(
+        `飞书表格缺少 sheet「${title}」，请先手动创建并填好表头。当前表格里的 sheet：${
+          sheets.map((s) => s.title).join("、") || "（空）"
+        }`,
+      );
     };
 
     // ---------- 归因进度快照 ----------
