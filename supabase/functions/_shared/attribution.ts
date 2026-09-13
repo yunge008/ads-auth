@@ -407,6 +407,24 @@ export function resolveOwnership(
   return { owners, reviews };
 }
 
+/**
+ * 归属分类：把 (桶, 角色, 匹配方式) 折成月度 Excel 流程「归属角色」列那五档，两边对数据不用再互相翻译。
+ * 「其他」是本系统后加的桶（创意类型认不出来的行），Excel 流程里没有对应项。
+ */
+export type OwnershipClass = "商品卡片" | "剪辑" | "BD-VID" | "BD-账号" | "未建联达人" | "其他";
+
+export function classifyAttribution(
+  bucket: Bucket,
+  role?: Role | null,
+  matchType?: MatchType | null,
+): OwnershipClass {
+  if (bucket === "PRODUCT_CARD") return "商品卡片";
+  if (bucket === "OTHER") return "其他";
+  if (bucket !== "STAFF") return "未建联达人";
+  if (role === "EDITOR") return "剪辑";
+  return matchType === "VID" ? "BD-VID" : "BD-账号";
+}
+
 // ---------- 归因主流程 ----------
 
 function pickVidOwner(
