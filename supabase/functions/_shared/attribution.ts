@@ -138,6 +138,13 @@ export type VidRegistration = {
 
 export type Handover = { fromBd: string; toBd: string; date: string }; // date: 'YYYY-MM-DD'
 
+/**
+ * 「谁在什么时候对哪个达人有过登记动作」。
+ * key = identityKey(站点, 归一化名) → 同事 → 该同事对这个达人的全部登记动作日期（升序去重）。
+ * 动作日期取 register_date，没有就退回 sample_date（发样）。站点交接判定要用它。
+ */
+export type CreatorActions = Map<string, Map<string, string[]>>;
+
 export type OwnershipRecord = { bd: string; keyType: "NICKNAME" | "HANDLE"; country: string };
 export type AliasRecord = { bd: string; country: string };
 
@@ -152,6 +159,8 @@ export type AttrContext = {
   vidAlias: Map<string, AliasRecord>;
   /** country → 交接记录（按日期升序） */
   handovers: Map<string, Handover[]>;
+  /** 达人登记动作时间线，站点交接按「新 BD 何时真正接手这个达人」判定 */
+  creatorActions: CreatorActions;
   /** review_key → 人工判定 BD（attribution_review.manual_bd） */
   reviewOverrides: Map<string, string>;
 };
@@ -211,49 +220,88 @@ function addMonthsISO(dateStr: string, months: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** 某个同事对某个达人、在 `from`（含）之后的第一次登记动作日期；没有则返回 null。 */
+function firstActionOnOrAfter(dates: string[] | undefined, from: string): string | null {
+  if (!dates?.length) return null;
+  for (const d of dates) if (d >= from) return d; // dates 已升序
+  return null;
+}
+
 /**
- * 站点交接：视频发布在交接日前归原 BD，之后归新 BD。
- * 正向（发布日 >= 交接日 且当前判定为原 BD → 转给新 BD，处理登记未更新的情况）；
- * 反向（发布日 < 交接日 且当前判定为新 BD → 归回原 BD，处理登记已更新的情况）。
- * postedAt 为 null 时视为「当前归属」，只做正向（全部交接生效）。
+ * 站点交接：**交接日只是「允许转移」的起点，不是转移生效日**。
+ *
+ * 真正的转移日 = 新 BD 在交接日（含）之后，对**这个具体达人**第一次产生登记动作（登记/发样）的日期。
+ *   · 新 BD 没对这个达人动过手 → 这次交接对该达人永不生效，仍归原 BD（不因为交接日到了就批量转移历史达人）
+ *   · 动过手 → 只有发布时间 ≥ 该转移日的行才切给新 BD，之前的行仍归原 BD
+ *   · 发布时间未知（null）→ 视为「当前归属」，只要新 BD 动过手就按已转移处理
+ *
+ * 反向（发布日 < 转移日 但当前判定已是新 BD）→ 归回原 BD，处理登记已更新、但视频是交接前发的情况。
+ * 这条规则只作用于昵称/账号路径，VID 强匹配不受影响（VID 是谁登记的就是谁的）。
  */
 export function applyHandover(
   baseBd: string,
   country: string,
+  normalizedName: string,
   postedAt: string | null,
   handoversForCountry: Handover[] | undefined,
-): { bd: string; applied: boolean } {
-  if (!handoversForCountry?.length) return { bd: baseBd, applied: false };
+  creatorActions?: CreatorActions,
+): { bd: string; applied: boolean; transferDate: string | null; handover: Handover | null } {
+  if (!handoversForCountry?.length) return { bd: baseBd, applied: false, transferDate: null, handover: null };
+
+  const actions = normalizedName ? creatorActions?.get(identityKey(country, normalizedName)) : undefined;
+  /** 这次交接对该达人的实际转移日；null = 新 BD 没接手过，这次交接不生效 */
+  const transferDateOf = (h: Handover) => firstActionOnOrAfter(actions?.get(h.toBd), h.date);
+
   let bd = baseBd;
   const p = postedAt ? postedAt.slice(0, 10) : null;
+  let transferDate: string | null = null;
+  let hit: Handover | null = null;
+
   // 正向：按日期升序
   for (const h of handoversForCountry) {
-    if ((p === null || p >= h.date) && bd === h.fromBd) bd = h.toBd;
-  }
-  if (p !== null) {
-    // 反向：按日期降序
-    for (let i = handoversForCountry.length - 1; i >= 0; i--) {
-      const h = handoversForCountry[i];
-      if (p < h.date && bd === h.toBd) bd = h.fromBd;
+    if (bd !== h.fromBd) continue;
+    const t = transferDateOf(h);
+    if (!t) continue; // 新 BD 从未接手这个达人 → 交接不生效
+    if (p === null || p >= t) {
+      bd = h.toBd;
+      transferDate = t;
+      hit = h;
     }
   }
-  return { bd, applied: bd !== baseBd };
+
+  if (p !== null) {
+    // 反向：按日期降序。同样只在新 BD 确实接手过的前提下才回拨
+    for (let i = handoversForCountry.length - 1; i >= 0; i--) {
+      const h = handoversForCountry[i];
+      if (bd !== h.toBd) continue;
+      const t = transferDateOf(h);
+      if (!t) continue;
+      if (p < t) {
+        bd = h.fromBd;
+        transferDate = t;
+        hit = h;
+      }
+    }
+  }
+
+  return { bd, applied: bd !== baseBd, transferDate, handover: hit };
 }
 
-/** 发布时间来自 VID 兜底且落在某交接日 ±N 天内 → 需要审查提示。 */
+/**
+ * 发布时间来自 VID 推算、且落在**实际转移日** ±N 天内 → 需要人工抽查。
+ * 注意这里用的是转移日（新 BD 首次接手该达人的日期），不是交接表上的交接日 ——
+ * 提示必须落在真正会改判的那个时间点上，否则等于提示在一个不会发生切换的日期附近。
+ */
 export function isHandoverBoundary(
   postedAt: string | null,
   postedAtSource: AttrInputRow["postedAtSource"],
-  handoversForCountry: Handover[] | undefined,
+  transferDate: string | null,
   days = 5,
-): Handover | null {
-  if (!postedAt || postedAtSource !== "vid" || !handoversForCountry?.length) return null;
+): boolean {
+  if (!postedAt || postedAtSource !== "vid" || !transferDate) return false;
   const p = new Date(postedAt).getTime();
-  for (const h of handoversForCountry) {
-    const d = new Date(`${h.date}T00:00:00Z`).getTime();
-    if (Math.abs(p - d) <= days * 86400 * 1000) return h;
-  }
-  return null;
+  const d = new Date(`${transferDate}T00:00:00Z`).getTime();
+  return Math.abs(p - d) <= days * 86400 * 1000;
 }
 
 // ---------- 保护期解析（昵称/用户名 → 当前 owner BD） ----------
@@ -422,18 +470,8 @@ export function attributeRows(rows: AttrInputRow[], ctx: AttrContext): AttrRunRe
   // norm → bd → Set<vid>（仅 BD 的 VID 强匹配行投票）
   const votes = new Map<string, Map<string, Set<string>>>();
   const displayByNorm = new Map<string, string>();
-  // 交接边界聚合：country|date → 样本
-  const boundaryAgg = new Map<string, { handover: Handover; count: number; samples: string[] }>();
-
-  const noteBoundary = (row: AttrInputRow, country: string) => {
-    const h = isHandoverBoundary(row.postedAt, row.postedAtSource, ctx.handovers.get(country));
-    if (!h) return;
-    const k = `${country}|${h.date}`;
-    const agg = boundaryAgg.get(k) ?? { handover: h, count: 0, samples: [] };
-    agg.count++;
-    if (agg.samples.length < 20) agg.samples.push(row.vid || row.accountName);
-    boundaryAgg.set(k, agg);
-  };
+  // 交接边界聚合：country|实际转移日 → 样本
+  const boundaryAgg = new Map<string, { handover: Handover; transferDate: string; count: number; samples: string[] }>();
 
   // ---- Pass 1 ----
   for (const row of rows) {
@@ -565,8 +603,22 @@ export function attributeRows(rows: AttrInputRow[], ctx: AttrContext): AttrRunRe
     }
     const country = row.country || recCountry || "";
     const hs = ctx.handovers.get(country);
-    const { bd: finalBd, applied } = applyHandover(bd, country, row.postedAt, hs);
-    if (applied || hs?.length) noteBoundary(row, country);
+    const { bd: finalBd, applied, transferDate, handover } = applyHandover(
+      bd,
+      country,
+      norm,
+      row.postedAt,
+      hs,
+      ctx.creatorActions,
+    );
+    // 发布时间是 VID 推算出来的、又正好卡在实际转移日附近 → 记一条抽查提示
+    if (handover && transferDate && isHandoverBoundary(row.postedAt, row.postedAtSource, transferDate)) {
+      const k = `${country}|${transferDate}`;
+      const agg = boundaryAgg.get(k) ?? { handover, transferDate, count: 0, samples: [] };
+      agg.count++;
+      if (agg.samples.length < 20) agg.samples.push(row.vid || row.accountName);
+      boundaryAgg.set(k, agg);
+    }
     results.push({
       key: row.key,
       bucket: "STAFF",
@@ -580,13 +632,19 @@ export function attributeRows(rows: AttrInputRow[], ctx: AttrContext): AttrRunRe
 
   // 交接边界审查项（聚合）
   for (const [k, agg] of boundaryAgg) {
-    const [country, date] = k.split("|");
+    const [country] = k.split("|");
     reviewByKey.set(`HND:${k}`, {
       reviewKey: `HND:${k}`,
       type: "HANDOVER_BOUNDARY",
-      subject: `${country} ${date} 交接（${agg.handover.fromBd}→${agg.handover.toBd}）`,
-      detail: { country, date, count: agg.count, samples: agg.samples },
-      defaultResolution: `${agg.count} 行发布时间来自 VID 推算且落在交接日 ±5 天内，可能误归，建议人工抽查`,
+      subject: `${country} ${agg.transferDate} 实际转移（${agg.handover.fromBd}→${agg.handover.toBd}，交接表日期 ${agg.handover.date}）`,
+      detail: {
+        country,
+        transferDate: agg.transferDate,
+        handoverDate: agg.handover.date,
+        count: agg.count,
+        samples: agg.samples,
+      },
+      defaultResolution: `${agg.count} 行发布时间来自 VID 推算且落在实际转移日 ±5 天内，可能误归，建议人工抽查`,
     });
   }
 

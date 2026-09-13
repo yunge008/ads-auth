@@ -4,6 +4,7 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
   type AttrContext,
+  type CreatorActions,
   type AttrInputRow,
   type AttrRowResult,
   type AttrRunResult,
@@ -143,14 +144,52 @@ export async function loadAttrContext(db: SupabaseClient): Promise<AttrContext> 
   }
   for (const arr of handovers.values()) arr.sort((a, b) => a.date.localeCompare(b.date));
 
-  // 5) 人工判定（审查表读回）
+  // 5) 达人登记动作时间线：站点交接要按「新 BD 何时真正接手这个达人」判定，
+  //    光有交接日不够，得知道 toBd 对这个具体达人在交接日之后有没有动过手。
+  const creatorActions: CreatorActions = new Map();
+  {
+    const rows = await pageAll<{
+      staff_name: string;
+      country: string;
+      nickname_norm: string | null;
+      handle_norm: string | null;
+      register_date: string | null;
+      sample_date: string | null;
+    }>((f, t) =>
+      db
+        .from("creator_registry")
+        .select("staff_name, country, nickname_norm, handle_norm, register_date, sample_date")
+        .range(f, t),
+    );
+    for (const r of rows) {
+      const date = r.register_date ?? r.sample_date;
+      if (!date || !r.staff_name) continue;
+      for (const norm of [r.nickname_norm, r.handle_norm]) {
+        if (!norm) continue;
+        const key = identityKey(r.country, norm);
+        const byStaff = creatorActions.get(key) ?? new Map<string, string[]>();
+        const list = byStaff.get(r.staff_name) ?? [];
+        list.push(date);
+        byStaff.set(r.staff_name, list);
+        creatorActions.set(key, byStaff);
+      }
+    }
+    // 每个 (达人, 同事) 的日期升序去重，applyHandover 靠顺序取「第一次动作」
+    for (const byStaff of creatorActions.values()) {
+      for (const [staff, list] of byStaff) {
+        byStaff.set(staff, Array.from(new Set(list)).sort());
+      }
+    }
+  }
+
+  // 6) 人工判定（审查表读回）
   const reviewOverrides = new Map<string, string>();
   const rvRows = await pageAll<{ review_key: string; manual_bd: string | null }>((f, t) =>
     db.from("attribution_review").select("review_key, manual_bd").not("manual_bd", "is", null).range(f, t),
   );
   for (const r of rvRows) if (r.manual_bd) reviewOverrides.set(r.review_key, r.manual_bd);
 
-  return { vidRegs, manualAlias, ownership, vidAlias, handovers, reviewOverrides };
+  return { vidRegs, manualAlias, ownership, vidAlias, handovers, creatorActions, reviewOverrides };
 }
 
 // ---------- 引擎产物落库 ----------

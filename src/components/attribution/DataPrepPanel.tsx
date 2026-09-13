@@ -211,7 +211,10 @@ export function DataPrepPanel({ month }: { month: string }) {
 
             <TabsContent value="handovers" className="mt-3 space-y-2">
               <div className="text-xs text-muted-foreground">
-                共 {data.handovers.length} 条交接记录。归因时按视频发布时间分段：交接日之前算原 BD，之后算新 BD。
+                共 {data.handovers.length} 条交接记录。<b>交接日只是「允许转移」的起点，不是转移生效日</b>：
+                真正的转移日 = 新 BD 在交接日（含）之后，对那个具体达人第一次登记/发样的日期。
+                发布时间早于该日期的素材仍算原 BD；新 BD 从未接手过的达人，这条交接对他永不生效。
+                VID 强匹配不受交接影响。
               </div>
               {data.handovers.length === 0 ? (
                 <div className="text-sm text-muted-foreground text-center py-8">
