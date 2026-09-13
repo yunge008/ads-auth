@@ -1529,6 +1529,19 @@ export type Database = {
           vid: string
         }[]
       }
+      attribution_month_reconcile: {
+        Args: { _month: string; _run_id?: string }
+        Returns: {
+          bucket: string
+          creative_type: string
+          gmv_native: number
+          gmv_usd: number
+          keys_count: number
+          no_rate_rows: number
+          rows_count: number
+          scope: string
+        }[]
+      }
       attribution_rebuild_agg_usd: { Args: { _month: string }; Returns: number }
       attribution_registry_matrix: {
         Args: never
