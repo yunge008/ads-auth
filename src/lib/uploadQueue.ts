@@ -210,6 +210,8 @@ export const uploadQueue = {
    * 调用方只负责给出提示回调；循环本身跑在模块作用域，组件卸载不影响它继续跑。
    */
   async run(cb: {
+    /** 勾选「替换同名旧记录」时为 true：首次创建就带上替换标志，不再靠 400 报错回退 */
+    replaceExisting?: boolean;
     onDuplicate: (msg: string) => boolean;
     onMissingRates: (currencies: string[]) => Promise<boolean>;
     onSuccess: (msg: string) => void;
