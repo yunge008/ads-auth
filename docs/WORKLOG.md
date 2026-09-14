@@ -93,3 +93,5 @@
 2026-09-13 | claude | **新增归属五分类枚举函数**：`OwnershipClass` = 商品卡片 / 剪辑 / BD-VID / BD-账号 / 未建联达人 / 其他，`classifyAttribution(bucket, role, matchType)` 把系统内部的 (桶, 角色, 匹配方式) 折成月度 Excel 流程「归属角色」列的那几档，避免两边对数据时互相翻译。「其他」是本系统后加的桶（创意类型认不出来的行），Excel 流程里没有对应项。本次只落函数，不接线、不改现有判定与展示。版本号 0913.046。**不需要人工操作**（无 migration、无 Edge Function 行为变化） | supabase/functions/_shared/attribution.ts, docs/{PLAN,WORKLOG}.md, src/lib/version.ts
 
 2026-09-14 | claude | 新增 `docs/GMV_ATTRIBUTION_DIAGNOSE_SQL.md`：GMV 归因排查 SQL 清单，按 批次表 → 归并层 → 快照层 → 登记/归属表 四层逐段给出可直接在 SQL Editor 执行的查询（数据是否还在、快照把钱判到哪个桶、广告表与登记表的站点写法比对、VID 强匹配与昵称路径各自的命中率、缺汇率币种、内容类型金额分布、原始归并行抽样），每段附「怎么读」结论。不改任何代码逻辑。版本号 0914.048。**不需要人工操作** | docs/{GMV_ATTRIBUTION_DIAGNOSE_SQL,WORKLOG}.md, src/lib/version.ts
+
+2026-09-14 | claude | 排查 SQL 清单新增 G 段「用旧快照回测归因逻辑」：广告批次被删后 `attribution_run_rows` 仍保留每条判定键的 country/vid/account_name/bucket，可拿当前 creator_registry / creator_ownership 回测旧快照里判为 UNMATCHED 的键，区分「判定逻辑接错了」「站点写法对不上」「确实没建联」三种情况，不必先重传 Excel。版本号 0914.049。**不需要人工操作** | docs/{GMV_ATTRIBUTION_DIAGNOSE_SQL,WORKLOG}.md, src/lib/version.ts

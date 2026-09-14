@@ -181,3 +181,57 @@ limit 30;
 ```
 
 站点、昵称里有没有多余空格、全角字符、汉字站点，这一眼就能看出来。
+
+---
+
+## G. 广告数据已经没了、但想先判断归因逻辑对不对（用旧快照回测）
+
+批次被删之后，`attribution_run_rows` 里仍然保留着当时每一条判定键的 `country / vid / account_name / bucket`。
+可以拿**当前的登记表和归属表**去回测这些旧键，判断「归不上」到底是数据没建联，还是判定逻辑接错了 ——
+不用先把 10 个 Excel 重传一遍。
+
+先从 A3 拿到 `run_id`。
+
+```sql
+-- G1 旧快照的判定分布：哪个站点整站掉进了无建联
+select country, bucket,
+       coalesce(role, '-') as role, coalesce(match_type, '-') as match_type,
+       count(*) as keys, round(sum(gmv_usd)) as gmv_usd
+from public.attribution_run_rows
+where run_id = '把 A3 的 id 贴这里'
+group by 1, 2, 3, 4
+order by gmv_usd desc;
+
+-- G2 回测：旧快照里判为 UNMATCHED 的键，按现在的登记表/归属表还能不能匹配上
+with u as (
+  select distinct r.country,
+         r.vid,
+         lower(btrim(regexp_replace(r.account_name, '\s+', ' ', 'g'))) as nm
+  from public.attribution_run_rows r
+  where r.run_id = '把 A3 的 id 贴这里'
+    and r.bucket = 'UNMATCHED'
+)
+select u.country,
+       count(*)                                             as 无建联键数,
+       count(*) filter (where vsame.hit)                    as VID同站点能命中,
+       count(*) filter (where vsame.hit is null and vany.hit) as VID只在别站点登记过,
+       count(*) filter (where nsame.hit)                    as 昵称同站点能命中,
+       count(*) filter (where nsame.hit is null and nany.hit) as 昵称只在别站点登记过
+from u
+left join lateral (select true as hit from public.creator_registry g
+                   where u.vid <> '' and g.vid = u.vid and g.country = u.country limit 1) vsame on true
+left join lateral (select true as hit from public.creator_registry g
+                   where u.vid <> '' and g.vid = u.vid limit 1) vany on true
+left join lateral (select true as hit from public.creator_ownership c
+                   where u.nm <> '' and c.match_key = u.nm and c.country = u.country limit 1) nsame on true
+left join lateral (select true as hit from public.creator_ownership c
+                   where u.nm <> '' and c.match_key = u.nm limit 1) nany on true
+group by 1
+order by 无建联键数 desc;
+```
+
+**怎么读 G2：**
+
+- `VID同站点能命中` / `昵称同站点能命中` 很大 → **判定逻辑有问题**：数据明明能匹配上，引擎却判成了无建联。把这张表发我，这是代码要改的。
+- `只在别站点登记过` 很大 → 广告表站点和登记表站点写法对不上，是数据问题。
+- 两类都接近 0 → 这些达人确实没建联过，归因结果是对的，问题在建联覆盖率而不是工具。
