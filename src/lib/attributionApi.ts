@@ -281,24 +281,32 @@ export const exportApi = {
    * 前端只看到「Failed to send a request to the Edge Function」。
    */
   vidSummary: async (month: string, onPage?: (got: number) => void) => {
-    const PAGE = 20000;
-    // 完整性由循环本身保证：任何一页出错都会抛出去，只有拿到「不满一页」才算读完。
-    // 所以不需要再单独查一次总行数来对账（那反而会给第一次请求多加一次全月聚合）。
+    const PAGE = 5000;
+    type Cursor = { country: string; vid: string; product_id: string } | null;
     const rows: VidSummaryRow[] = [];
-    for (let offset = 0; ; ) {
-      const r = await invokeFn<{ rows: VidSummaryRow[] }>(
+    let cursor: Cursor = null;
+    for (;;) {
+      const r = await invokeFn<{ rows: VidSummaryRow[]; next_cursor: Cursor }>(
         "attribution-upload",
-        { action: "export_vid_summary", month, limit: PAGE, offset },
+        {
+          action: "export_vid_summary",
+          month,
+          limit: PAGE,
+          after_country: cursor?.country,
+          after_vid: cursor?.vid,
+          after_product: cursor?.product_id,
+        },
         { timeout: 300000 },
       );
       const page = r.rows ?? [];
       rows.push(...page);
       onPage?.(rows.length);
-      if (page.length < PAGE) break;
-      offset += page.length;
+      if (page.length < PAGE || !r.next_cursor) break;
+      cursor = r.next_cursor;
     }
     return { rows };
   },
+
 };
 
 export type UnmatchedTrendRow = { country: string; account_name: string; total: number; by_month: Record<string, number> };
