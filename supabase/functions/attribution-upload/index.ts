@@ -449,12 +449,21 @@ type MonthKeyRow = {
   posted_at: string | null;
 };
 
+/**
+ * 一次拉两万个判定键。
+ *
+ * `attribution_month_keys_json` 把整页打成**一个 JSON（也就是一行）**返回，
+ * 所以不受 PostgREST 单次 1000 行上限的约束。16 万个键原本要来回 168 次 HTTP，
+ * 现在 9 次——往返次数才是快照重算超时的大头，不是 SQL 本身慢。
+ */
+const KEY_PAGE_JSON = 20000;
+
 async function fetchMonthKeys(db: ReturnType<typeof admin>, month: string): Promise<MonthKeyRow[]> {
   const keys: MonthKeyRow[] = [];
   for (let offset = 0; ; ) {
-    const { data, error } = await db.rpc("attribution_month_keys", {
+    const { data, error } = await db.rpc("attribution_month_keys_json", {
       _month: month,
-      _limit: KEY_PAGE,
+      _limit: KEY_PAGE_JSON,
       _offset: offset,
     });
     if (error) throw new Error(`读取判定键失败：${error.message}`);
@@ -462,6 +471,7 @@ async function fetchMonthKeys(db: ReturnType<typeof admin>, month: string): Prom
     if (!page.length) break;
     keys.push(...page);
     offset += page.length;
+    if (page.length < KEY_PAGE_JSON) break;
   }
   const { data: cnt, error: cntErr } = await db.rpc("attribution_month_key_count", { _month: month });
   if (cntErr) throw new Error(`判定键计数失败：${cntErr.message}`);
@@ -570,9 +580,14 @@ async function buildSnapshot(
           handover_applied: res?.handoverApplied ?? false,
         };
       });
-      const KEY_INSERT = 2000;
+      // 同理，判定结果也整块塞给数据库，别再 2000 行一次地来回 84 趟
+      const KEY_INSERT = 20000;
       for (let i = 0; i < keyRows.length; i += KEY_INSERT) {
-        const { error } = await db.from("attribution_run_keys").insert(keyRows.slice(i, i + KEY_INSERT));
+        const batch = keyRows.slice(i, i + KEY_INSERT);
+        const { error } = await db.rpc("attribution_write_run_keys", {
+          _run_id: runId,
+          _rows: batch.map(({ run_id: _ignored, ...r }) => r),
+        });
         if (error) throw new Error(`写入判定结果失败：${error.message}`);
       }
     }
@@ -981,6 +996,10 @@ Deno.serve(async (req) => {
         months = seen.slice(0, lookback);
       }
 
+      // 上一轮后台任务被墙钟掐断时，快照行会永远停在 RUNNING，前端只能干等到超时。
+      // 每次重算前先把这种死行标成 FAILED，让历史和轮询都能看到真实结论。
+      await db.rpc("attribution_runs_fail_stale", { _minutes: 10 });
+
       // cron 默认只在「有新数据」时才跑；页面上手动点「重新计算」永远强制重算
       const skipIfUnchanged = body.skip_if_unchanged === undefined ? cronAuthed : !!body.skip_if_unchanged;
 
@@ -1104,6 +1123,9 @@ Deno.serve(async (req) => {
     if (action === "runs") {
       const month = str(body.month);
       const limit = Math.max(1, Math.min(50, Math.round(num(body.limit)) || 20));
+      // 轮询也顺手收尸：后台任务被掐断留下的 RUNNING 行标成 FAILED，
+      // 前端就能在几分钟内看到「后台重算进程已中断」，而不是干等满 20 分钟才报超时。
+      await db.rpc("attribution_runs_fail_stale", { _minutes: 10 });
       let q = db.from("attribution_runs").select(RUN_META_COLUMNS).order("started_at", { ascending: false }).limit(limit);
       if (month) q = q.eq("month", month);
       const { data, error } = await q;
