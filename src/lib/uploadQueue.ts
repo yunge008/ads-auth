@@ -210,6 +210,8 @@ export const uploadQueue = {
    * 调用方只负责给出提示回调；循环本身跑在模块作用域，组件卸载不影响它继续跑。
    */
   async run(cb: {
+    /** 勾选「替换同名旧记录」时为 true：首次创建就带上替换标志，不再靠 400 报错回退 */
+    replaceExisting?: boolean;
     onDuplicate: (msg: string) => boolean;
     onMissingRates: (currencies: string[]) => Promise<boolean>;
     onSuccess: (msg: string) => void;
@@ -236,7 +238,7 @@ export const uploadQueue = {
         const rows = rowsById.get(item.id) ?? [];
         patchItem(item.id, { status: "uploading", phase: "创建批次", uploadedRows: 0, startedAt: Date.now(), error: null });
         try {
-          const uploadId = await createBatch(item, cb.onDuplicate);
+          const uploadId = await createBatch(item, cb.onDuplicate, cb.replaceExisting === true);
           patchItem(item.id, { uploadId, phase: "上传数据" });
 
           await appendRows(uploadId, rows, (done) => {
@@ -299,13 +301,25 @@ export const uploadQueue = {
 
 // ---------- 内部：单文件三步 ----------
 
-async function createBatch(item: QueueItem, onDuplicate: (msg: string) => boolean): Promise<string> {
+async function createBatch(
+  item: QueueItem,
+  onDuplicate: (msg: string) => boolean,
+  replaceExisting = false,
+): Promise<string> {
   try {
-    const { upload_id } = await uploadApi.create({ file_name: item.fileName, country: item.country, month: item.month });
+    const { upload_id } = await uploadApi.create({
+      file_name: item.fileName,
+      country: item.country,
+      month: item.month,
+      // 已勾选替换：第一次请求就覆盖同名旧记录，避免先收到 400 再重试
+      ...(replaceExisting ? { replace_existing: true } : {}),
+    });
     return upload_id;
   } catch (e) {
     const payload = (e as Error & { payload?: { duplicate?: boolean } }).payload;
-    if (!payload?.duplicate || !onDuplicate((e as Error).message)) throw e;
+    const msg = (e as Error).message;
+    const isDup = payload?.duplicate === true || msg.includes("该文件名已上传过");
+    if (!isDup || !onDuplicate(msg)) throw e;
     const { upload_id } = await uploadApi.create({
       file_name: item.fileName,
       country: item.country,
