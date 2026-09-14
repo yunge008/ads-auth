@@ -63,9 +63,7 @@ function GmvAttributionPage() {
     if (!/^\d{4}-\d{2}$/.test(month)) return;
     setRefreshing(true);
     try {
-      const r = await snapshotApi.refresh(month);
-      const first = r.results?.[0];
-      if (first && !first.ok) throw new Error(first.error ?? "重算失败");
+      await snapshotApi.refreshAsync(month);
       toast.success(`${month} 归因快照已更新`);
       await load(month);
     } catch (e) {
