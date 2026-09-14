@@ -238,7 +238,7 @@ export const uploadQueue = {
         const rows = rowsById.get(item.id) ?? [];
         patchItem(item.id, { status: "uploading", phase: "创建批次", uploadedRows: 0, startedAt: Date.now(), error: null });
         try {
-          const uploadId = await createBatch(item, cb.onDuplicate);
+          const uploadId = await createBatch(item, cb.onDuplicate, cb.replaceExisting === true);
           patchItem(item.id, { uploadId, phase: "上传数据" });
 
           await appendRows(uploadId, rows, (done) => {
