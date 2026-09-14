@@ -1284,15 +1284,10 @@ Deno.serve(async (req) => {
       // 250 多次往返加上 25 万行 JS 聚合，会被超时/CPU 掐断，前端只看到
       // 「Failed to send a request to the Edge Function」。
       const run = await latestRun(db, month);
-      // 总行数只在第一页算一次；大月份这条 count 也可能被语句超时掐断——
-      // 它只是给前端显示进度用的，算不出来就当未知（0），不要因此让整个导出失败。
-      const offset0 = Math.max(0, Math.round(num(body.offset)));
-      let expected = 0;
-      if (offset0 === 0) {
-        const { data: cnt, error: cntErr } = await db.rpc("attribution_vid_summary_count", { _month: month });
-        if (cntErr) console.warn(`统计导出行数失败（忽略）：${cntErr.message}`);
-        else expected = Number(cnt ?? 0);
-      }
+      // 不再在导出流程里算总行数。它只是进度条的分母，却要整月扫一遍 GROUP BY，
+      // 放在第一页请求里等于平白多一次全月聚合，反而更容易把第一次请求拖超时。
+      // 导出的完整性不靠它：翻页只在「本页行数 < 页大小」时结束，中途任何一页出错都会抛，
+      // 所以循环正常走完就说明取全了。（attribution_vid_summary_count 保留，需要时单独查。）
 
       // 一次只回一页，由客户端翻页拼装。整月二十几万行一次性返回是几十 MB，
       // Edge Function 扛不住、响应也可能被截断；分页之后每个请求都是小活儿。
@@ -1306,8 +1301,8 @@ Deno.serve(async (req) => {
       });
       if (error) throw new Error(`导出汇总失败：${error.message}`);
       const page = (data ?? []) as unknown[];
-      console.log(`export_vid_summary ${month}: 第 ${offset + 1}-${offset + page.length} 行 / 共 ${expected}`);
-      return json({ rows: page, total: expected, offset, run_id: run?.id ?? null, month });
+      console.log(`export_vid_summary ${month}: 第 ${offset + 1}-${offset + page.length} 行`);
+      return json({ rows: page, offset, run_id: run?.id ?? null, month });
     }
 
     // 12 个月无建联趋势：逐月现算（归并后每月只有几千行，够快），不再依赖已废弃的 attr_bucket

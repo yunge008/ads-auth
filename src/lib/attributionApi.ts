@@ -280,25 +280,22 @@ export const exportApi = {
    * 以前是服务端把整月归并行拉进 Edge Function 用 JS 聚合，会被超时/CPU 掐断，
    * 前端只看到「Failed to send a request to the Edge Function」。
    */
-  vidSummary: async (month: string, onPage?: (got: number, total: number) => void) => {
+  vidSummary: async (month: string, onPage?: (got: number) => void) => {
     const PAGE = 20000;
+    // 完整性由循环本身保证：任何一页出错都会抛出去，只有拿到「不满一页」才算读完。
+    // 所以不需要再单独查一次总行数来对账（那反而会给第一次请求多加一次全月聚合）。
     const rows: VidSummaryRow[] = [];
-    let total = 0;
     for (let offset = 0; ; ) {
-      const r = await invokeFn<{ rows: VidSummaryRow[]; total?: number }>(
+      const r = await invokeFn<{ rows: VidSummaryRow[] }>(
         "attribution-upload",
         { action: "export_vid_summary", month, limit: PAGE, offset },
         { timeout: 300000 },
       );
-      total = Number(r.total ?? 0) || total;
       const page = r.rows ?? [];
       rows.push(...page);
-      onPage?.(rows.length, total);
-      if (!page.length || page.length < PAGE) break;
+      onPage?.(rows.length);
+      if (page.length < PAGE) break;
       offset += page.length;
-    }
-    if (total && rows.length !== total) {
-      throw new Error(`导出行数不完整：应有 ${total} 行，实际取到 ${rows.length} 行`);
     }
     return { rows };
   },
