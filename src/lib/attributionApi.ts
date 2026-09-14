@@ -280,6 +280,40 @@ export const exportApi = {
    * 以前是服务端把整月归并行拉进 Edge Function 用 JS 聚合，会被超时/CPU 掐断，
    * 前端只看到「Failed to send a request to the Edge Function」。
    */
+  /**
+   * 流式读取：每取到一页就交给 onPage 处理，本函数**不累积**。
+   * 25 万行如果先攒成对象数组再转表格，等于在浏览器里存两份，后半程会明显卡顿。
+   */
+  vidSummaryStream: async (month: string, onPage: (page: VidSummaryRow[], got: number) => void) => {
+    const PAGE = 20000; // 页大一些，50 次请求降到 13 次；函数返回的是单行 JSON，不受 1000 行上限约束
+    type Cursor = { country: string; vid: string; product_id: string } | null;
+    type Page = { rows: VidSummaryRow[]; next_cursor: Cursor };
+    let cursor: Cursor = null;
+    let got = 0;
+    for (;;) {
+      const r: Page = await invokeFn<Page>(
+        "attribution-upload",
+        {
+          action: "export_vid_summary",
+          month,
+          limit: PAGE,
+          after_country: cursor?.country,
+          after_vid: cursor?.vid,
+          after_product: cursor?.product_id,
+        },
+        { timeout: 300000 },
+      );
+      const page = r.rows ?? [];
+      got += page.length;
+      onPage(page, got);
+      if (page.length < PAGE || !r.next_cursor) break;
+      cursor = r.next_cursor;
+      // 让出主线程，否则整段下载期间页面完全无响应
+      await new Promise((res) => setTimeout(res, 0));
+    }
+    return got;
+  },
+
   vidSummary: async (month: string, onPage?: (got: number) => void) => {
     const PAGE = 5000;
     type Cursor = { country: string; vid: string; product_id: string } | null;

@@ -86,6 +86,8 @@ const SYNC_HELP: Record<"creators" | "targets" | "handovers" | "progress" | "exp
       "列顺序：站点 · 月份 · VID · 达人昵称 · 归属人 · 角色 · 归属类别 · 匹配方式 · PID · SKU · GMV · 消耗 · 订单量 · ROI · PV · 点击 · CTR · CVR",
       "归属四列来自该月最新快照：一个 VID 可能有多条判定（视频/直播…），取金额最大的那条。没跑过快照时这四列为空。",
       "这是与本地 Excel 对账用的底表——站点、VID、归属人三列齐全，可以直接和手工结果逐行比。",
+      "大月份二十几万行：下载分页进行（每页两万），文件生成是浏览器本地做的，十几秒属正常，期间别关页面。",
+      "VID 以文本写入，不会被 Excel 转成科学计数法丢精度。",
     ],
   },
 };
@@ -254,26 +256,32 @@ function MonthlyView() {
   const exportVidSummary = async () => {
     setBusy("export");
     try {
-      const { rows } = await exportApi.vidSummary(month, (got) => {
-        if (got >= 20000) toast.loading(`正在导出，已取 ${got.toLocaleString()} 行…`, { id: "vid-export" });
+      // 直接边下边转成表格行，不先攒一份对象数组——25 万行在浏览器里存两份，后半程必卡。
+      const aoa: (string | number)[][] = [VID_SUMMARY_HEADER];
+      const n = await exportApi.vidSummaryStream(month, (page, got) => {
+        for (const r of page) {
+          aoa.push([
+            r.country, r.month, r.vid, r.account_name,
+            r.staff, r.role, r.bucket, r.match_type,
+            r.product_id, r.sku,
+            r.gmv, r.cost, r.orders, r.roi ?? "", r.pv, r.clicks, r.ctr ?? "", r.cvr ?? "",
+          ]);
+        }
+        toast.loading(`正在下载数据…已取 ${got.toLocaleString()} 行`, { id: "vid-export" });
       });
-      toast.dismiss("vid-export");
-      if (!rows.length) { toast.warning("没有可导出的数据"); return; }
-      const aoa = [
-        VID_SUMMARY_HEADER,
-        ...rows.map((r) => [
-          r.country, r.month, r.vid, r.account_name,
-          r.staff, r.role, r.bucket, r.match_type,
-          r.product_id, r.sku,
-          r.gmv, r.cost, r.orders, r.roi ?? "", r.pv, r.clicks, r.ctr ?? "", r.cvr ?? "",
-        ]),
-      ];
+      if (!n) { toast.dismiss("vid-export"); toast.warning("没有可导出的数据"); return; }
+
+      toast.loading(`正在生成 Excel（${n.toLocaleString()} 行），大文件需要十几秒…`, { id: "vid-export" });
+      // 让 toast 先渲染出来，再进同步的表格生成——否则用户看到的是「卡住」
+      await new Promise((res) => setTimeout(res, 50));
       const ws = XLSX.utils.aoa_to_sheet(aoa);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "VID汇总");
       XLSX.writeFile(wb, `VID汇总-${month}.xlsx`);
-      toast.success(`导出完成：${rows.length} 行`);
+      toast.dismiss("vid-export");
+      toast.success(`导出完成：${n.toLocaleString()} 行`);
     } catch (e) {
+      toast.dismiss("vid-export");
       toast.error(`导出失败：${(e as Error).message}`);
     } finally {
       setBusy(null);

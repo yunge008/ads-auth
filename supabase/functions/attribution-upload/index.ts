@@ -1343,11 +1343,28 @@ Deno.serve(async (req) => {
         }
         // 库内直接按 (站点, 归一化昵称) 聚合，不再「取前 5000 条明细」——
         // 一个月的无建联明细有几万条，截断会把长尾整段砍掉，月度数字偏小、跨月还不可比。
-        const { data: aggRows, error: aggErr } = await db.rpc("attribution_run_unmatched_by_creator", {
-          _run_id: run.id,
-        });
-        if (aggErr) throw new Error(`读取无建联汇总失败：${aggErr.message}`);
-        const rows = (aggRows ?? []) as Array<{ country: string; account_name: string; name_norm: string; gmv_usd: number }>;
+        //
+        // 必须走 JSON 分页版：行集版会被 PostgREST 的 1000 行上限截断，而这个聚合的输出
+        // 按 (站点, 归一化昵称) 有序，前 1000 行会被字母序最靠前的站点（JP、MX-AR）吃满，
+        // 表现就是「其它站点的无建联达人整片消失」。
+        type UnmatchedRow = { country: string; account_name: string; name_norm: string; gmv_usd: number };
+        const rows: UnmatchedRow[] = [];
+        {
+          const PAGE_JSON = 20000;
+          for (let offset = 0; ; ) {
+            const { data: aggRows, error: aggErr } = await db.rpc("attribution_run_unmatched_by_creator_json", {
+              _run_id: run.id,
+              _limit: PAGE_JSON,
+              _offset: offset,
+            });
+            if (aggErr) throw new Error(`读取无建联汇总失败：${aggErr.message}`);
+            const page = (aggRows ?? []) as UnmatchedRow[];
+            if (!page.length) break;
+            rows.push(...page);
+            offset += page.length;
+            if (page.length < PAGE_JSON) break;
+          }
+        }
         for (const r of rows) {
           const name = (r.account_name ?? "").trim();
           const norm = r.name_norm || normalizeName(name);
