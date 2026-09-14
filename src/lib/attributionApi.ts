@@ -374,13 +374,37 @@ export const snapshotApi = {
       if (r.done || remaining === 0) break;
     }
 
-    const fin = await invokeFn<{ run?: RunMeta }>(
-      "attribution-upload",
-      { action: "refresh", month, source, stage: "finish", run_id: runId },
-      { timeout: 300000 },
-    );
-    if (!fin.run) throw new Error("重算收尾失败：没有返回快照");
-    return fin.run;
+    // 收尾这一步是纯数据库聚合，大月份可能跑上百秒，会撞网关的连接超时——
+    // 但服务端通常还在继续跑并把快照写完。所以请求失败不直接判死，改为轮询快照状态，
+    // 真的出现了新的 READY 快照就当成功（否则整月白算一遍，用户还看不到结果）。
+    const waitForRun = async (limitMs: number): Promise<RunMeta | null> => {
+      const until = Date.now() + limitMs;
+      while (Date.now() < until) {
+        await new Promise((r) => setTimeout(r, 5000));
+        onTick?.(Math.round((Date.now() - t0) / 1000), { chunks, total, remaining: 0, country: null });
+        const { runs } = await snapshotApi.runs(month, 1).catch(() => ({ runs: [] as RunMeta[] }));
+        const run = runs?.[0];
+        if (run?.id === runId && run.status === "READY") return run;
+        if (run?.id === runId && run.status === "FAILED") throw new Error(run.error ?? "重算收尾失败");
+      }
+      return null;
+    };
+
+    try {
+      const fin = await invokeFn<{ run?: RunMeta }>(
+        "attribution-upload",
+        { action: "refresh", month, source, stage: "finish", run_id: runId },
+        { timeout: 300000 },
+      );
+      if (fin.run) return fin.run;
+    } catch (e) {
+      const late = await waitForRun(5 * 60 * 1000);
+      if (late) return late;
+      throw e;
+    }
+    const late = await waitForRun(5 * 60 * 1000);
+    if (late) return late;
+    throw new Error("重算收尾失败：没有返回快照");
   },
   /** 从快照明细表下钻，不重算。 */
   detail: (p: { run_id?: string; month?: string; detail_for: DrillFilter }) =>

@@ -192,7 +192,10 @@ function MonthlyView() {
     } catch (e) {
       toast.error(`重新计算失败：${(e as Error).message}`);
     } finally {
-      attributionView.patch("admin-monthly", { refreshing: false });
+      attributionView.patch("admin-monthly", { refreshing: false, refreshProgress: null });
+      // 不管前面成没成功都再读一次快照：收尾请求可能被网关掐断，但服务端已经把结果写完了，
+      // 这时候只是前端拿不到返回值，不该让用户对着空页面。
+      await load(month);
     }
   };
 
