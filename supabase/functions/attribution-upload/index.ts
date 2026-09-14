@@ -1289,20 +1289,33 @@ Deno.serve(async (req) => {
       // 导出的完整性不靠它：翻页只在「本页行数 < 页大小」时结束，中途任何一页出错都会抛，
       // 所以循环正常走完就说明取全了。（attribution_vid_summary_count 保留，需要时单独查。）
 
-      // 一次只回一页，由客户端翻页拼装。整月二十几万行一次性返回是几十 MB，
-      // Edge Function 扛不住、响应也可能被截断；分页之后每个请求都是小活儿。
-      const limit = Math.max(1, Math.min(20000, Math.round(num(body.limit)) || 20000));
-      const offset = Math.max(0, Math.round(num(body.offset)));
-      const { data, error } = await db.rpc("attribution_vid_summary_json", {
+      // 一次只回一页，由客户端翻页拼装。
+      // 翻页用游标（上一页最后一行的 站点/VID/商品ID），不用 OFFSET：
+      // OFFSET 每翻一页都要把整月重新 GROUP BY 一遍再丢掉前面的行，越翻越慢，
+      // 后面几页必然顶到网关的 upstream request timeout。游标分页每页都能走索引直接取。
+      const limit = Math.max(1, Math.min(20000, Math.round(num(body.limit)) || 5000));
+      const afterCountry = str(body.after_country) || null;
+      const { data, error } = await db.rpc("attribution_vid_summary_page", {
         _month: month,
         _run_id: run?.id ?? null,
         _limit: limit,
-        _offset: offset,
+        _after_country: afterCountry,
+        _after_vid: afterCountry ? str(body.after_vid) : null,
+        _after_product: afterCountry ? str(body.after_product) : null,
       });
       if (error) throw new Error(`导出汇总失败：${error.message}`);
-      const page = (data ?? []) as unknown[];
-      console.log(`export_vid_summary ${month}: 第 ${offset + 1}-${offset + page.length} 行`);
-      return json({ rows: page, offset, run_id: run?.id ?? null, month });
+      const page = (data ?? []) as Array<Record<string, unknown>>;
+      const last = page[page.length - 1];
+      console.log(`export_vid_summary ${month}: 本页 ${page.length} 行（after=${afterCountry ?? "-"}）`);
+      return json({
+        rows: page,
+        run_id: run?.id ?? null,
+        month,
+        next_cursor: last
+          ? { country: String(last.country ?? ""), vid: String(last.vid ?? ""), product_id: String(last.product_id ?? "") }
+          : null,
+      });
+
     }
 
     // 12 个月无建联趋势：逐月现算（归并后每月只有几千行，够快），不再依赖已废弃的 attr_bucket
