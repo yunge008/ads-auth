@@ -279,9 +279,8 @@ export const uploadQueue = {
         if (months.length === 1) {
           const [month] = months;
           try {
-            const r = await snapshotApi.refresh(month, "UPLOAD");
-            const first = r.results?.[0];
-            if (first && !first.ok) throw new Error(first.error ?? "快照刷新失败");
+            // 后台重算 + 轮询：整月快照经常跑几分钟，单次请求会撞上网关 150 秒 idle timeout
+            await snapshotApi.refreshAsync(month, "UPLOAD");
             const fresh = await snapshotApi.report(month);
             setState({ viewing: { kind: "merged", month }, summary: fresh.summary }, { persist: false });
             cb.onSuccess(`已刷新 ${month} 全站点归因快照，请查看「归因结果」标签`);

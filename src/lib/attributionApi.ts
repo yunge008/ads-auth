@@ -322,6 +322,30 @@ export const snapshotApi = {
       // skipped=true 表示该月没有新数据、直接沿用上一版快照（cron 才会跳过，手动重算永远强制重跑）
       results: Array<{ month: string; ok: boolean; skipped?: boolean; reason?: string; run?: RunMeta; error?: string }>;
     }>("attribution-upload", { action: "refresh", month, source }, { timeout: 600000 }),
+  /**
+   * 后台重算 + 轮询。整月重算经常超过网关 150 秒 idle timeout，
+   * 这里让服务端立刻返回、后台继续跑，前端每 5 秒查一次快照状态。
+   */
+  refreshAsync: async (month: string, source = "MANUAL", onTick?: (secs: number) => void) => {
+    const before = await snapshotApi.runs(month, 1).catch(() => ({ runs: [] as RunMeta[] }));
+    const beforeId = before.runs?.[0]?.id ?? null;
+    await invokeFn<{ months: string[]; async?: boolean }>(
+      "attribution-upload",
+      { action: "refresh", month, source, async: true },
+      { timeout: 60000 },
+    );
+    const deadline = Date.now() + 20 * 60 * 1000;
+    for (let i = 0; Date.now() < deadline; i++) {
+      await new Promise((r) => setTimeout(r, 5000));
+      onTick?.(Math.round((i + 1) * 5));
+      const { runs } = await snapshotApi.runs(month, 1).catch(() => ({ runs: [] as RunMeta[] }));
+      const run = runs?.[0];
+      if (!run || run.id === beforeId) continue;
+      if (run.status === "READY") return run;
+      if (run.status === "FAILED") throw new Error(run.error ?? "快照重算失败");
+    }
+    throw new Error("快照重算超时，请稍后在月度进度页查看结果");
+  },
   /** 从快照明细表下钻，不重算。 */
   detail: (p: { run_id?: string; month?: string; detail_for: DrillFilter }) =>
     invokeFn<{ detail_rows: DetailRow[]; run_id?: string }>(

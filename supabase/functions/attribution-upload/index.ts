@@ -985,6 +985,38 @@ Deno.serve(async (req) => {
       const skipIfUnchanged = body.skip_if_unchanged === undefined ? cronAuthed : !!body.skip_if_unchanged;
 
       const results: Array<{ month: string; ok: boolean; skipped?: boolean; reason?: string; run?: RunMeta; error?: string }> = [];
+
+      // 整月快照重算动辄几分钟，单次 HTTP 请求会撞上网关 150 秒 idle timeout。
+      // async=true：立刻返回，重算放到后台跑，客户端改用 runs 轮询状态。
+      const runMonths = async () => {
+        for (const m of months) {
+          try {
+            if (skipIfUnchanged) {
+              const prev = await latestRun(db, m);
+              const { needed, reason } = await monthNeedsRefresh(db, m, prev);
+              if (!needed) {
+                results.push({ month: m, ok: true, skipped: true, reason, run: prev ?? undefined });
+                console.log(`refresh ${m}: 跳过（${reason}）`);
+                continue;
+              }
+            }
+            const { run } = await buildSnapshot(db, m, source, account.name, keep);
+            results.push({ month: m, ok: true, run });
+            console.log(`refresh ${m}: ${run.agg_rows} 归并行 → ${run.staff_count} 人，GMV ${Math.round(run.total_gmv)}`);
+          } catch (e) {
+            results.push({ month: m, ok: false, error: (e as Error).message });
+            console.error(`refresh ${m} 失败`, e);
+          }
+        }
+      };
+
+      if (body.async === true) {
+        const bg = runMonths();
+        const rt = (globalThis as { EdgeRuntime?: { waitUntil: (p: Promise<unknown>) => void } }).EdgeRuntime;
+        if (rt?.waitUntil) rt.waitUntil(bg);
+        return json({ months, async: true, results: [] });
+      }
+
       for (const m of months) {
         try {
           if (skipIfUnchanged) {
