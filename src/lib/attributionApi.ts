@@ -191,6 +191,14 @@ export function feishuAction<T = Record<string, unknown>>(action: string, extra?
   return invokeFn<T>("attribution-feishu", { action, ...(extra ?? {}) }, { timeout: 300000 });
 }
 
+/** 重算进度：已判片数 / 待判总键数 / 剩余键数 / 刚判完的站点。 */
+export type RefreshProgress = {
+  chunks: number;
+  total: number;
+  remaining: number;
+  country: string | null;
+};
+
 export const uploadApi = {
   create: (p: { file_name: string; country: string; month: string; note?: string; force?: boolean; replace_existing?: boolean }) =>
     invokeFn<{ upload_id: string }>("attribution-upload", { action: "create", ...p }),
@@ -330,12 +338,12 @@ export const snapshotApi = {
    * 在一次调用里判完必然 `CPU Time exceeded`，进程被掐断、快照永远停在 RUNNING。
    * 分片是按 (站点, 达人昵称) 切的，同一个达人不会被拆开，所以结果与一次性判定等价。
    *
-   * onTick 收到的是「已判片数 / 剩余键数」，用来在页面上显示真实进度。
+   * onTick 收到的是「已判片数 / 总键数 / 剩余键数 / 当前站点」，用来在页面上显示真实进度。
    */
   refreshAsync: async (
     month: string,
     source = "MANUAL",
-    onTick?: (secs: number, progress?: { chunks: number; remaining: number }) => void,
+    onTick?: (secs: number, progress?: RefreshProgress) => void,
   ) => {
     const t0 = Date.now();
     const started = await invokeFn<{
@@ -350,17 +358,19 @@ export const snapshotApi = {
     if (!runId) throw new Error("重算未能启动（没有拿到 run_id）");
 
     let chunks = 0;
-    let remaining = Number(plan.remaining ?? 0);
+    const total = Number(plan.remaining ?? 0);
+    let remaining = total;
+    onTick?.(Math.round((Date.now() - t0) / 1000), { chunks: 0, total, remaining, country: null });
     // 上限只是兜底，正常情况下每片必然会让 remaining 下降
     for (let i = 0; i < 500; i++) {
-      const r = await invokeFn<{ done?: boolean; remaining?: number }>(
+      const r = await invokeFn<{ done?: boolean; remaining?: number; country?: string }>(
         "attribution-upload",
         { action: "refresh", month, source, stage: "judge", run_id: runId },
         { timeout: 300000 },
       );
       chunks++;
       remaining = Number(r.remaining ?? 0);
-      onTick?.(Math.round((Date.now() - t0) / 1000), { chunks, remaining });
+      onTick?.(Math.round((Date.now() - t0) / 1000), { chunks, total, remaining, country: r.country ?? null });
       if (r.done || remaining === 0) break;
     }
 

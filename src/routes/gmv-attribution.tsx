@@ -38,7 +38,17 @@ function GmvAttributionPage() {
     attributionView.getServerSnapshot,
   );
   const view = views.user;
-  const { month, report, run, refreshing, refreshSecs } = view;
+  const { month, report, run, refreshing, refreshSecs, refreshStartedAt, refreshProgress } = view;
+
+  // 已等待时间每秒本地走一次。服务端回调是「判完一片」才来一次，间隔可能几十秒，
+  // 光靠它刷新会让人以为卡死（之前就一直停在 0:00）。
+  const [, tick] = React.useState(0);
+  React.useEffect(() => {
+    if (!refreshing) return;
+    const t = window.setInterval(() => tick((n) => n + 1), 1000);
+    return () => window.clearInterval(t);
+  }, [refreshing]);
+  const waitedSecs = refreshStartedAt ? Math.max(0, Math.round((Date.now() - refreshStartedAt) / 1000)) : refreshSecs;
   const setMonth = (m: string) => attributionView.patch("user", { month: m });
   const [loading, setLoading] = React.useState(false);
 
@@ -60,9 +70,11 @@ function GmvAttributionPage() {
   /** 手动重算：按当下的飞书登记数据重跑该月全站点全人员归因，生成一条新快照。 */
   const refresh = async () => {
     if (!/^\d{4}-\d{2}$/.test(month)) return;
-    attributionView.patch("user", { refreshing: true, refreshSecs: 0 });
+    attributionView.patch("user", { refreshing: true, refreshStartedAt: Date.now(), refreshSecs: 0, refreshProgress: null });
     try {
-      await snapshotApi.refreshAsync(month, "MANUAL", (s) => attributionView.patch("user", { refreshSecs: s }));
+      await snapshotApi.refreshAsync(month, "MANUAL", (s, progress) =>
+        attributionView.patch("user", { refreshSecs: s, refreshProgress: progress ?? null }),
+      );
       toast.success(`${month} 归因快照已更新`);
       await load(month);
     } catch (e) {
@@ -116,8 +128,32 @@ function GmvAttributionPage() {
 
       {refreshing ? (
         <div className="text-sm text-muted-foreground text-center py-16 space-y-1">
-          <div>正在重新计算该月全站点归因，请稍候…（已等待 {Math.floor(refreshSecs / 60)}:{String(refreshSecs % 60).padStart(2, "0")}）</div>
-          <div className="text-xs">大月份可能需要几分钟，期间可留在本页，完成后会自动展示结果。</div>
+          <div>
+            正在重新计算该月全站点归因，请稍候…（已等待 {Math.floor(waitedSecs / 60)}:{String(waitedSecs % 60).padStart(2, "0")}）
+          </div>
+          {refreshProgress ? (
+            <div className="text-xs space-y-1">
+              <div>
+                {refreshProgress.country
+                  ? `已判完 ${refreshProgress.country} 第 ${refreshProgress.chunks} 片`
+                  : "正在切分判定分片"}
+                {refreshProgress.total
+                  ? ` · 剩 ${refreshProgress.remaining.toLocaleString()} / ${refreshProgress.total.toLocaleString()} 个待判定`
+                  : ""}
+              </div>
+              {refreshProgress.total ? (
+                <div className="mx-auto w-64 h-1.5 rounded bg-muted overflow-hidden">
+                  <div
+                    className="h-full bg-primary transition-all"
+                    style={{
+                      width: `${Math.round(((refreshProgress.total - refreshProgress.remaining) / refreshProgress.total) * 100)}%`,
+                    }}
+                  />
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          <div className="text-xs">判定按站点分片执行，判完一片就存库；中途离开本页也不会白跑。</div>
         </div>
       ) : loading && !report ? (
         <div className="text-sm text-muted-foreground text-center py-16">读取归因快照…</div>
