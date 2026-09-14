@@ -65,7 +65,26 @@ export async function loadStaffMeta(db: SupabaseClient): Promise<StaffMeta> {
   return m;
 }
 
-export async function loadAttrContext(db: SupabaseClient): Promise<AttrContext> {
+/**
+ * 上下文加载。
+ *
+ * `scope.country` 给定时只加载那个站点的登记/归属/别名/交接数据——判定分片是按站点切的，
+ * 全量上下文（登记表六万行 + 归属表三万行）每片都解析一遍同样会吃掉 CPU 配额。
+ * 唯一的例外是 VID 强匹配：引擎允许「VID 登记在别的站点」也算命中，收窄站点会漏，
+ * 所以调用方要把 `scope.extraVidRegs` 一起传进来（由 attribution_vid_regs_for_country 捞出）。
+ */
+export type AttrContextScope = {
+  country?: string;
+  extraVidRegs?: {
+    registry: Array<{ vid: string; staff_name: string; role: string; register_date: string | null; country: string }>;
+    vid_map: Array<{ vid: string; staff_name: string; source_type: string; country: string }>;
+  };
+};
+
+export async function loadAttrContext(db: SupabaseClient, scope?: AttrContextScope): Promise<AttrContext> {
+  const only = scope?.country;
+  /** 有站点范围时给查询加上 country 过滤；没有就原样返回。 */
+  const scoped = <T extends { eq: (c: string, v: string) => T }>(q: T): T => (only ? q.eq("country", only) : q);
   // 1) VID 登记：staff_vid_map（无日期）∪ creator_registry（含日期与归档）
   const vidRegs = new Map<string, VidRegistration[]>();
   const addReg = (vid: string, reg: VidRegistration) => {
@@ -82,8 +101,9 @@ export async function loadAttrContext(db: SupabaseClient): Promise<AttrContext> 
   };
 
   const svm = await pageAll<{ country: string; staff_name: string; vid: string; source_type: string }>((f, t) =>
-    db.from("staff_vid_map").select("country, staff_name, vid, source_type").order("id").range(f, t),
+    scoped(db.from("staff_vid_map").select("country, staff_name, vid, source_type")).order("id").range(f, t),
   );
+  for (const r of scope?.extraVidRegs?.vid_map ?? []) svm.push(r);
   for (const r of svm) {
     addReg(r.vid, { staff: r.staff_name, role: r.source_type as Role, registerDate: null, country: r.country ?? "" });
   }
@@ -94,13 +114,12 @@ export async function loadAttrContext(db: SupabaseClient): Promise<AttrContext> 
     register_date: string | null;
     country: string;
   }>((f, t) =>
-    db
-      .from("creator_registry")
-      .select("vid, staff_name, role, register_date, country")
+    scoped(db.from("creator_registry").select("vid, staff_name, role, register_date, country"))
       .neq("vid", "")
       .order("id")
       .range(f, t),
   );
+  for (const r of scope?.extraVidRegs?.registry ?? []) regRows.push(r);
   for (const r of regRows) {
     addReg(r.vid, {
       staff: r.staff_name,
@@ -113,7 +132,7 @@ export async function loadAttrContext(db: SupabaseClient): Promise<AttrContext> 
   // 2) 建联表归属：NICKNAME 优先，HANDLE 补缺
   const ownership = new Map<string, { bd: string; keyType: "NICKNAME" | "HANDLE"; country: string }>();
   const ownRows = await pageAll<{ key_type: string; match_key: string; owner_bd: string; country: string }>((f, t) =>
-    db.from("creator_ownership").select("key_type, match_key, owner_bd, country").order("id").range(f, t),
+    scoped(db.from("creator_ownership").select("key_type, match_key, owner_bd, country")).order("id").range(f, t),
   );
   for (const r of ownRows) {
     if (r.key_type !== "NICKNAME") continue;
@@ -129,7 +148,7 @@ export async function loadAttrContext(db: SupabaseClient): Promise<AttrContext> 
   const manualAlias = new Map<string, { bd: string; country: string }>();
   const vidAlias = new Map<string, { bd: string; country: string }>();
   const aliasRows = await pageAll<{ alias_norm: string; bd_name: string; country: string; source: string }>((f, t) =>
-    db.from("creator_alias").select("alias_norm, bd_name, country, source").order("id").range(f, t),
+    scoped(db.from("creator_alias").select("alias_norm, bd_name, country, source")).order("id").range(f, t),
   );
   for (const r of aliasRows) {
     const rec = { bd: r.bd_name, country: r.country ?? "" };
@@ -141,7 +160,7 @@ export async function loadAttrContext(db: SupabaseClient): Promise<AttrContext> 
   // 4) 站点交接（按日期升序）
   const handovers = new Map<string, Handover[]>();
   const hRows = await pageAll<{ country: string; from_bd: string; to_bd: string; handover_date: string }>((f, t) =>
-    db.from("site_handovers").select("country, from_bd, to_bd, handover_date").order("id").range(f, t),
+    scoped(db.from("site_handovers").select("country, from_bd, to_bd, handover_date")).order("id").range(f, t),
   );
   for (const r of hRows) {
     const arr = handovers.get(r.country) ?? [];
@@ -162,9 +181,7 @@ export async function loadAttrContext(db: SupabaseClient): Promise<AttrContext> 
       register_date: string | null;
       sample_date: string | null;
     }>((f, t) =>
-      db
-        .from("creator_registry")
-        .select("staff_name, country, nickname_norm, handle_norm, register_date, sample_date")
+      scoped(db.from("creator_registry").select("staff_name, country, nickname_norm, handle_norm, register_date, sample_date"))
         .order("id")
         .range(f, t),
     );

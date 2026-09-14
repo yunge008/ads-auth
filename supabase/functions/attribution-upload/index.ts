@@ -501,13 +501,125 @@ async function fetchMonthKeys(db: ReturnType<typeof admin>, month: string): Prom
   return keys;
 }
 
-async function buildSnapshot(
+/** 单片判定的键数上限。一片只判这么多，保证单次调用的 CPU 稳稳在配额内。 */
+const JUDGE_CHUNK = 15000;
+
+/**
+ * 判定下一片。
+ *
+ * 分片是按 (站点, 归一化昵称) 切的——别名投票只在同一个 (站点, 昵称) 内部产生和消费，
+ * 所以同组不拆开就等价于一次性判定。上下文也按站点收窄，再补上「VID 登记在别站点」的那部分，
+ * 否则每片都要解析六万行登记表，CPU 照样不够。
+ *
+ * 判完就把这一片从候选表删掉，剩余行数即进度；中途失败重跑只会重做没删掉的部分。
+ */
+async function snapshotJudgeNext(
+  db: ReturnType<typeof admin>,
+  runId: string,
+): Promise<{ done: boolean; remaining: number; judged: number; country?: string }> {
+  const t0 = Date.now();
+  const { data, error } = await db.rpc("attribution_next_chunk_json", { _run_id: runId });
+  if (error) throw new Error(`读取待判定分片失败：${error.message}`);
+  const chunk = (data ?? {}) as {
+    done?: boolean;
+    country?: string;
+    chunk_no?: number;
+    remaining?: number;
+    keys?: MonthKeyRow[];
+  };
+  if (chunk.done) return { done: true, remaining: 0, judged: 0 };
+
+  const country = str(chunk.country);
+  const chunkNo = Math.round(num(chunk.chunk_no));
+  const keys = (chunk.keys ?? []) as MonthKeyRow[];
+
+  const { data: extra, error: extraErr } = await db.rpc("attribution_vid_regs_for_country", {
+    _run_id: runId,
+    _country: country,
+  });
+  if (extraErr) throw new Error(`读取跨站点 VID 登记失败：${extraErr.message}`);
+
+  const ctx = await loadAttrContext(db, {
+    country,
+    extraVidRegs: extra as AttrContextScope["extraVidRegs"],
+  });
+
+  const inputs: AttrInputRow[] = keys.map((k, i) => {
+    let postedAt: string | null = null;
+    let postedAtSource: AttrInputRow["postedAtSource"] = null;
+    if (k.posted_at) {
+      postedAt = k.posted_at;
+      postedAtSource = "sheet";
+    } else if (k.vid) {
+      const d = vidToPostedAt(k.vid);
+      if (d) {
+        postedAt = d.toISOString();
+        postedAtSource = "vid";
+      }
+    }
+    return {
+      key: `k:${i}`,
+      creativeType: normalizeCreativeType(k.creative_type),
+      vid: k.vid ?? "",
+      accountName: k.account_name ?? "",
+      country: k.country ?? "",
+      postedAt,
+      postedAtSource,
+      // 判定与金额无关，这里给 0 即可；金额在数据库里 JOIN 回去
+      currency: "USD",
+      cost: 0,
+      grossRevenue: 0,
+      orders: 0,
+    };
+  });
+
+  const engineRun = attributeRows(inputs, ctx);
+  await persistRunArtifacts(db, engineRun);
+  const resultByKey = new Map(engineRun.rows.map((r) => [r.key, r]));
+
+  const rows = keys.map((k, i) => {
+    const res = resultByKey.get(`k:${i}`);
+    return {
+      country: k.country ?? "",
+      vid: k.vid ?? "",
+      account_name: k.account_name ?? "",
+      creative_type: k.creative_type ?? "",
+      bucket: res?.bucket ?? "UNMATCHED",
+      staff: res?.staff ?? null,
+      role: res?.source ?? null,
+      match_type: res?.matchType ?? null,
+      handover_applied: res?.handoverApplied ?? false,
+    };
+  });
+  if (rows.length) {
+    const { error: wErr } = await db.rpc("attribution_write_run_keys", { _run_id: runId, _rows: rows });
+    if (wErr) throw new Error(`写入判定结果失败：${wErr.message}`);
+  }
+
+  const { data: left, error: dErr } = await db.rpc("attribution_drop_chunk", {
+    _run_id: runId,
+    _country: country,
+    _chunk: chunkNo,
+  });
+  if (dErr) throw new Error(`标记分片完成失败：${dErr.message}`);
+  const remaining = Number(left ?? 0);
+  console.log(
+    `judge ${runId}: ${country} 第 ${chunkNo + 1} 片 ${rows.length} 个键判完，剩 ${remaining}，耗时 ${Date.now() - t0}ms`,
+  );
+  return { done: remaining === 0, remaining, judged: rows.length, country };
+}
+
+/**
+ * 建快照第 1 步：建 run 行、补归并、按最新汇率重算美元、库内定桶 + 切分判定分片。
+ * 判定本身不在这里做——整月二十几万个键进 JS 会撞 Edge Function 的 CPU 配额，
+ * 由调用方反复调 snapshotJudgeNext 逐片判完，再调 snapshotFinish 收尾。
+ */
+async function snapshotStart(
   db: ReturnType<typeof admin>,
   month: string,
   source: string,
   triggeredBy: string,
-  keep: number,
-): Promise<{ run: RunMeta; summary: unknown }> {
+): Promise<{ runId: string; remaining: number }> {
   const { data: created, error: insErr } = await db
     .from("attribution_runs")
     .insert({ month, source, triggered_by: triggeredBy, status: "RUNNING" })
@@ -539,89 +651,55 @@ async function buildSnapshot(
       loadStaffMeta(db),
     ]);
 
-    // ---- 1) 先在库内给「不可能归到人」的键定桶，只把候选键拉进来判 ----
-    // Edge Function 有 CPU 配额（日志里表现为 `CPU Time exceeded`）。整月二十几万个判定键
-    // 光解析成 JS 对象再序列化写回就超预算，而其中绝大多数是 VID 对不上、昵称也查无此人的，
-    // 引擎对它们的结论必然是 UNMATCHED；商品卡和认不出的类型更是只看内容类型就能定桶。
-    // 这些在 SQL 里一条 INSERT 解决，JS 只处理真正有可能归到人的那一小撮。
-    let seeded = 0;
+    // ---- 1) 库内定桶 + 切分判定分片 ----
+    // 判定不在这里做：整月二十几万个判定键进 JS 会撞 Edge Function 的 CPU 配额
+    //（日志表现为 `CPU Time exceeded`），所以只 seed 出分片计划，判定交给 snapshotJudgeNext 逐片跑。
     if (uploads.length) {
-      const { data, error } = await db.rpc("attribution_seed_run_keys", { _run_id: runId, _month: month });
-      if (error) throw new Error(`预判定键落库失败：${error.message}`);
-      const info = (Array.isArray(data) ? data[0] : data) as { seeded: number; candidates: number } | null;
-      seeded = Number(info?.seeded ?? 0);
-      console.log(`buildSnapshot ${month}: 库内直接定桶 ${seeded} 个键，候选 ${Number(info?.candidates ?? 0)} 个`);
-    }
-    const keys: MonthKeyRow[] = uploads.length ? await fetchCandidateKeys(db, runId) : [];
-    const tKeys = Date.now();
-    console.log(`buildSnapshot ${month}: ${uploads.length} 个批次 / ${keys.length} 个候选键（另有 ${seeded} 个库内定桶），读取耗时 ${tKeys - t0}ms`);
-
-    // ---- 2) 跑归因引擎（一次性，保证别名投票口径不被分片打散）----
-    const inputs: AttrInputRow[] = keys.map((k, i) => {
-      let postedAt: string | null = null;
-      let postedAtSource: AttrInputRow["postedAtSource"] = null;
-      if (k.posted_at) {
-        postedAt = k.posted_at;
-        postedAtSource = "sheet";
-      } else if (k.vid) {
-        const d = vidToPostedAt(k.vid);
-        if (d) {
-          postedAt = d.toISOString();
-          postedAtSource = "vid";
-        }
-      }
-      return {
-        key: `k:${i}`,
-        creativeType: normalizeCreativeType(k.creative_type),
-        vid: k.vid ?? "",
-        accountName: k.account_name ?? "",
-        country: k.country ?? "",
-        postedAt,
-        postedAtSource,
-        // 判定与金额无关，这里给 0 即可；金额在数据库里 JOIN 回去
-        currency: "USD",
-        cost: 0,
-        grossRevenue: 0,
-        orders: 0,
-      };
-    });
-    const ctx = await loadAttrContext(db);
-    const engineRun = attributeRows(inputs, ctx);
-    await persistRunArtifacts(db, engineRun);
-    const resultByKey = new Map(engineRun.rows.map((r) => [r.key, r]));
-    const tEngine = Date.now();
-    console.log(`buildSnapshot ${month}: 引擎耗时 ${tEngine - tKeys}ms`);
-
-    // ---- 3) 候选键的判定结果落库（非候选键在第 1 步已经写过了）----
-    if (keys.length) {
-      const keyRows = keys.map((k, i) => {
-        const res = resultByKey.get(`k:${i}`);
-        return {
-          run_id: runId,
-          country: k.country ?? "",
-          vid: k.vid ?? "",
-          account_name: k.account_name ?? "",
-          creative_type: k.creative_type ?? "",
-          bucket: res?.bucket ?? "UNMATCHED",
-          staff: res?.staff ?? null,
-          role: res?.source ?? null,
-          match_type: res?.matchType ?? null,
-          handover_applied: res?.handoverApplied ?? false,
-        };
+      const { data, error } = await db.rpc("attribution_seed_run_keys", {
+        _run_id: runId,
+        _month: month,
+        _chunk_size: JUDGE_CHUNK,
       });
-      // 同理，判定结果也整块塞给数据库，别再 2000 行一次地来回 84 趟
-      const KEY_INSERT = 20000;
-      for (let i = 0; i < keyRows.length; i += KEY_INSERT) {
-        const batch = keyRows.slice(i, i + KEY_INSERT);
-        const { error } = await db.rpc("attribution_write_run_keys", {
-          _run_id: runId,
-          _rows: batch.map(({ run_id: _ignored, ...r }) => r),
-        });
-        if (error) throw new Error(`写入判定结果失败：${error.message}`);
-      }
+      if (error) throw new Error(`预判定键落库失败：${error.message}`);
+      const info = (data ?? {}) as { seeded?: number; candidates?: number; plan?: unknown[] };
+      console.log(
+        `buildSnapshot ${month}: 库内直接定桶 ${Number(info.seeded ?? 0)} 个键，` +
+          `候选 ${Number(info.candidates ?? 0)} 个，分 ${(info.plan ?? []).length} 片判定，` +
+          `耗时 ${Date.now() - t0}ms`,
+      );
     }
-    const tWrite = Date.now();
-    console.log(`buildSnapshot ${month}: 判定结果写入耗时 ${tWrite - tEngine}ms`);
+
+    const { count: remaining } = await db
+      .from("attribution_run_candidates")
+      .select("seq", { count: "exact", head: true })
+      .eq("run_id", runId);
+    return { runId, remaining: Number(remaining ?? 0) };
+  } catch (e) {
+    await db
+      .from("attribution_runs")
+      .update({ status: "FAILED", error: (e as Error).message, finished_at: new Date().toISOString() })
+      .eq("id", runId);
+    throw e;
+  }
+}
+
+/** 建快照最后一步：所有分片判完之后，在库内聚合成明细与汇总，写进快照行。 */
+async function snapshotFinish(
+  db: ReturnType<typeof admin>,
+  runId: string,
+  month: string,
+  keep: number,
+): Promise<{ run: RunMeta; summary: unknown }> {
+  const t0 = Date.now();
+  const tWrite = t0;
+  try {
+    const uploads = await readyUploads(db, month);
+    const { start, end } = monthRange(month);
+    const [targets, exchangeRates, staffMeta] = await Promise.all([
+      loadTargets(db, month),
+      loadExchangeRates(db),
+      loadStaffMeta(db),
+    ]);
 
     // ---- 4) 数据库内聚合：落明细 + 返回紧凑汇总 ----
     const { data: compactData, error: applyErr } = await db.rpc("attribution_apply_run", {
@@ -686,7 +764,7 @@ async function buildSnapshot(
       .update({
         status: "READY",
         upload_count: uploads.length,
-        agg_rows: Number(keyCount ?? keys.length),
+        agg_rows: Number(keyCount ?? 0),
         raw_rows: rawRows,
         staff_count: summary.staff.length,
         total_gmv: summary.totals.gmv,
@@ -1032,59 +1110,46 @@ Deno.serve(async (req) => {
       // cron 默认只在「有新数据」时才跑；页面上手动点「重新计算」永远强制重算
       const skipIfUnchanged = body.skip_if_unchanged === undefined ? cronAuthed : !!body.skip_if_unchanged;
 
-      const results: Array<{ month: string; ok: boolean; skipped?: boolean; reason?: string; run?: RunMeta; error?: string }> = [];
-
-      // 整月快照重算动辄几分钟，单次 HTTP 请求会撞上网关 150 秒 idle timeout。
-      // async=true：立刻返回，重算放到后台跑，客户端改用 runs 轮询状态。
-      const runMonths = async () => {
-        for (const m of months) {
-          try {
-            if (skipIfUnchanged) {
-              const prev = await latestRun(db, m);
-              const { needed, reason } = await monthNeedsRefresh(db, m, prev);
-              if (!needed) {
-                results.push({ month: m, ok: true, skipped: true, reason, run: prev ?? undefined });
-                console.log(`refresh ${m}: 跳过（${reason}）`);
-                continue;
-              }
-            }
-            const { run } = await buildSnapshot(db, m, source, account.name, keep);
-            results.push({ month: m, ok: true, run });
-            console.log(`refresh ${m}: ${run.agg_rows} 归并行 → ${run.staff_count} 人，GMV ${Math.round(run.total_gmv)}`);
-          } catch (e) {
-            results.push({ month: m, ok: false, error: (e as Error).message });
-            console.error(`refresh ${m} 失败`, e);
-          }
-        }
-      };
-
-      if (body.async === true) {
-        const bg = runMonths();
-        const rt = (globalThis as { EdgeRuntime?: { waitUntil: (p: Promise<unknown>) => void } }).EdgeRuntime;
-        if (rt?.waitUntil) rt.waitUntil(bg);
-        return json({ months, async: true, results: [] });
+      // 快照重算由调用方分步驱动，一次请求只做一件事：
+      //   stage 省略 → 建 run + 库内定桶 + 切分判定分片，返回 run_id 与待判片数
+      //   stage=judge → 判掉下一片（一片 15000 个键），返回剩余
+      //   stage=finish → 全部判完后在库内聚合、写快照
+      // 这样每次请求的 CPU 都稳稳在 Edge Function 的配额内；整月一次性跑必然 `CPU Time exceeded`。
+      const stage = str(body.stage);
+      if (stage === "judge") {
+        const runId = str(body.run_id);
+        if (!runId) throw new Error("judge 需要 run_id");
+        const r = await snapshotJudgeNext(db, runId);
+        return json({ run_id: runId, ...r });
+      }
+      if (stage === "finish") {
+        const runId = str(body.run_id);
+        const m = months[0];
+        if (!runId || !m) throw new Error("finish 需要 run_id 与 month");
+        const { run, summary } = await snapshotFinish(db, runId, m, keep);
+        return json({ months, results: [{ month: m, ok: true, run }], run, summary });
       }
 
+      const plans: Array<{ month: string; run_id?: string; remaining?: number; skipped?: boolean; reason?: string; run?: RunMeta; error?: string }> = [];
       for (const m of months) {
         try {
           if (skipIfUnchanged) {
             const prev = await latestRun(db, m);
             const { needed, reason } = await monthNeedsRefresh(db, m, prev);
             if (!needed) {
-              results.push({ month: m, ok: true, skipped: true, reason, run: prev ?? undefined });
+              plans.push({ month: m, skipped: true, reason, run: prev ?? undefined });
               console.log(`refresh ${m}: 跳过（${reason}）`);
               continue;
             }
           }
-          const { run } = await buildSnapshot(db, m, source, account.name, keep);
-          results.push({ month: m, ok: true, run });
-          console.log(`refresh ${m}: ${run.agg_rows} 归并行 → ${run.staff_count} 人，GMV ${Math.round(run.total_gmv)}`);
+          const { runId, remaining } = await snapshotStart(db, m, source, account.name);
+          plans.push({ month: m, run_id: runId, remaining });
         } catch (e) {
-          results.push({ month: m, ok: false, error: (e as Error).message });
-          console.error(`refresh ${m} 失败`, e);
+          plans.push({ month: m, error: (e as Error).message });
+          console.error(`refresh ${m} 启动失败`, e);
         }
       }
-      return json({ months, results });
+      return json({ months, staged: true, plans, results: plans.map((p) => ({ month: p.month, ok: !p.error, skipped: p.skipped, reason: p.reason, run: p.run, error: p.error })) });
     }
 
     // 前台默认入口：读该月最新快照，不重算。run=null 表示还没跑过，前端提示「立即重算」。

@@ -10,8 +10,19 @@ import { createClient } from "@supabase/supabase-js";
 /** 默认刷新最近 3 个「有已完成上传批次」的月份。 */
 const DEFAULT_LOOKBACK_MONTHS = 3;
 
+type PlanEntry = {
+  month: string;
+  run_id?: string;
+  remaining?: number;
+  skipped?: boolean;
+  reason?: string;
+  error?: string;
+};
+
 type RefreshResult = {
   months?: string[];
+  staged?: boolean;
+  plans?: PlanEntry[];
   results?: Array<{ month: string; ok: boolean; error?: string }>;
   error?: string;
 };
@@ -59,8 +70,10 @@ export const Route = createFileRoute("/api/public/hooks/attribution-cron")({
         }
 
         const startedAt = Date.now();
-        let payload: RefreshResult;
-        try {
+
+        // 重算由这里分步驱动：Edge Function 一次请求只做一件事（建分片 → 判一片 → 收尾），
+        // 因为它有 CPU 配额，整月二十几万个判定键一口气判完必然被掐断。
+        const call = async (body: Record<string, unknown>) => {
           const r = await fetch(`${supabaseUrl}/functions/v1/attribution-upload`, {
             method: "POST",
             headers: {
@@ -69,28 +82,63 @@ export const Route = createFileRoute("/api/public/hooks/attribution-cron")({
               apikey: anonKey,
               Authorization: `Bearer ${anonKey}`,
             },
-            body: JSON.stringify({
-              action: "refresh",
-              source: "CRON",
-              ...(months ? { months } : { lookback_months: lookback }),
-            }),
+            body: JSON.stringify(body),
           });
           const text = await r.text();
-          if (!r.ok) {
-            return new Response(
-              JSON.stringify({ error: `attribution-upload refresh failed: ${r.status}`, detail: text.slice(0, 800) }),
-              { status: 502, headers: { "Content-Type": "application/json" } },
-            );
+          if (!r.ok) throw new Error(`attribution-upload ${r.status}: ${text.slice(0, 400)}`);
+          return JSON.parse(text) as Record<string, unknown>;
+        };
+
+        let payload: RefreshResult;
+        const results: Array<{ month: string; ok: boolean; error?: string }> = [];
+        try {
+          payload = (await call({
+            action: "refresh",
+            source: "CRON",
+            ...(months ? { months } : { lookback_months: lookback }),
+          })) as RefreshResult;
+
+          for (const plan of payload.plans ?? []) {
+            if (plan.error) {
+              results.push({ month: plan.month, ok: false, error: plan.error });
+              continue;
+            }
+            if (plan.skipped || !plan.run_id) {
+              results.push({ month: plan.month, ok: true });
+              continue;
+            }
+            try {
+              for (let i = 0; i < 500; i++) {
+                const r = (await call({
+                  action: "refresh",
+                  source: "CRON",
+                  stage: "judge",
+                  run_id: plan.run_id,
+                  months: [plan.month],
+                })) as { done?: boolean; remaining?: number };
+                if (r.done || Number(r.remaining ?? 0) === 0) break;
+              }
+              await call({
+                action: "refresh",
+                source: "CRON",
+                stage: "finish",
+                run_id: plan.run_id,
+                months: [plan.month],
+              });
+              results.push({ month: plan.month, ok: true });
+            } catch (e) {
+              results.push({ month: plan.month, ok: false, error: (e as Error).message });
+            }
           }
-          payload = JSON.parse(text) as RefreshResult;
         } catch (e) {
           return new Response(JSON.stringify({ error: (e as Error).message }), {
             status: 500,
             headers: { "Content-Type": "application/json" },
           });
         }
+        payload.results = results;
 
-        const failed = (payload.results ?? []).filter((x) => !x.ok);
+        const failed = results.filter((x) => !x.ok);
         console.log(
           `[attribution-cron] refreshed ${(payload.results ?? []).length} month(s) in ${Date.now() - startedAt}ms` +
             (failed.length ? `, ${failed.length} failed` : ""),

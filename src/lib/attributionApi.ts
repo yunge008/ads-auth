@@ -323,28 +323,54 @@ export const snapshotApi = {
       results: Array<{ month: string; ok: boolean; skipped?: boolean; reason?: string; run?: RunMeta; error?: string }>;
     }>("attribution-upload", { action: "refresh", month, source }, { timeout: 600000 }),
   /**
-   * 后台重算 + 轮询。整月重算经常超过网关 150 秒 idle timeout，
-   * 这里让服务端立刻返回、后台继续跑，前端每 5 秒查一次快照状态。
+   * 分步驱动整月重算。
+   *
+   * 服务端一次请求只做一件事（建分片 → 判一片 → 收尾），由这里循环调用。
+   * 之所以不能让服务端一口气跑完：Edge Function 有 CPU 配额，整月二十几万个判定键
+   * 在一次调用里判完必然 `CPU Time exceeded`，进程被掐断、快照永远停在 RUNNING。
+   * 分片是按 (站点, 达人昵称) 切的，同一个达人不会被拆开，所以结果与一次性判定等价。
+   *
+   * onTick 收到的是「已判片数 / 剩余键数」，用来在页面上显示真实进度。
    */
-  refreshAsync: async (month: string, source = "MANUAL", onTick?: (secs: number) => void) => {
-    const before = await snapshotApi.runs(month, 1).catch(() => ({ runs: [] as RunMeta[] }));
-    const beforeId = before.runs?.[0]?.id ?? null;
-    await invokeFn<{ months: string[]; async?: boolean }>(
-      "attribution-upload",
-      { action: "refresh", month, source, async: true },
-      { timeout: 60000 },
-    );
-    const deadline = Date.now() + 20 * 60 * 1000;
-    for (let i = 0; Date.now() < deadline; i++) {
-      await new Promise((r) => setTimeout(r, 5000));
-      onTick?.(Math.round((i + 1) * 5));
-      const { runs } = await snapshotApi.runs(month, 1).catch(() => ({ runs: [] as RunMeta[] }));
-      const run = runs?.[0];
-      if (!run || run.id === beforeId) continue;
-      if (run.status === "READY") return run;
-      if (run.status === "FAILED") throw new Error(run.error ?? "快照重算失败");
+  refreshAsync: async (
+    month: string,
+    source = "MANUAL",
+    onTick?: (secs: number, progress?: { chunks: number; remaining: number }) => void,
+  ) => {
+    const t0 = Date.now();
+    const started = await invokeFn<{
+      staged?: boolean;
+      plans?: Array<{ month: string; run_id?: string; remaining?: number; skipped?: boolean; run?: RunMeta; error?: string }>;
+    }>("attribution-upload", { action: "refresh", month, source }, { timeout: 300000 });
+
+    const plan = started.plans?.[0];
+    if (plan?.error) throw new Error(plan.error);
+    if (plan?.skipped && plan.run) return plan.run;
+    const runId = plan?.run_id;
+    if (!runId) throw new Error("重算未能启动（没有拿到 run_id）");
+
+    let chunks = 0;
+    let remaining = Number(plan.remaining ?? 0);
+    // 上限只是兜底，正常情况下每片必然会让 remaining 下降
+    for (let i = 0; i < 500; i++) {
+      const r = await invokeFn<{ done?: boolean; remaining?: number }>(
+        "attribution-upload",
+        { action: "refresh", month, source, stage: "judge", run_id: runId },
+        { timeout: 300000 },
+      );
+      chunks++;
+      remaining = Number(r.remaining ?? 0);
+      onTick?.(Math.round((Date.now() - t0) / 1000), { chunks, remaining });
+      if (r.done || remaining === 0) break;
     }
-    throw new Error("快照重算超时，请稍后在月度进度页查看结果");
+
+    const fin = await invokeFn<{ run?: RunMeta }>(
+      "attribution-upload",
+      { action: "refresh", month, source, stage: "finish", run_id: runId },
+      { timeout: 300000 },
+    );
+    if (!fin.run) throw new Error("重算收尾失败：没有返回快照");
+    return fin.run;
   },
   /** 从快照明细表下钻，不重算。 */
   detail: (p: { run_id?: string; month?: string; detail_for: DrillFilter }) =>
