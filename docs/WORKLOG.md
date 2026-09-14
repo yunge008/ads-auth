@@ -1,5 +1,7 @@
 # 完工日志（只追加，不修改历史行）
 
+2026-09-14 | lovable | 执行 migration 20260914120000_finalize_chunked.sql，新增 attribution_clear_upload_agg / attribution_build_upload_agg_part / attribution_finalize_mark 三个 service_role 分片归并函数；重新部署 attribution-upload Edge Function 使大文件分片 finalize 生效 | supabase/migrations/20260914120000_finalize_chunked.sql, supabase/functions/attribution-upload/index.ts, src/lib/version.ts, docs/WORKLOG.md
+
 格式：`日期 | 工具 | 改了什么 | 涉及文件`
 
 2026-09-14 | lovable | 重新部署 Edge Function attribution-upload（代码已含最新共享逻辑），版本号改为 0914.052 | supabase/functions/attribution-upload/index.ts, src/lib/version.ts, docs/WORKLOG.md
