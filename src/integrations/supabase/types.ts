@@ -1731,6 +1731,19 @@ export type Database = {
         Args: { _country: string; _run_id: string }
         Returns: Json
       }
+      attribution_vid_summary_count: {
+        Args: { _month: string }
+        Returns: number
+      }
+      attribution_vid_summary_json: {
+        Args: {
+          _limit?: number
+          _month: string
+          _offset?: number
+          _run_id?: string
+        }
+        Returns: Json
+      }
       attribution_write_run_keys: {
         Args: { _rows: Json; _run_id: string }
         Returns: number
