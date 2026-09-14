@@ -167,34 +167,6 @@ async function fetchAgg(db: ReturnType<typeof admin>, uploadIds: string[]): Prom
   return out;
 }
 
-/** 流式读归并行：整月可能有几十万行，逐页处理完就丢，不整块驻留内存。 */
-async function streamAgg(
-  db: ReturnType<typeof admin>,
-  uploadIds: string[],
-  onPage: (rows: AggRow[]) => void,
-): Promise<number> {
-  let total = 0;
-  for (let i = 0; i < uploadIds.length; i += 50) {
-    const ids = uploadIds.slice(i, i + 50);
-    let from = 0;
-    for (;;) {
-      const { data, error } = await db
-        .from("ad_upload_agg")
-        .select(AGG_COLUMNS)
-        .in("upload_id", ids)
-        .order("id", { ascending: true })
-        .range(from, from + PAGE - 1);
-      if (error) throw new Error(error.message);
-      const rows = (data ?? []) as AggRow[];
-      onPage(rows);
-      total += rows.length;
-      if (rows.length < PAGE) break;
-      from += PAGE;
-    }
-  }
-  return total;
-}
-
 /** 从某次快照里取「无建联」明细（已按 GMV 降序，取前 cap 行足够做诊断）。 */
 async function fetchRunUnmatched(
   db: ReturnType<typeof admin>,
@@ -1307,113 +1279,29 @@ Deno.serve(async (req) => {
       if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("month 格式应为 YYYY-MM");
       const uploads = await readyUploads(db, month);
       if (!uploads.length) throw new Error(`没有 ${month} 已完成上传的批次`);
-      type Group = {
-        country: string;
-        vid: string;
-        product_id: string;
-        gmvUsd: number;
-        costUsd: number;
-        orders: number;
-        impressions: number;
-        clicks: number;
-        accountNameCounts: Map<string, number>;
-      };
-      const groups = new Map<string, Group>();
-      const consume = (r: AggRow) => {
-        // 归并层已按当时的后台汇率折好美元，这里直接相加，不再做汇率分支
-        const key = `${r.country}|${r.vid}|${r.product_id ?? ""}`;
-        let g = groups.get(key);
-        if (!g) {
-          g = {
-            country: r.country, vid: r.vid, product_id: r.product_id ?? "",
-            gmvUsd: 0, costUsd: 0, orders: 0, impressions: 0, clicks: 0, accountNameCounts: new Map(),
-          };
-          groups.set(key, g);
-        }
-        g.gmvUsd += num(r.gmv_usd);
-        g.costUsd += num(r.cost_usd);
-        g.orders += Math.round(num(r.orders));
-        g.impressions += Math.round(num(r.impressions));
-        g.clicks += Math.round(num(r.clicks));
-        const name = (r.account_name ?? "").trim() || "（无账号）";
-        g.accountNameCounts.set(name, (g.accountNameCounts.get(name) ?? 0) + (r.rows_count || 1));
-      };
-      await streamAgg(db, uploads.map((u) => u.id), (page) => {
-        for (const r of page) consume(r);
+
+      // 聚合全部在数据库里做。以前是把整月归并行（25 万组）分页拉进来再用 JS 聚合——
+      // 250 多次往返加上 25 万行 JS 聚合，会被超时/CPU 掐断，前端只看到
+      // 「Failed to send a request to the Edge Function」。
+      const run = await latestRun(db, month);
+      const { data: cnt, error: cntErr } = await db.rpc("attribution_vid_summary_count", { _month: month });
+      if (cntErr) throw new Error(`统计导出行数失败：${cntErr.message}`);
+      const expected = Number(cnt ?? 0);
+
+      // 一次只回一页，由客户端翻页拼装。整月二十几万行一次性返回是几十 MB，
+      // Edge Function 扛不住、响应也可能被截断；分页之后每个请求都是小活儿。
+      const limit = Math.max(1, Math.min(20000, Math.round(num(body.limit)) || 20000));
+      const offset = Math.max(0, Math.round(num(body.offset)));
+      const { data, error } = await db.rpc("attribution_vid_summary_json", {
+        _month: month,
+        _run_id: run?.id ?? null,
+        _limit: limit,
+        _offset: offset,
       });
-
-      const productIds = Array.from(new Set(Array.from(groups.values()).map((g) => g.product_id).filter(Boolean)));
-      const skuByKey = new Map<string, string>();
-      if (productIds.length) {
-        const CHUNK = 500;
-        for (let i = 0; i < productIds.length; i += CHUNK) {
-          const { data: skuRows, error: skuErr } = await db
-            .from("sku_product_map")
-            .select("country, product_id, merchant_sku")
-            .in("product_id", productIds.slice(i, i + CHUNK));
-          if (skuErr) throw new Error(skuErr.message);
-          for (const r of (skuRows ?? []) as { country: string; product_id: string; merchant_sku: string }[]) {
-            const key = `${r.country}|${r.product_id}`;
-            if (!skuByKey.has(key)) skuByKey.set(key, r.merchant_sku ?? "");
-          }
-        }
-      }
-
-      // 归属人从该月最新快照的判定键里取（判定键口径 = 站点 × VID × 达人昵称 × 内容类型，
-      // 这里按 站点|VID 取 GMV 最大的那条，导出粒度是 站点×VID×商品ID，天然会有多个内容类型）。
-      // 没有快照就留空，导出仍然可用，只是没有归属列。
-      const ownerByVid = new Map<string, { staff: string; role: string; match: string; bucket: string }>();
-      {
-        const run = await latestRun(db, month);
-        if (run) {
-          const { data, error } = await db.rpc("attribution_run_owner_by_vid", { _run_id: run.id });
-          if (error) throw new Error(`读取归属失败：${error.message}`);
-          for (const r of (data ?? []) as Array<Record<string, unknown>>) {
-            ownerByVid.set(`${str(r.country)}|${str(r.vid)}`, {
-              staff: str(r.staff),
-              role: str(r.role) === "EDITOR" ? "剪辑" : str(r.role) === "BD" ? "BD" : "",
-              match: str(r.match_type),
-              bucket: str(r.bucket),
-            });
-          }
-        }
-      }
-      const BUCKET_LABEL: Record<string, string> = {
-        STAFF: "归到人",
-        PRODUCT_CARD: "商品卡片",
-        OTHER: "其他类型",
-        UNMATCHED: "未建联达人",
-      };
-
-      const rowsOut = Array.from(groups.values()).map((g) => {
-        let bestName = "";
-        let bestCount = -1;
-        for (const [name, cnt] of g.accountNameCounts) {
-          if (cnt > bestCount) { bestName = name; bestCount = cnt; }
-        }
-        const own = ownerByVid.get(`${g.country}|${g.vid}`);
-        return {
-          country: g.country,
-          month,
-          vid: g.vid,
-          account_name: bestName,
-          staff: own?.staff ?? "",
-          role: own?.role ?? "",
-          bucket: own ? (BUCKET_LABEL[own.bucket] ?? own.bucket) : "",
-          match_type: own?.match ?? "",
-          product_id: g.product_id,
-          sku: skuByKey.get(`${g.country}|${g.product_id}`) ?? "",
-          gmv: g.gmvUsd,
-          cost: g.costUsd,
-          orders: g.orders,
-          roi: g.costUsd > 0 ? g.gmvUsd / g.costUsd : null,
-          pv: g.impressions,
-          clicks: g.clicks,
-          ctr: g.impressions > 0 ? g.clicks / g.impressions : null,
-          cvr: g.clicks > 0 ? g.orders / g.clicks : null,
-        };
-      });
-      return json({ rows: rowsOut });
+      if (error) throw new Error(`导出汇总失败：${error.message}`);
+      const page = (data ?? []) as unknown[];
+      console.log(`export_vid_summary ${month}: 第 ${offset + 1}-${offset + page.length} 行 / 共 ${expected}`);
+      return json({ rows: page, total: expected, offset, run_id: run?.id ?? null, month });
     }
 
     // 12 个月无建联趋势：逐月现算（归并后每月只有几千行，够快），不再依赖已废弃的 attr_bucket

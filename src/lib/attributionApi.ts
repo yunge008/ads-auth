@@ -275,8 +275,33 @@ export const exchangeRateApi = {
 };
 
 export const exportApi = {
-  vidSummary: (month: string) =>
-    invokeFn<{ rows: VidSummaryRow[] }>("attribution-upload", { action: "export_vid_summary", month }, { timeout: 120000 }),
+  /**
+   * 唯一VID汇总。整月二十几万行，服务端一次只回一页（两万行），这里翻页拼完整。
+   * 以前是服务端把整月归并行拉进 Edge Function 用 JS 聚合，会被超时/CPU 掐断，
+   * 前端只看到「Failed to send a request to the Edge Function」。
+   */
+  vidSummary: async (month: string, onPage?: (got: number, total: number) => void) => {
+    const PAGE = 20000;
+    const rows: VidSummaryRow[] = [];
+    let total = 0;
+    for (let offset = 0; ; ) {
+      const r = await invokeFn<{ rows: VidSummaryRow[]; total?: number }>(
+        "attribution-upload",
+        { action: "export_vid_summary", month, limit: PAGE, offset },
+        { timeout: 300000 },
+      );
+      total = Number(r.total ?? 0);
+      const page = r.rows ?? [];
+      rows.push(...page);
+      onPage?.(rows.length, total);
+      if (!page.length || page.length < PAGE) break;
+      offset += page.length;
+    }
+    if (total && rows.length !== total) {
+      throw new Error(`导出行数不完整：应有 ${total} 行，实际取到 ${rows.length} 行`);
+    }
+    return { rows };
+  },
 };
 
 export type UnmatchedTrendRow = { country: string; account_name: string; total: number; by_month: Record<string, number> };

@@ -254,7 +254,10 @@ function MonthlyView() {
   const exportVidSummary = async () => {
     setBusy("export");
     try {
-      const { rows } = await exportApi.vidSummary(month);
+      const { rows } = await exportApi.vidSummary(month, (got, total) => {
+        if (total > 20000) toast.loading(`正在导出 ${got.toLocaleString()} / ${total.toLocaleString()} 行…`, { id: "vid-export" });
+      });
+      toast.dismiss("vid-export");
       if (!rows.length) { toast.warning("没有可导出的数据"); return; }
       const aoa = [
         VID_SUMMARY_HEADER,
