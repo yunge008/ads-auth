@@ -1,4 +1,5 @@
 // 上传状态矩阵：行=月份（新→旧），列=站点，格子=该站点该月的上传/归因状态。
+// 格子左侧的数字 = 该格已归因（READY）的文件数；状态文字始终按整格居中，不受数字宽度影响。
 // COUNTRY_ORDER 里的站点是固定列，即使一条上传记录都没有也保留列（格子留空），方便一眼看出哪个站点整月没传。
 import * as React from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -33,9 +34,13 @@ function countryRank(c: string): number {
   return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
 }
 
+function readyCountOf(rows: UploadRec[]): number {
+  return rows.filter((r) => r.status === "READY").length;
+}
+
 function cellStatus(rows: UploadRec[]): CellStatus {
   if (!rows.length) return "EMPTY";
-  const readyCount = rows.filter((r) => r.status === "READY").length;
+  const readyCount = readyCountOf(rows);
   if (readyCount === rows.length) return "READY";
   if (readyCount > 0) return "PARTIAL";
   if (rows.some((r) => r.status === "UPLOADING")) return "UPLOADING";
@@ -94,13 +99,21 @@ export function UploadStatusMatrix({ history }: { history: UploadRec[] }) {
                   const rows = byKey.get(`${c}|${m}`) ?? [];
                   const status = cellStatus(rows);
                   if (status === "EMPTY") return <TableCell key={c} className="text-center p-1" title="无上传记录" />;
-                  const title = rows.map((r) => `${r.file_name}：${r.status}${r.row_count ? `（${r.row_count}行）` : ""}`).join("\n");
+                  const ready = readyCountOf(rows);
+                  const title = [
+                    `已归因 ${ready} / 共 ${rows.length} 个文件`,
+                    ...rows.map((r) => `${r.file_name}：${r.status}${r.row_count ? `（${r.row_count}行）` : ""}`),
+                  ].join("\n");
                   return (
                     <TableCell key={c} className="text-center p-1">
+                      {/* 归因文件数绝对定位在左侧，状态文字仍按整格居中——数字位数变化不会把文字推偏 */}
                       <span
                         title={title}
-                        className={`inline-block w-full rounded px-1.5 py-1 text-[11px] whitespace-nowrap ${STATUS_CLASS[status]}`}
+                        className={`relative block w-full rounded px-1.5 py-1 text-[11px] whitespace-nowrap ${STATUS_CLASS[status]}`}
                       >
+                        <span className="absolute left-1.5 top-1/2 -translate-y-1/2 tabular-nums opacity-70">
+                          {ready}
+                        </span>
                         {STATUS_LABEL[status]}
                       </span>
                     </TableCell>
