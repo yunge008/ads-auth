@@ -407,6 +407,61 @@ const RUN_META_COLUMNS =
  * 归因本身仍然是按当下的飞书登记数据现算的，只是把结果固化下来供前台秒开；
  * 想要最新口径就再刷一次快照，不需要碰上传数据。
  */
+/**
+ * PostgREST 的服务端返回行数上限（Supabase 默认 1000 行）对 RPC 同样生效：
+ * 传 `_limit: 5000` 实际也只会回 1000 行。旧代码用「本页行数 < 请求的页大小」判断翻页结束，
+ * 第一页拿到 1000 行就被当成「已经读完了」——整月十几万个判定键只判了前 1000 个，
+ * 其余的键在 `attribution_apply_run` 的 LEFT JOIN 里被 `coalesce(k.bucket,'UNMATCHED')`
+ * 兜成无建联，表现就是「除了排序最靠前的那个站点，其它站点全部归不上」。
+ *
+ * 所以这里：页大小对齐服务端上限、按**实际返回行数**推进 offset、读到空页才结束，
+ * 最后与 `attribution_month_key_count` 对账——数量对不上直接报错，
+ * 绝不允许再生成一份静默缺数的快照。
+ */
+/**
+ * 同一个服务端行数上限也压在这些「一次返回汇总」的 RPC 上。它们正常只有几百行，
+ * 一旦真的顶到上限，返回的就是一份**少算了钱**的汇总——那种错比直接报错危险得多，
+ * 所以这里宁可失败：真撞上了就把对应 RPC 也改成分页读。
+ */
+function assertNotCapped(label: string, rows: unknown[]): void {
+  if (rows.length >= KEY_PAGE) {
+    throw new Error(`${label} 返回 ${rows.length} 行，已顶到服务端单次返回上限，结果可能不完整，已中止`);
+  }
+}
+
+const KEY_PAGE = 1000;
+
+type MonthKeyRow = {
+  country: string;
+  vid: string;
+  account_name: string;
+  creative_type: string;
+  posted_at: string | null;
+};
+
+async function fetchMonthKeys(db: ReturnType<typeof admin>, month: string): Promise<MonthKeyRow[]> {
+  const keys: MonthKeyRow[] = [];
+  for (let offset = 0; ; ) {
+    const { data, error } = await db.rpc("attribution_month_keys", {
+      _month: month,
+      _limit: KEY_PAGE,
+      _offset: offset,
+    });
+    if (error) throw new Error(`读取判定键失败：${error.message}`);
+    const page = (data ?? []) as MonthKeyRow[];
+    if (!page.length) break;
+    keys.push(...page);
+    offset += page.length;
+  }
+  const { data: cnt, error: cntErr } = await db.rpc("attribution_month_key_count", { _month: month });
+  if (cntErr) throw new Error(`判定键计数失败：${cntErr.message}`);
+  const expected = Number(cnt ?? 0);
+  if (expected !== keys.length) {
+    throw new Error(`判定键读取不完整：数据库里有 ${expected} 个，实际只读到 ${keys.length} 个，已中止以免生成缺数的快照`);
+  }
+  return keys;
+}
+
 async function buildSnapshot(
   db: ReturnType<typeof admin>,
   month: string,
@@ -448,22 +503,7 @@ async function buildSnapshot(
     // ---- 1) 拉「需要判定的去重键」----
     // 判定只跟 (站点, VID, 达人昵称, 内容类型) 有关，跟商品ID/币种/金额无关，
     // 所以这里的行数比归并表小一个量级——整月几十万归并行通常只有几万个判定键。
-    type KeyRow = { country: string; vid: string; account_name: string; creative_type: string; posted_at: string | null };
-    const keys: KeyRow[] = [];
-    if (uploads.length) {
-      const KEY_PAGE = 5000;
-      for (let offset = 0; ; offset += KEY_PAGE) {
-        const { data, error } = await db.rpc("attribution_month_keys", {
-          _month: month,
-          _limit: KEY_PAGE,
-          _offset: offset,
-        });
-        if (error) throw new Error(`读取判定键失败：${error.message}`);
-        const page = (data ?? []) as KeyRow[];
-        keys.push(...page);
-        if (page.length < KEY_PAGE) break;
-      }
-    }
+    const keys: MonthKeyRow[] = uploads.length ? await fetchMonthKeys(db, month) : [];
     const tKeys = Date.now();
     console.log(`buildSnapshot ${month}: ${uploads.length} 个批次 / ${keys.length} 个判定键，读取耗时 ${tKeys - t0}ms`);
 
@@ -536,6 +576,7 @@ async function buildSnapshot(
     });
     if (applyErr) throw new Error(`聚合失败：${applyErr.message}`);
     const compact = (compactData ?? []) as CompactRow[];
+    assertNotCapped("attribution_apply_run 紧凑汇总", compact);
     console.log(`buildSnapshot ${month}: 聚合耗时 ${Date.now() - tWrite}ms，紧凑汇总 ${compact.length} 行`);
 
     const { data: topData, error: topErr } = await db.rpc("attribution_run_unmatched_top", {
@@ -553,10 +594,12 @@ async function buildSnapshot(
     const { data: distinctData, error: distinctErr } = await db.rpc("attribution_run_distinct", { _run_id: runId });
     if (distinctErr) throw new Error(`去重计数失败：${distinctErr.message}`);
     const distinct = (distinctData ?? []) as DistinctRow[];
+    assertNotCapped("attribution_run_distinct 去重计数", distinct);
 
     // 内容类型占比（商品卡 / 直播 / 视频 / 其他 × 站点），所有行都入库，这里只是分类汇总
     const { data: byTypeData, error: byTypeErr } = await db.rpc("attribution_run_by_type", { _run_id: runId });
     if (byTypeErr) throw new Error(`内容类型汇总失败：${byTypeErr.message}`);
+    assertNotCapped("attribution_run_by_type 内容类型汇总", (byTypeData ?? []) as unknown[]);
     const byType = ((byTypeData ?? []) as Array<Record<string, unknown>>).map((r) => ({
       country: str(r.country),
       creative_type: str(r.creative_type),
@@ -1272,17 +1315,9 @@ Deno.serve(async (req) => {
       const total = emptyLayer();
       const bySite = new Map<string, Layer>();
 
-      type KeyRow = { country: string; vid: string; account_name: string; creative_type: string };
       if (uploads.length) {
-        const KEY_PAGE = 5000;
-        for (let offset = 0; ; offset += KEY_PAGE) {
-          const { data, error } = await db.rpc("attribution_month_keys", {
-            _month: month,
-            _limit: KEY_PAGE,
-            _offset: offset,
-          });
-          if (error) throw new Error(`读取判定键失败：${error.message}`);
-          const page = (data ?? []) as KeyRow[];
+        {
+          const page = await fetchMonthKeys(db, month);
           for (const r of page) {
             const site = r.country || "（空）";
             const layer = bySite.get(site) ?? emptyLayer();
@@ -1332,7 +1367,6 @@ Deno.serve(async (req) => {
               bump("name_never_registered");
             }
           }
-          if (page.length < KEY_PAGE) break;
         }
       }
 
