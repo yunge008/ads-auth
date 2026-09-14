@@ -283,10 +283,11 @@ export const exportApi = {
   vidSummary: async (month: string, onPage?: (got: number) => void) => {
     const PAGE = 5000;
     type Cursor = { country: string; vid: string; product_id: string } | null;
+    type Page = { rows: VidSummaryRow[]; next_cursor: Cursor };
     const rows: VidSummaryRow[] = [];
     let cursor: Cursor = null;
     for (;;) {
-      const r = await invokeFn<{ rows: VidSummaryRow[]; next_cursor: Cursor }>(
+      const r: Page = await invokeFn<Page>(
         "attribution-upload",
         {
           action: "export_vid_summary",
