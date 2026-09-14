@@ -15,12 +15,15 @@ export type ReportView = {
   /** 最近一次读取快照的时间，用于展示「数据取自 …」 */
   loadedAt: number | null;
   detail: { rows: DetailRow[]; title: string } | null;
+  /** 重算进行中也放这里：切 TAB/切路由回来进度还在（重算的轮询回调会一直 patch 这个字段） */
+  refreshing: boolean;
+  refreshSecs: number;
 };
 
 const SS_KEY = "tt_attr_view_v1";
 
 function emptyView(): ReportView {
-  return { month: lastMonth(), report: null, run: null, loadedAt: null, detail: null };
+  return { month: lastMonth(), report: null, run: null, loadedAt: null, detail: null, refreshing: false, refreshSecs: 0 };
 }
 
 let state: Record<ViewKey, ReportView> = {
