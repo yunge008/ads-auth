@@ -491,6 +491,7 @@ export type Database = {
       attribution_run_candidates: {
         Row: {
           account_name: string
+          chunk_no: number
           country: string
           creative_type: string
           posted_at: string | null
@@ -500,6 +501,7 @@ export type Database = {
         }
         Insert: {
           account_name?: string
+          chunk_no?: number
           country?: string
           creative_type?: string
           posted_at?: string | null
@@ -509,6 +511,7 @@ export type Database = {
         }
         Update: {
           account_name?: string
+          chunk_no?: number
           country?: string
           creative_type?: string
           posted_at?: string | null
@@ -1553,12 +1556,12 @@ export type Database = {
           raw_rows: number
         }[]
       }
-      attribution_candidate_keys_json: {
-        Args: { _limit?: number; _offset?: number; _run_id: string }
-        Returns: Json
-      }
       attribution_clear_upload_agg: {
         Args: { _upload_id: string }
+        Returns: number
+      }
+      attribution_drop_chunk: {
+        Args: { _chunk: number; _country: string; _run_id: string }
         Returns: number
       }
       attribution_finalize_mark: {
@@ -1621,6 +1624,7 @@ export type Database = {
           scope: string
         }[]
       }
+      attribution_next_chunk_json: { Args: { _run_id: string }; Returns: Json }
       attribution_norm_creative_type: {
         Args: { _raw: string }
         Returns: string
@@ -1680,11 +1684,8 @@ export type Database = {
         Returns: number
       }
       attribution_seed_run_keys: {
-        Args: { _month: string; _run_id: string }
-        Returns: {
-          candidates: number
-          seeded: number
-        }[]
+        Args: { _chunk_size?: number; _month: string; _run_id: string }
+        Returns: Json
       }
       attribution_unmatched_trend: {
         Args: { _months: string[] }
@@ -1704,6 +1705,10 @@ export type Database = {
         Returns: number
       }
       attribution_uploads_delete_all: { Args: never; Returns: number }
+      attribution_vid_regs_for_country: {
+        Args: { _country: string; _run_id: string }
+        Returns: Json
+      }
       attribution_write_run_keys: {
         Args: { _rows: Json; _run_id: string }
         Returns: number
