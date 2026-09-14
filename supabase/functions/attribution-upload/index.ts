@@ -434,8 +434,10 @@ function assertNotCapped(label: string, rows: unknown[]): void {
  * 而整个归并是一个事务，超时即回滚，重试多少次都一样。超过阈值就拆片，由客户端逐片驱动。
  */
 const FINALIZE_CHUNK_THRESHOLD = 20000;
-const FINALIZE_ROWS_PER_PART = 20000;
-const FINALIZE_MAX_PARTS = 32;
+// 每片承载的行数调小：单次请求只有 150 秒 idle 预算，片越小越不容易撞上网关超时
+const FINALIZE_ROWS_PER_PART = 10000;
+const FINALIZE_MAX_PARTS = 48;
+
 
 const KEY_PAGE = 1000;
 
