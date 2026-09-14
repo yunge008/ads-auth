@@ -1693,6 +1693,7 @@ export type Database = {
         Args: { _limit?: number; _run_id: string }
         Returns: {
           account_name: string
+          country: string
           gmv: number
           rows_count: number
         }[]
