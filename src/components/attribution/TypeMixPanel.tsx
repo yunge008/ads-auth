@@ -16,9 +16,11 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 export function TypeMixPanel({ rows }: { rows: TypeMixRow[] }) {
-  const { countries, cellGmv, typeTotal, grand } = React.useMemo(() => {
+  const { countries, cellGmv, cellRows, typeTotal, typeRows, grand } = React.useMemo(() => {
     const cellGmv = new Map<string, number>();
+    const cellRows = new Map<string, number>();
     const typeTotal = new Map<string, number>();
+    const typeRows = new Map<string, number>();
     const countrySet = new Set<string>();
     let grand = 0;
     for (const r of rows) {
@@ -26,7 +28,9 @@ export function TypeMixPanel({ rows }: { rows: TypeMixRow[] }) {
       const type = TYPE_ORDER.includes(r.creative_type as (typeof TYPE_ORDER)[number]) ? r.creative_type : "other";
       countrySet.add(country);
       cellGmv.set(`${country}|${type}`, (cellGmv.get(`${country}|${type}`) ?? 0) + r.gmv);
+      cellRows.set(`${country}|${type}`, (cellRows.get(`${country}|${type}`) ?? 0) + (r.rows ?? 0));
       typeTotal.set(type, (typeTotal.get(type) ?? 0) + r.gmv);
+      typeRows.set(type, (typeRows.get(type) ?? 0) + (r.rows ?? 0));
       grand += r.gmv;
     }
     // 按 GMV 降序排站点，大盘在最上面
@@ -36,7 +40,7 @@ export function TypeMixPanel({ rows }: { rows: TypeMixRow[] }) {
       byCountry.set(country, (byCountry.get(country) ?? 0) + v);
     }
     const countries = Array.from(countrySet).sort((a, b) => (byCountry.get(b) ?? 0) - (byCountry.get(a) ?? 0));
-    return { countries, cellGmv, typeTotal, grand };
+    return { countries, cellGmv, cellRows, typeTotal, typeRows, grand };
   }, [rows]);
 
   if (!rows.length) return null;
@@ -49,7 +53,8 @@ export function TypeMixPanel({ rows }: { rows: TypeMixRow[] }) {
         <CardTitle className="text-base">内容类型占比</CardTitle>
         <p className="text-xs text-muted-foreground">
           广告表的每一行都入库，只是分类不同：视频按 VID + 达人昵称归因、直播只按达人昵称归 BD、
-          商品卡与其他不归人但金额照样统计。下表是各站点的 GMV（USD）分布，括号内为该站点内部占比。
+          商品卡与其他不归人但金额照样统计。下表是各站点的 GMV（USD）分布，括号内为该站点内部占比，灰色小字是素材数。
+          「图片」以及其它认不出的创意类型都归入**其他**——这类素材通常没有 GMV，所以金额是 0，但素材数不为 0，看素材数才能确认它们确实进来了。
         </p>
       </CardHeader>
       <CardContent>
@@ -73,11 +78,13 @@ export function TypeMixPanel({ rows }: { rows: TypeMixRow[] }) {
                     <TableCell className="text-right tabular-nums font-semibold">${fmtUsd(total)}</TableCell>
                     {TYPE_ORDER.map((t) => {
                       const v = cellGmv.get(`${c}|${t}`) ?? 0;
+                      const n = cellRows.get(`${c}|${t}`) ?? 0;
                       return (
                         <TableCell key={t} className="text-right tabular-nums text-xs whitespace-nowrap">
                           <div>${fmtUsd(v)}</div>
                           <div className="text-[11px] text-muted-foreground">
                             {total > 0 ? fmtPct(v / total) : "—"}
+                            {n ? ` · ${n.toLocaleString()} 条` : ""}
                           </div>
                         </TableCell>
                       );
@@ -90,10 +97,14 @@ export function TypeMixPanel({ rows }: { rows: TypeMixRow[] }) {
                 <TableCell className="text-right tabular-nums">${fmtUsd(grand)}</TableCell>
                 {TYPE_ORDER.map((t) => {
                   const v = typeTotal.get(t) ?? 0;
+                  const n = typeRows.get(t) ?? 0;
                   return (
                     <TableCell key={t} className="text-right tabular-nums text-xs whitespace-nowrap">
                       <div>${fmtUsd(v)}</div>
-                      <div className="text-[11px] text-muted-foreground">{grand > 0 ? fmtPct(v / grand) : "—"}</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {grand > 0 ? fmtPct(v / grand) : "—"}
+                        {n ? ` · ${n.toLocaleString()} 条` : ""}
+                      </div>
                     </TableCell>
                   );
                 })}

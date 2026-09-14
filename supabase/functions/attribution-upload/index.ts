@@ -688,7 +688,8 @@ async function snapshotFinish(
       _limit: 200,
     });
     if (topErr) throw new Error(topErr.message);
-    const unmatchedTop = ((topData ?? []) as Array<{ account_name: string; gmv: number; rows_count: number }>).map((r) => ({
+    const unmatchedTop = ((topData ?? []) as Array<{ country?: string; account_name: string; gmv: number; rows_count: number }>).map((r) => ({
+      country: str(r.country),
       account_name: r.account_name,
       gmv: num(r.gmv),
       rows: num(r.rows_count),

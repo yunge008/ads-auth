@@ -112,9 +112,10 @@ export function ProgressBoard({
       {mode === "admin" && report.unmatched.top.length ? (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">
-              无建联达人（按 GMV 降序，共 {report.unmatched.top.length} 个，供补建联参考）
-            </CardTitle>
+            {/* 注意：下面渲染的是 UnmatchedTrendTable（该月全部无建联达人 + 12 个月趋势），
+                不是 report.unmatched.top（那份只有 GMV 最高的 200 个）。
+                标题以前写「共 200 个」，与实际显示的内容对不上，看起来像被截断了。 */}
+            <CardTitle className="text-sm">无建联达人（供补建联参考）</CardTitle>
           </CardHeader>
           <CardContent>
             {report.month ? (
@@ -124,6 +125,7 @@ export function ProgressBoard({
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead>站点</TableHead>
                       <TableHead>达人昵称</TableHead>
                       <TableHead className="text-right">当月 GMV</TableHead>
                       <TableHead className="text-right">行数</TableHead>
@@ -131,7 +133,8 @@ export function ProgressBoard({
                   </TableHeader>
                   <TableBody>
                     {report.unmatched.top.map((t) => (
-                      <TableRow key={t.account_name}>
+                      <TableRow key={`${t.country ?? ""}|${t.account_name}`}>
+                        <TableCell className="text-xs">{t.country || "—"}</TableCell>
                         <TableCell className="text-xs">{t.account_name}</TableCell>
                         <TableCell className="text-right tabular-nums text-xs">${fmtUsd(t.gmv)}</TableCell>
                         <TableCell className="text-right tabular-nums text-xs">{t.rows}</TableCell>

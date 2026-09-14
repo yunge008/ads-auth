@@ -318,7 +318,7 @@ export type AttributionReport = {
   product_card: BucketAgg;
   /** 无法识别的创意类型（不归人，但金额照样统计） */
   other: BucketAgg;
-  unmatched: BucketAgg & { top: Array<{ account_name: string; gmv: number; rows: number }> };
+  unmatched: BucketAgg & { top: Array<{ country?: string; account_name: string; gmv: number; rows: number }> };
   /**
    * 每个非美元币种一行。`usd_rate` 为 null = 缺汇率、这些行未计入任何汇总；
    * 有值 = 已按 本币/usd_rate 折美元并计入，`gmv_usd` 是折算后的金额，供人工核对量级。
@@ -564,7 +564,7 @@ export function buildReportFromCompact(
     targets?: TargetMap;
     staffMeta?: StaffMeta;
     exchangeRates?: ExchangeRateMap;
-    unmatchedTop?: Array<{ account_name: string; gmv: number; rows: number }>;
+    unmatchedTop?: Array<{ country?: string; account_name: string; gmv: number; rows: number }>;
     /** 数据库按「只按同事+国家」口径算出的精确去重数（CELL / STAFF / TOTAL 三个粒度） */
     distinct?: DistinctRow[];
   },
