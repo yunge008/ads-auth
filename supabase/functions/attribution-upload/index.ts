@@ -1284,9 +1284,15 @@ Deno.serve(async (req) => {
       // 250 多次往返加上 25 万行 JS 聚合，会被超时/CPU 掐断，前端只看到
       // 「Failed to send a request to the Edge Function」。
       const run = await latestRun(db, month);
-      const { data: cnt, error: cntErr } = await db.rpc("attribution_vid_summary_count", { _month: month });
-      if (cntErr) throw new Error(`统计导出行数失败：${cntErr.message}`);
-      const expected = Number(cnt ?? 0);
+      // 总行数只在第一页算一次；大月份这条 count 也可能被语句超时掐断——
+      // 它只是给前端显示进度用的，算不出来就当未知（0），不要因此让整个导出失败。
+      const offset0 = Math.max(0, Math.round(num(body.offset)));
+      let expected = 0;
+      if (offset0 === 0) {
+        const { data: cnt, error: cntErr } = await db.rpc("attribution_vid_summary_count", { _month: month });
+        if (cntErr) console.warn(`统计导出行数失败（忽略）：${cntErr.message}`);
+        else expected = Number(cnt ?? 0);
+      }
 
       // 一次只回一页，由客户端翻页拼装。整月二十几万行一次性返回是几十 MB，
       // Edge Function 扛不住、响应也可能被截断；分页之后每个请求都是小活儿。
