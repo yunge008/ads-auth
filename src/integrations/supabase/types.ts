@@ -1667,6 +1667,28 @@ export type Database = {
           vids: number
         }[]
       }
+      attribution_run_owner_by_vid: {
+        Args: { _run_id: string }
+        Returns: {
+          bucket: string
+          country: string
+          gmv_usd: number
+          match_type: string
+          role: string
+          staff: string
+          vid: string
+        }[]
+      }
+      attribution_run_unmatched_by_creator: {
+        Args: { _run_id: string }
+        Returns: {
+          account_name: string
+          country: string
+          gmv_usd: number
+          name_norm: string
+          rows_count: number
+        }[]
+      }
       attribution_run_unmatched_top: {
         Args: { _limit?: number; _run_id: string }
         Returns: {
