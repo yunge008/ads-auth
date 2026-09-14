@@ -204,29 +204,41 @@ export const uploadApi = {
    */
   finalize: async (upload_id: string, onPart?: (done: number, total: number) => void) => {
     type Res = { row_count?: number; agg_rows?: number; staged?: boolean; parts?: number };
-    const start = await invokeFn<Res>(
-      "attribution-upload",
-      { action: "finalize", upload_id },
-      { timeout: 300000 },
-    );
+    // 网关 150 秒 idle timeout / 502 / 网络瞬断都可能打断某一片。
+    // 三步都是幂等的（清理→按片 ON CONFLICT DO NOTHING→收尾重算合计），失败重发同一请求是安全的。
+    const call = async <T>(body: Record<string, unknown>): Promise<T> => {
+      let lastErr: unknown;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          return await invokeFn<T>("attribution-upload", body, { timeout: 300000 });
+        } catch (e) {
+          lastErr = e;
+          const msg = (e as Error).message ?? "";
+          // 汇率缺失、批次不存在这类业务错误立即抛出，不要白等
+          const retryable = /504|502|503|timeout|IDLE_TIMEOUT|Failed to fetch|network/i.test(msg);
+          if (!retryable || attempt === 2) break;
+          await new Promise((r) => setTimeout(r, 2000 * 2 ** attempt));
+        }
+      }
+      throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+    };
+
+    const start = await call<Res>({ action: "finalize", upload_id });
     if (!start.staged) return start as { row_count: number; agg_rows?: number };
 
     const parts = Math.max(1, Number(start.parts ?? 1));
     for (let part = 0; part < parts; part++) {
       onPart?.(part, parts);
-      await invokeFn<Res>(
-        "attribution-upload",
-        { action: "finalize", upload_id, stage: "part", parts, part },
-        { timeout: 300000 },
-      );
+      await call<Res>({ action: "finalize", upload_id, stage: "part", parts, part });
     }
     onPart?.(parts, parts);
-    return await invokeFn<{ row_count: number; agg_rows?: number }>(
-      "attribution-upload",
-      { action: "finalize", upload_id, stage: "mark" },
-      { timeout: 300000 },
-    );
+    return await call<{ row_count: number; agg_rows?: number }>({
+      action: "finalize",
+      upload_id,
+      stage: "mark",
+    });
   },
+
   list: (month?: string) => invokeFn<{ uploads: UploadRec[] }>("attribution-upload", { action: "list", month }),
   get: (p: { upload_id?: string; month?: string; merged?: boolean; detail_for?: DrillFilter }) =>
     invokeFn<{
