@@ -488,6 +488,47 @@ export type Database = {
         }
         Relationships: []
       }
+      attribution_run_candidates: {
+        Row: {
+          account_name: string
+          chunk_no: number
+          country: string
+          creative_type: string
+          posted_at: string | null
+          run_id: string
+          seq: number
+          vid: string
+        }
+        Insert: {
+          account_name?: string
+          chunk_no?: number
+          country?: string
+          creative_type?: string
+          posted_at?: string | null
+          run_id: string
+          seq?: number
+          vid?: string
+        }
+        Update: {
+          account_name?: string
+          chunk_no?: number
+          country?: string
+          creative_type?: string
+          posted_at?: string | null
+          run_id?: string
+          seq?: number
+          vid?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "attribution_run_candidates_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "attribution_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       attribution_run_keys: {
         Row: {
           account_name: string
@@ -1519,6 +1560,10 @@ export type Database = {
         Args: { _upload_id: string }
         Returns: number
       }
+      attribution_drop_chunk: {
+        Args: { _chunk: number; _country: string; _run_id: string }
+        Returns: number
+      }
       attribution_finalize_mark: {
         Args: { _upload_id: string }
         Returns: {
@@ -1550,6 +1595,18 @@ export type Database = {
           vid: string
         }[]
       }
+      attribution_month_keys_ext: {
+        Args: { _month: string }
+        Returns: {
+          account_name: string
+          country: string
+          creative_type: string
+          ctype: string
+          is_candidate: boolean
+          posted_at: string
+          vid: string
+        }[]
+      }
       attribution_month_keys_json: {
         Args: { _limit?: number; _month: string; _offset?: number }
         Returns: Json
@@ -1567,6 +1624,13 @@ export type Database = {
           scope: string
         }[]
       }
+      attribution_next_chunk_json: { Args: { _run_id: string }; Returns: Json }
+      attribution_norm_creative_type: {
+        Args: { _raw: string }
+        Returns: string
+      }
+      attribution_norm_name: { Args: { _s: string }; Returns: string }
+      attribution_norm_site: { Args: { _s: string }; Returns: string }
       attribution_rebuild_agg_usd: { Args: { _month: string }; Returns: number }
       attribution_registry_matrix: {
         Args: never
@@ -1619,6 +1683,10 @@ export type Database = {
         Args: { _keep?: number; _month: string }
         Returns: number
       }
+      attribution_seed_run_keys: {
+        Args: { _chunk_size?: number; _month: string; _run_id: string }
+        Returns: Json
+      }
       attribution_unmatched_trend: {
         Args: { _months: string[] }
         Returns: {
@@ -1637,6 +1705,10 @@ export type Database = {
         Returns: number
       }
       attribution_uploads_delete_all: { Args: never; Returns: number }
+      attribution_vid_regs_for_country: {
+        Args: { _country: string; _run_id: string }
+        Returns: Json
+      }
       attribution_write_run_keys: {
         Args: { _rows: Json; _run_id: string }
         Returns: number
