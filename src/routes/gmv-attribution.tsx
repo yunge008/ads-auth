@@ -38,12 +38,9 @@ function GmvAttributionPage() {
     attributionView.getServerSnapshot,
   );
   const view = views.user;
-  const { month, report, run } = view;
+  const { month, report, run, refreshing, refreshSecs } = view;
   const setMonth = (m: string) => attributionView.patch("user", { month: m });
   const [loading, setLoading] = React.useState(false);
-  const [refreshing, setRefreshing] = React.useState(false);
-  /** 重算已等待秒数，让用户知道没卡死 */
-  const [refreshSecs, setRefreshSecs] = React.useState(0);
 
   /** 默认读最新快照（秒开），不做即时全量重算。 */
   const load = React.useCallback(async (m: string) => {
@@ -63,16 +60,15 @@ function GmvAttributionPage() {
   /** 手动重算：按当下的飞书登记数据重跑该月全站点全人员归因，生成一条新快照。 */
   const refresh = async () => {
     if (!/^\d{4}-\d{2}$/.test(month)) return;
-    setRefreshing(true);
-    setRefreshSecs(0);
+    attributionView.patch("user", { refreshing: true, refreshSecs: 0 });
     try {
-      await snapshotApi.refreshAsync(month, "MANUAL", (s) => setRefreshSecs(s));
+      await snapshotApi.refreshAsync(month, "MANUAL", (s) => attributionView.patch("user", { refreshSecs: s }));
       toast.success(`${month} 归因快照已更新`);
       await load(month);
     } catch (e) {
       toast.error(`重新计算失败：${(e as Error).message}`);
     } finally {
-      setRefreshing(false);
+      attributionView.patch("user", { refreshing: false });
     }
   };
 
