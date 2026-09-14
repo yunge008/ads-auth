@@ -64,6 +64,7 @@ export function UploadView({
   const [refinalizing, setRefinalizing] = React.useState<string | null>(null);
   const [historyPage, setHistoryPage] = React.useState(1);
   const [clearing, setClearing] = React.useState(false);
+  const [retryAll, setRetryAll] = React.useState<{ done: number; total: number } | null>(null);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [deleting, setDeleting] = React.useState(false);
   const fileInput = React.useRef<HTMLInputElement>(null);
@@ -173,22 +174,52 @@ export function UploadView({
     });
 
   /** 批次行数已经传完但卡在 UPLOADING（多半是上一轮归并超时），重跑一次归并即可，不必重传文件。 */
-  const refinalize = async (u: UploadRec) => {
+  const refinalize = async (u: UploadRec, opts?: { silent?: boolean }): Promise<boolean> => {
     setRefinalizing(u.id);
     try {
-      const fin = await uploadApi.finalize(u.id);
-      toast.success(`${u.file_name}：${fin.row_count} 行已归并${fin.agg_rows ? `为 ${fin.agg_rows} 组` : ""}`);
-      await loadHistory();
+      const fin = await uploadApi.finalize(u.id, (done, total) => {
+        if (total > 1) setRefinalizing(`${u.id}|${done + 1}/${total}`);
+      });
+      if (!opts?.silent) {
+        toast.success(`${u.file_name}：${fin.row_count} 行已归并${fin.agg_rows ? `为 ${fin.agg_rows} 组` : ""}`);
+        await loadHistory();
+      }
+      return true;
     } catch (e) {
       const payload = (e as Error & { payload?: { missing_currencies?: string[] } }).payload;
       if (payload?.missing_currencies?.length && (await promptMissingRates(payload.missing_currencies))) {
         setRefinalizing(null);
-        return refinalize(u);
+        return refinalize(u, opts);
       }
-      toast.error(`重新归并失败：${(e as Error).message}`);
+      if (!opts?.silent) toast.error(`重新归并失败：${(e as Error).message}`);
+      return false;
     } finally {
       setRefinalizing(null);
     }
+  };
+
+  /**
+   * 批量重试：把所有「行数已经传完、只是没归并完」的批次挨个重跑一遍归并。
+   * 逐个串行，避免几个大批次同时压数据库；单个失败不影响后面的。
+   */
+  const retryAllFailed = async () => {
+    const targets = history.filter((u) => u.status !== "READY");
+    if (!targets.length) return;
+    const list = targets.slice(0, 10).map((u) => `· ${u.country} ${u.month} ${u.file_name}`).join("\n");
+    if (!window.confirm(
+      `将对 ${targets.length} 个未完成的批次重跑归并（不用重传文件，行数据还在库里）：\n\n${list}${targets.length > 10 ? "\n…" : ""}`,
+    )) return;
+    let ok = 0;
+    let fail = 0;
+    for (let i = 0; i < targets.length; i++) {
+      setRetryAll({ done: i, total: targets.length });
+      if (await refinalize(targets[i], { silent: true })) ok++;
+      else fail++;
+    }
+    setRetryAll(null);
+    if (ok) toast.success(`${ok} 个批次已重新归并完成`);
+    if (fail) toast.error(`${fail} 个批次仍然失败，可再点一次重试`);
+    await loadHistory();
   };
 
   const viewUpload = async (u: UploadRec) => {
@@ -213,6 +244,9 @@ export function UploadView({
     }
   };
 
+
+  /** 未完成的批次：行数据可能已经传完，只是归并没跑完（大文件归并超时最常见），重跑即可，不必重传。 */
+  const unfinishedUploads = React.useMemo(() => history.filter((u) => u.status !== "READY"), [history]);
 
   // 卡死判定：状态非「已归因」且创建时间超过 STALE_MINUTES 分钟
   const staleUploads = React.useMemo(
@@ -459,6 +493,18 @@ export function UploadView({
             <Button
               size="sm"
               variant="outline"
+              onClick={retryAllFailed}
+              disabled={!!retryAll || historyLoading || !unfinishedUploads.length}
+              title="对所有未完成的批次重跑归并。行数据已经在库里，不用重传文件"
+            >
+              <PlayCircle className={`h-4 w-4 mr-1.5 ${retryAll ? "animate-pulse" : ""}`} />
+              {retryAll
+                ? `重试中 ${retryAll.done + 1} / ${retryAll.total}`
+                : `失败重试${unfinishedUploads.length ? `（${unfinishedUploads.length}）` : ""}`}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
               className="text-destructive"
               onClick={clearStale}
               disabled={clearing || historyLoading || !staleUploads.length}
@@ -582,9 +628,11 @@ export function UploadView({
                                 className="h-7 px-2"
                                 title="行数据已经传完、只是没归并完时，点这里重跑，不用重传文件"
                                 onClick={() => refinalize(u)}
-                                disabled={refinalizing === u.id}
+                                disabled={!!refinalizing?.startsWith(u.id) || !!retryAll}
                               >
-                                <PlayCircle className={`h-3.5 w-3.5 ${refinalizing === u.id ? "animate-pulse" : ""}`} />
+                                <PlayCircle
+                                  className={`h-3.5 w-3.5 ${refinalizing?.startsWith(u.id) ? "animate-pulse" : ""}`}
+                                />
                               </Button>
                             ) : null}
                             <Button size="sm" variant="ghost" className="h-7 px-2 text-destructive" onClick={() => removeUpload(u)}>

@@ -241,7 +241,12 @@ export const uploadQueue = {
           });
 
           patchItem(item.id, { status: "finalizing", uploadedRows: rows.length, phase: "服务端归并中（按 VID+达人昵称）" });
-          const fin = await finalizeWithRates(uploadId, cb.onMissingRates);
+          const fin = await finalizeWithRates(uploadId, cb.onMissingRates, (done, total) => {
+            // 大文件会分片归并，把片数报出来，免得看起来像卡死
+            patchItem(item.id, {
+              phase: done >= total ? "服务端归并中（收尾）" : `服务端归并中 ${done + 1} / ${total} 片`,
+            });
+          });
 
           completedMonths.add(item.month);
           patchItem(item.id, { status: "done", phase: "完成", finishedAt: Date.now() });
@@ -334,13 +339,17 @@ async function appendRows(uploadId: string, rows: ParsedRow[], onProgress: (done
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, chunks.length) }, worker));
 }
 
-async function finalizeWithRates(uploadId: string, onMissingRates: (c: string[]) => Promise<boolean>) {
+async function finalizeWithRates(
+  uploadId: string,
+  onMissingRates: (c: string[]) => Promise<boolean>,
+  onPart?: (done: number, total: number) => void,
+) {
   try {
-    return await uploadApi.finalize(uploadId);
+    return await uploadApi.finalize(uploadId, onPart);
   } catch (e) {
     const payload = (e as Error & { payload?: { missing_currencies?: string[] } }).payload;
     if (!payload?.missing_currencies?.length || !(await onMissingRates(payload.missing_currencies))) throw e;
-    return await uploadApi.finalize(uploadId);
+    return await uploadApi.finalize(uploadId, onPart);
   }
 }
 

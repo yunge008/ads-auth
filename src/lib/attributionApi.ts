@@ -196,12 +196,37 @@ export const uploadApi = {
     invokeFn<{ upload_id: string }>("attribution-upload", { action: "create", ...p }),
   append: (upload_id: string, rows: ParsedRow[]) =>
     invokeFn<{ inserted: number }>("attribution-upload", { action: "append", upload_id, rows }, { timeout: 120000 }),
-  finalize: (upload_id: string) =>
-    invokeFn<{ row_count: number; agg_rows?: number }>(
+  /**
+   * 归并入库。大批次（万行级以上）后端会改成分片返回 `{ staged: true, parts }`，
+   * 这里接着逐片调用，每一片都是独立的一次请求、独立事务——
+   * 单次请求不会再顶到网关超时，中途失败也只丢一片，重来一次即可。
+   * 调用方拿到的仍然是 `{ row_count, agg_rows }`，不用关心是不是分了片。
+   */
+  finalize: async (upload_id: string, onPart?: (done: number, total: number) => void) => {
+    type Res = { row_count?: number; agg_rows?: number; staged?: boolean; parts?: number };
+    const start = await invokeFn<Res>(
       "attribution-upload",
       { action: "finalize", upload_id },
       { timeout: 300000 },
-    ),
+    );
+    if (!start.staged) return start as { row_count: number; agg_rows?: number };
+
+    const parts = Math.max(1, Number(start.parts ?? 1));
+    for (let part = 0; part < parts; part++) {
+      onPart?.(part, parts);
+      await invokeFn<Res>(
+        "attribution-upload",
+        { action: "finalize", upload_id, stage: "part", parts, part },
+        { timeout: 300000 },
+      );
+    }
+    onPart?.(parts, parts);
+    return await invokeFn<{ row_count: number; agg_rows?: number }>(
+      "attribution-upload",
+      { action: "finalize", upload_id, stage: "mark" },
+      { timeout: 300000 },
+    );
+  },
   list: (month?: string) => invokeFn<{ uploads: UploadRec[] }>("attribution-upload", { action: "list", month }),
   get: (p: { upload_id?: string; month?: string; merged?: boolean; detail_for?: DrillFilter }) =>
     invokeFn<{

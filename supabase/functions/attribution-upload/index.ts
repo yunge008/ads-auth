@@ -429,6 +429,14 @@ function assertNotCapped(label: string, rows: unknown[]): void {
   }
 }
 
+/**
+ * 归并分片阈值。10 万行的归并在一次 HTTP 请求里做不完（网关 upstream request timeout），
+ * 而整个归并是一个事务，超时即回滚，重试多少次都一样。超过阈值就拆片，由客户端逐片驱动。
+ */
+const FINALIZE_CHUNK_THRESHOLD = 20000;
+const FINALIZE_ROWS_PER_PART = 20000;
+const FINALIZE_MAX_PARTS = 32;
+
 const KEY_PAGE = 1000;
 
 type MonthKeyRow = {
@@ -792,27 +800,74 @@ Deno.serve(async (req) => {
     // 归并 + 置 READY。整个过程留在数据库内，避免把 10 万行级归并结果读回 Worker。
     if (action === "finalize") {
       const uploadId = str(body.upload_id);
-      await getUpload(db, uploadId);
-
+      const upload = await getUpload(db, uploadId);
       const t0 = Date.now();
-      const { data: finalizeInfo, error: finalizeErr } = await db.rpc("attribution_finalize_upload", { _upload_id: uploadId });
-      if (finalizeErr) throw new Error(`归并失败：${finalizeErr.message}`);
-      const info = (Array.isArray(finalizeInfo) ? finalizeInfo[0] : finalizeInfo) as {
+
+      type FinalizeInfo = {
         agg_rows: number;
         raw_rows: number;
         missing_currencies: string[] | null;
-      } | null;
-      const rawRows = Number(info?.raw_rows ?? 0);
-      if (!rawRows) throw new Error("该批次没有数据行");
-      console.log(`finalize ${uploadId}: ${rawRows} 原始行 → ${info?.agg_rows ?? 0} 归并行，耗时 ${Date.now() - t0}ms`);
-
-      const missing = info?.missing_currencies ?? [];
-      if (missing.length) {
+      };
+      const first = <T>(v: unknown) => (Array.isArray(v) ? v[0] : v) as T | null;
+      const rejectMissingRates = (missing: string[] | null | undefined) => {
+        if (!missing?.length) return;
         throw errWithPayload(
           `缺少汇率配置：${missing.join("、")}，请先在设置页维护汇率后重试`,
           { missing_currencies: missing },
         );
+      };
+
+      // ---- 分片模式：大批次单次请求做不完，由客户端按片驱动 ----
+      // stage=part 归并一片；stage=mark 收尾。每一片都是独立事务，超时也只丢那一片。
+      const stage = str(body.stage);
+      if (stage === "part") {
+        const parts = Math.max(1, Math.round(num(body.parts)));
+        const part = Math.max(0, Math.round(num(body.part)));
+        const { data, error } = await db.rpc("attribution_build_upload_agg_part", {
+          _upload_id: uploadId,
+          _parts: parts,
+          _part: part,
+        });
+        if (error) throw new Error(`归并第 ${part + 1}/${parts} 片失败：${error.message}`);
+        const info = first<FinalizeInfo>(data);
+        console.log(`finalize ${uploadId}: 第 ${part + 1}/${parts} 片 → ${info?.agg_rows ?? 0} 组，耗时 ${Date.now() - t0}ms`);
+        return json({ stage: "part", part, parts, agg_rows: Number(info?.agg_rows ?? 0) });
       }
+      if (stage === "mark") {
+        const { data, error } = await db.rpc("attribution_finalize_mark", { _upload_id: uploadId });
+        if (error) throw new Error(`归并收尾失败：${error.message}`);
+        const info = first<FinalizeInfo>(data);
+        rejectMissingRates(info?.missing_currencies);
+        const rawRows = Number(info?.raw_rows ?? 0);
+        if (!rawRows) throw new Error("该批次没有数据行");
+        console.log(`finalize ${uploadId}: 收尾完成，${rawRows} 原始行 → ${info?.agg_rows ?? 0} 归并行`);
+        return json({ row_count: rawRows, agg_rows: Number(info?.agg_rows ?? 0) });
+      }
+
+      // ---- 起始调用：行数超过阈值就改走分片，并告诉客户端要分几片 ----
+      const { count: rawCount, error: cntErr } = await db
+        .from("ad_upload_rows")
+        .select("id", { count: "exact", head: true })
+        .eq("upload_id", uploadId);
+      if (cntErr) throw new Error(`读取行数失败：${cntErr.message}`);
+      const rawRows0 = Number(rawCount ?? upload.row_count ?? 0);
+      if (!rawRows0) throw new Error("该批次没有数据行");
+
+      if (rawRows0 > FINALIZE_CHUNK_THRESHOLD) {
+        const parts = Math.min(FINALIZE_MAX_PARTS, Math.ceil(rawRows0 / FINALIZE_ROWS_PER_PART));
+        const { error } = await db.rpc("attribution_clear_upload_agg", { _upload_id: uploadId });
+        if (error) throw new Error(`清理上一轮归并结果失败：${error.message}`);
+        console.log(`finalize ${uploadId}: ${rawRows0} 行，改走分片归并，共 ${parts} 片`);
+        return json({ staged: true, parts, raw_rows: rawRows0 });
+      }
+
+      const { data: finalizeInfo, error: finalizeErr } = await db.rpc("attribution_finalize_upload", { _upload_id: uploadId });
+      if (finalizeErr) throw new Error(`归并失败：${finalizeErr.message}`);
+      const info = first<FinalizeInfo>(finalizeInfo);
+      const rawRows = Number(info?.raw_rows ?? 0);
+      if (!rawRows) throw new Error("该批次没有数据行");
+      console.log(`finalize ${uploadId}: ${rawRows} 原始行 → ${info?.agg_rows ?? 0} 归并行，耗时 ${Date.now() - t0}ms`);
+      rejectMissingRates(info?.missing_currencies);
 
       return json({ row_count: rawRows, agg_rows: Number(info?.agg_rows ?? 0) });
     }
