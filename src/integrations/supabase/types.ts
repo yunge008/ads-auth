@@ -1508,6 +1508,27 @@ export type Database = {
           raw_rows: number
         }[]
       }
+      attribution_build_upload_agg_part: {
+        Args: { _part: number; _parts: number; _upload_id: string }
+        Returns: {
+          agg_rows: number
+          raw_rows: number
+        }[]
+      }
+      attribution_clear_upload_agg: {
+        Args: { _upload_id: string }
+        Returns: number
+      }
+      attribution_finalize_mark: {
+        Args: { _upload_id: string }
+        Returns: {
+          agg_rows: number
+          missing_currencies: string[]
+          raw_rows: number
+          total_cost_usd: number
+          total_revenue_usd: number
+        }[]
+      }
       attribution_finalize_upload: {
         Args: { _upload_id: string }
         Returns: {
