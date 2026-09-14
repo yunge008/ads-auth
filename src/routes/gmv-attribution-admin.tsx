@@ -151,6 +151,8 @@ function MonthlyView() {
   const setMonth = (m: string) => attributionView.patch("admin-monthly", { month: m });
   const [loading, setLoading] = React.useState(false);
   const [refreshing, setRefreshing] = React.useState(false);
+  /** 重算已等待秒数，让用户知道没卡死 */
+  const [refreshSecs, setRefreshSecs] = React.useState(0);
   const [busy, setBusy] = React.useState<string | null>(null);
   const [detailLoading, setDetailLoading] = React.useState(false);
 
@@ -174,8 +176,9 @@ function MonthlyView() {
   const refresh = async () => {
     if (!/^\d{4}-\d{2}$/.test(month)) return;
     setRefreshing(true);
+    setRefreshSecs(0);
     try {
-      await snapshotApi.refreshAsync(month);
+      await snapshotApi.refreshAsync(month, "MANUAL", (s) => setRefreshSecs(s));
       toast.success(`${month} 归因快照已更新`);
       await load(month);
     } catch (e) {
@@ -348,7 +351,10 @@ function MonthlyView() {
       <DataPrepPanel month={month} />
 
       {refreshing ? (
-        <div className="text-sm text-muted-foreground text-center py-16">正在重新计算该月全站点归因，请稍候…</div>
+        <div className="text-sm text-muted-foreground text-center py-16 space-y-1">
+          <div>正在重新计算该月全站点归因，请稍候…（已等待 {Math.floor(refreshSecs / 60)}:{String(refreshSecs % 60).padStart(2, "0")}）</div>
+          <div className="text-xs">大月份可能需要几分钟，期间可留在本页，完成后会自动展示结果。</div>
+        </div>
       ) : loading && !report ? (
         <div className="text-sm text-muted-foreground text-center py-16">读取归因快照…</div>
       ) : report ? (
