@@ -1550,6 +1550,10 @@ export type Database = {
           vid: string
         }[]
       }
+      attribution_month_keys_json: {
+        Args: { _limit?: number; _month: string; _offset?: number }
+        Returns: Json
+      }
       attribution_month_reconcile: {
         Args: { _month: string; _run_id?: string }
         Returns: {
@@ -1607,6 +1611,10 @@ export type Database = {
           rows_count: number
         }[]
       }
+      attribution_runs_fail_stale: {
+        Args: { _minutes?: number }
+        Returns: number
+      }
       attribution_runs_prune: {
         Args: { _keep?: number; _month: string }
         Returns: number
@@ -1629,6 +1637,10 @@ export type Database = {
         Returns: number
       }
       attribution_uploads_delete_all: { Args: never; Returns: number }
+      attribution_write_run_keys: {
+        Args: { _rows: Json; _run_id: string }
+        Returns: number
+      }
       get_gmv_cron_secret: { Args: never; Returns: string }
       gmv_attr_monthly_agg: {
         Args: {
