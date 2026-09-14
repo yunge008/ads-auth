@@ -458,6 +458,25 @@ type MonthKeyRow = {
  */
 const KEY_PAGE_JSON = 20000;
 
+/** 只拉候选键（可能归到人的那部分）；非候选键已经由 attribution_seed_run_keys 在库内定好桶。 */
+async function fetchCandidateKeys(db: ReturnType<typeof admin>, runId: string): Promise<MonthKeyRow[]> {
+  const keys: MonthKeyRow[] = [];
+  for (let offset = 0; ; ) {
+    const { data, error } = await db.rpc("attribution_candidate_keys_json", {
+      _run_id: runId,
+      _limit: KEY_PAGE_JSON,
+      _offset: offset,
+    });
+    if (error) throw new Error(`读取候选判定键失败：${error.message}`);
+    const page = (data ?? []) as MonthKeyRow[];
+    if (!page.length) break;
+    keys.push(...page);
+    offset += page.length;
+    if (page.length < KEY_PAGE_JSON) break;
+  }
+  return keys;
+}
+
 async function fetchMonthKeys(db: ReturnType<typeof admin>, month: string): Promise<MonthKeyRow[]> {
   const keys: MonthKeyRow[] = [];
   for (let offset = 0; ; ) {
@@ -520,12 +539,22 @@ async function buildSnapshot(
       loadStaffMeta(db),
     ]);
 
-    // ---- 1) 拉「需要判定的去重键」----
-    // 判定只跟 (站点, VID, 达人昵称, 内容类型) 有关，跟商品ID/币种/金额无关，
-    // 所以这里的行数比归并表小一个量级——整月几十万归并行通常只有几万个判定键。
-    const keys: MonthKeyRow[] = uploads.length ? await fetchMonthKeys(db, month) : [];
+    // ---- 1) 先在库内给「不可能归到人」的键定桶，只把候选键拉进来判 ----
+    // Edge Function 有 CPU 配额（日志里表现为 `CPU Time exceeded`）。整月二十几万个判定键
+    // 光解析成 JS 对象再序列化写回就超预算，而其中绝大多数是 VID 对不上、昵称也查无此人的，
+    // 引擎对它们的结论必然是 UNMATCHED；商品卡和认不出的类型更是只看内容类型就能定桶。
+    // 这些在 SQL 里一条 INSERT 解决，JS 只处理真正有可能归到人的那一小撮。
+    let seeded = 0;
+    if (uploads.length) {
+      const { data, error } = await db.rpc("attribution_seed_run_keys", { _run_id: runId, _month: month });
+      if (error) throw new Error(`预判定键落库失败：${error.message}`);
+      const info = (Array.isArray(data) ? data[0] : data) as { seeded: number; candidates: number } | null;
+      seeded = Number(info?.seeded ?? 0);
+      console.log(`buildSnapshot ${month}: 库内直接定桶 ${seeded} 个键，候选 ${Number(info?.candidates ?? 0)} 个`);
+    }
+    const keys: MonthKeyRow[] = uploads.length ? await fetchCandidateKeys(db, runId) : [];
     const tKeys = Date.now();
-    console.log(`buildSnapshot ${month}: ${uploads.length} 个批次 / ${keys.length} 个判定键，读取耗时 ${tKeys - t0}ms`);
+    console.log(`buildSnapshot ${month}: ${uploads.length} 个批次 / ${keys.length} 个候选键（另有 ${seeded} 个库内定桶），读取耗时 ${tKeys - t0}ms`);
 
     // ---- 2) 跑归因引擎（一次性，保证别名投票口径不被分片打散）----
     const inputs: AttrInputRow[] = keys.map((k, i) => {
@@ -563,7 +592,7 @@ async function buildSnapshot(
     const tEngine = Date.now();
     console.log(`buildSnapshot ${month}: 引擎耗时 ${tEngine - tKeys}ms`);
 
-    // ---- 3) 判定结果落库 ----
+    // ---- 3) 候选键的判定结果落库（非候选键在第 1 步已经写过了）----
     if (keys.length) {
       const keyRows = keys.map((k, i) => {
         const res = resultByKey.get(`k:${i}`);
