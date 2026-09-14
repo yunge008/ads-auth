@@ -248,7 +248,7 @@ export function UploadView({
   /** 未完成的批次：行数据可能已经传完，只是归并没跑完（大文件归并超时最常见），重跑即可，不必重传。 */
   const unfinishedUploads = React.useMemo(() => history.filter((u) => u.status !== "READY"), [history]);
 
-  // 卡死判定：状态非「已归因」且创建时间超过 STALE_MINUTES 分钟
+  // 卡死判定：状态非「已入库」且创建时间超过 STALE_MINUTES 分钟
   const staleUploads = React.useMemo(
     () =>
       history.filter(
@@ -428,7 +428,11 @@ export function UploadView({
                         {f.status === "parsed" ? <Badge variant="secondary">待上传</Badge>
                           : f.status === "queued" ? <Badge variant="secondary">排队中</Badge>
                           : f.status === "uploading" ? <Badge variant="secondary">上传中</Badge>
-                          : f.status === "finalizing" ? <Badge variant="secondary">归因中</Badge>
+                          : f.status === "finalizing" ? (
+                            <Badge variant="secondary" title="这一步不做归因，只是把这个文件的行按「站点+VID+达人昵称+商品ID+内容类型+币种」在数据库里合并成组，并按后台汇率折成美元存下来。归因是出报表时按当下的飞书登记数据现算的。">
+                              归并中
+                            </Badge>
+                          )
                           : f.status === "done" ? <Badge>完成</Badge>
                           : <span className="text-destructive" title={f.error ?? f.parseError ?? ""}>失败</span>}
                         {f.restored ? <div className="text-[11px] text-muted-foreground">刷新前的记录</div> : null}
@@ -612,7 +616,7 @@ export function UploadView({
                         <TableCell className="text-right tabular-nums">{fmtUsd(u.total_revenue)}</TableCell>
                         <TableCell>
                           <Badge variant={u.status === "READY" ? "default" : u.status === "FAILED" ? "destructive" : "secondary"}>
-                            {u.status === "READY" ? "已归因" : u.status === "FAILED" ? "失败" : "上传中"}
+                            {u.status === "READY" ? "已入库" : u.status === "FAILED" ? "失败" : "上传中"}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-xs">{u.uploaded_by || "—"} · {new Date(u.created_at).toLocaleDateString()}</TableCell>

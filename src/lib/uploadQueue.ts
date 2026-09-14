@@ -26,6 +26,9 @@ export type QueueItem = {
   error?: string | null;
   parseError?: string | null;
   uploadId?: string | null;
+  /** 归并分片进度（大文件才有）：已完成片数 / 总片数，用来让进度条在归并阶段继续走 */
+  mergeDone?: number;
+  mergeParts?: number;
   startedAt?: number | null;
   finishedAt?: number | null;
   /** 解析统计（展示用，刷新后仍保留） */
@@ -240,11 +243,21 @@ export const uploadQueue = {
             patchItem(item.id, { uploadedRows: done, phase: `上传数据 ${done.toLocaleString()} / ${rows.length.toLocaleString()} 行` });
           });
 
-          patchItem(item.id, { status: "finalizing", uploadedRows: rows.length, phase: "服务端归并中（按 VID+达人昵称）" });
+          patchItem(item.id, {
+            status: "finalizing",
+            uploadedRows: rows.length,
+            phase: "服务端归并中（合并同 VID+达人+商品+币种，折算美元）",
+            mergeDone: 0,
+            mergeParts: 0,
+          });
           const fin = await finalizeWithRates(uploadId, cb.onMissingRates, (done, total) => {
             // 大文件会分片归并，把片数报出来，免得看起来像卡死
             patchItem(item.id, {
-              phase: done >= total ? "服务端归并中（收尾）" : `服务端归并中 ${done + 1} / ${total} 片`,
+              phase: done >= total
+                ? "服务端归并中（收尾：核对汇率、回填合计）"
+                : `服务端归并中 ${done + 1} / ${total} 片`,
+              mergeDone: done,
+              mergeParts: total,
             });
           });
 
@@ -353,10 +366,13 @@ async function finalizeWithRates(
   }
 }
 
-/** 进度百分比：上传占 0-90，归因占 90-100。 */
+/** 进度百分比：上传行数占 0-90，服务端归并占 90-100（分片时按片数走，不再卡在 95%）。 */
 export function itemPercent(i: QueueItem): number {
   if (i.status === "done") return 100;
-  if (i.status === "finalizing") return 95;
+  if (i.status === "finalizing") {
+    if (!i.mergeParts) return 92;
+    return Math.min(99, 90 + Math.round(((i.mergeDone ?? 0) / i.mergeParts) * 9));
+  }
   if (i.status === "failed") return i.totalRows ? Math.round((i.uploadedRows / i.totalRows) * 90) : 0;
   if (i.status !== "uploading") return 0;
   if (!i.totalRows) return 2;

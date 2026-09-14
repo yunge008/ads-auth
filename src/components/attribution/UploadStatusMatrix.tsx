@@ -1,5 +1,5 @@
-// 上传状态矩阵：行=月份（新→旧），列=站点，格子=该站点该月的上传/归因状态。
-// 格子左侧的数字 = 该格已归因（READY）的文件数；状态文字始终按整格居中，不受数字宽度影响。
+// 上传状态矩阵：行=月份（新→旧），列=站点，格子=该站点该月的上传/入库状态。
+// 格子左侧的数字 = 该格已入库（归并完成）的文件数；状态文字始终按整格居中，不受数字宽度影响。
 // COUNTRY_ORDER 里的站点是固定列，即使一条上传记录都没有也保留列（格子留空），方便一眼看出哪个站点整月没传。
 import * as React from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -8,8 +8,8 @@ import type { UploadRec } from "@/lib/attributionApi";
 type CellStatus = "READY" | "PARTIAL" | "UPLOADING" | "FAILED" | "EMPTY";
 
 const STATUS_LABEL: Record<CellStatus, string> = {
-  READY: "已归因",
-  PARTIAL: "部分归因",
+  READY: "已入库",
+  PARTIAL: "部分入库",
   UPLOADING: "上传中",
   FAILED: "失败",
   EMPTY: "", // 无上传记录的格子留空
@@ -101,7 +101,7 @@ export function UploadStatusMatrix({ history }: { history: UploadRec[] }) {
                   if (status === "EMPTY") return <TableCell key={c} className="text-center p-1" title="无上传记录" />;
                   const ready = readyCountOf(rows);
                   const title = [
-                    `已归因 ${ready} / 共 ${rows.length} 个文件`,
+                    `已入库 ${ready} / 共 ${rows.length} 个文件`,
                     ...rows.map((r) => `${r.file_name}：${r.status}${r.row_count ? `（${r.row_count}行）` : ""}`),
                   ].join("\n");
                   return (
