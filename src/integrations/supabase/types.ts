@@ -488,6 +488,44 @@ export type Database = {
         }
         Relationships: []
       }
+      attribution_run_candidates: {
+        Row: {
+          account_name: string
+          country: string
+          creative_type: string
+          posted_at: string | null
+          run_id: string
+          seq: number
+          vid: string
+        }
+        Insert: {
+          account_name?: string
+          country?: string
+          creative_type?: string
+          posted_at?: string | null
+          run_id: string
+          seq?: number
+          vid?: string
+        }
+        Update: {
+          account_name?: string
+          country?: string
+          creative_type?: string
+          posted_at?: string | null
+          run_id?: string
+          seq?: number
+          vid?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "attribution_run_candidates_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "attribution_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       attribution_run_keys: {
         Row: {
           account_name: string
@@ -1515,6 +1553,10 @@ export type Database = {
           raw_rows: number
         }[]
       }
+      attribution_candidate_keys_json: {
+        Args: { _limit?: number; _offset?: number; _run_id: string }
+        Returns: Json
+      }
       attribution_clear_upload_agg: {
         Args: { _upload_id: string }
         Returns: number
@@ -1550,6 +1592,18 @@ export type Database = {
           vid: string
         }[]
       }
+      attribution_month_keys_ext: {
+        Args: { _month: string }
+        Returns: {
+          account_name: string
+          country: string
+          creative_type: string
+          ctype: string
+          is_candidate: boolean
+          posted_at: string
+          vid: string
+        }[]
+      }
       attribution_month_keys_json: {
         Args: { _limit?: number; _month: string; _offset?: number }
         Returns: Json
@@ -1567,6 +1621,12 @@ export type Database = {
           scope: string
         }[]
       }
+      attribution_norm_creative_type: {
+        Args: { _raw: string }
+        Returns: string
+      }
+      attribution_norm_name: { Args: { _s: string }; Returns: string }
+      attribution_norm_site: { Args: { _s: string }; Returns: string }
       attribution_rebuild_agg_usd: { Args: { _month: string }; Returns: number }
       attribution_registry_matrix: {
         Args: never
@@ -1618,6 +1678,13 @@ export type Database = {
       attribution_runs_prune: {
         Args: { _keep?: number; _month: string }
         Returns: number
+      }
+      attribution_seed_run_keys: {
+        Args: { _month: string; _run_id: string }
+        Returns: {
+          candidates: number
+          seeded: number
+        }[]
       }
       attribution_unmatched_trend: {
         Args: { _months: string[] }
