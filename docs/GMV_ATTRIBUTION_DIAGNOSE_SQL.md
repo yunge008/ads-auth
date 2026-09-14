@@ -235,3 +235,28 @@ order by 无建联键数 desc;
 - `VID同站点能命中` / `昵称同站点能命中` 很大 → **判定逻辑有问题**：数据明明能匹配上，引擎却判成了无建联。把这张表发我，这是代码要改的。
 - `只在别站点登记过` 很大 → 广告表站点和登记表站点写法对不上，是数据问题。
 - 两类都接近 0 → 这些达人确实没建联过，归因结果是对的，问题在建联覆盖率而不是工具。
+
+---
+
+## H. 快照和登记数据谁先谁后（回测结论成立的前提）
+
+G2 是拿**今天的**登记表去回测**9/11 那次**快照。如果登记数据是在那次快照之后才同步进来的，
+那「当时判不出来」就完全正常，不是逻辑问题。跑这一条把时间轴摆出来：
+
+```sql
+select 'RUN 快照'  as what, month as country, count(*) as rows,
+       min(started_at) as 最早, max(finished_at) as 最晚
+from public.attribution_runs group by 2
+union all
+select 'REG 登记表', country, count(*), min(created_at), max(updated_at)
+from public.creator_registry group by 2
+union all
+select 'OWN 归属表', country, count(*), min(created_at), max(updated_at)
+from public.creator_ownership group by 2
+order by 1, 3 desc;
+```
+
+**怎么读：**
+
+- `REG/OWN` 的 `最早`（created_at）**晚于**快照的 `最晚`（finished_at）→ 快照跑的时候登记表里还没有这些人，判成无建联是对的，重新上传+重算即可。
+- `REG/OWN` 的 `最早` **早于**快照 → 当时数据就在库里却没匹配上，是引擎的问题。

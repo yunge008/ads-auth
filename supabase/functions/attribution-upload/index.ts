@@ -359,15 +359,17 @@ function detailFromPairs(pairs: LivePair[], f: { staff?: string; role?: string; 
 }
 
 /** 通用整表分页读取（诊断用的小表：creator_ownership / creator_alias）。 */
+/** 分页读全表。必须显式排序：LIMIT/OFFSET 不带 ORDER BY 时行序没有保证，翻页之间会重复也会漏行。 */
 async function pageAllRows<T>(
   db: ReturnType<typeof admin>,
   table: string,
   columns: string,
+  orderBy = "id",
 ): Promise<T[]> {
   const out: T[] = [];
   let from = 0;
   for (;;) {
-    const { data, error } = await db.from(table).select(columns).range(from, from + PAGE - 1);
+    const { data, error } = await db.from(table).select(columns).order(orderBy).range(from, from + PAGE - 1);
     if (error) throw new Error(error.message);
     const rows = (data ?? []) as T[];
     out.push(...rows);

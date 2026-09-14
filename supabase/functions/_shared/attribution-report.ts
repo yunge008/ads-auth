@@ -31,6 +31,11 @@ export const KPI_MIN_SITE_USD = 0;
 
 const PAGE = 1000;
 
+/**
+ * 分页读全表。**每个调用方都必须带 `.order(<唯一列>)`**：
+ * LIMIT/OFFSET 不带 ORDER BY 时，Postgres 不保证两次请求的行序一致（并行顺序扫描尤其会变），
+ * 结果是翻页之间既可能重复、也可能整段漏掉行——而漏掉登记数据的表现就是「大批达人归不上」。
+ */
 async function pageAll<T>(
   build: (from: number, to: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>,
 ): Promise<T[]> {
@@ -53,7 +58,7 @@ export type StaffMeta = Map<string, { role: Role; active: boolean }>; // key: `$
 
 export async function loadStaffMeta(db: SupabaseClient): Promise<StaffMeta> {
   const rows = await pageAll<{ name: string; role: string; active: boolean }>((f, t) =>
-    db.from("staff_sheets").select("name, role, active").range(f, t),
+    db.from("staff_sheets").select("name, role, active").order("id").range(f, t),
   );
   const m: StaffMeta = new Map();
   for (const r of rows) m.set(`${r.name}|${r.role}`, { role: r.role as Role, active: !!r.active });
@@ -77,7 +82,7 @@ export async function loadAttrContext(db: SupabaseClient): Promise<AttrContext> 
   };
 
   const svm = await pageAll<{ country: string; staff_name: string; vid: string; source_type: string }>((f, t) =>
-    db.from("staff_vid_map").select("country, staff_name, vid, source_type").range(f, t),
+    db.from("staff_vid_map").select("country, staff_name, vid, source_type").order("id").range(f, t),
   );
   for (const r of svm) {
     addReg(r.vid, { staff: r.staff_name, role: r.source_type as Role, registerDate: null, country: r.country ?? "" });
@@ -93,6 +98,7 @@ export async function loadAttrContext(db: SupabaseClient): Promise<AttrContext> 
       .from("creator_registry")
       .select("vid, staff_name, role, register_date, country")
       .neq("vid", "")
+      .order("id")
       .range(f, t),
   );
   for (const r of regRows) {
@@ -107,7 +113,7 @@ export async function loadAttrContext(db: SupabaseClient): Promise<AttrContext> 
   // 2) 建联表归属：NICKNAME 优先，HANDLE 补缺
   const ownership = new Map<string, { bd: string; keyType: "NICKNAME" | "HANDLE"; country: string }>();
   const ownRows = await pageAll<{ key_type: string; match_key: string; owner_bd: string; country: string }>((f, t) =>
-    db.from("creator_ownership").select("key_type, match_key, owner_bd, country").range(f, t),
+    db.from("creator_ownership").select("key_type, match_key, owner_bd, country").order("id").range(f, t),
   );
   for (const r of ownRows) {
     if (r.key_type !== "NICKNAME") continue;
@@ -123,7 +129,7 @@ export async function loadAttrContext(db: SupabaseClient): Promise<AttrContext> 
   const manualAlias = new Map<string, { bd: string; country: string }>();
   const vidAlias = new Map<string, { bd: string; country: string }>();
   const aliasRows = await pageAll<{ alias_norm: string; bd_name: string; country: string; source: string }>((f, t) =>
-    db.from("creator_alias").select("alias_norm, bd_name, country, source").range(f, t),
+    db.from("creator_alias").select("alias_norm, bd_name, country, source").order("id").range(f, t),
   );
   for (const r of aliasRows) {
     const rec = { bd: r.bd_name, country: r.country ?? "" };
@@ -135,7 +141,7 @@ export async function loadAttrContext(db: SupabaseClient): Promise<AttrContext> 
   // 4) 站点交接（按日期升序）
   const handovers = new Map<string, Handover[]>();
   const hRows = await pageAll<{ country: string; from_bd: string; to_bd: string; handover_date: string }>((f, t) =>
-    db.from("site_handovers").select("country, from_bd, to_bd, handover_date").range(f, t),
+    db.from("site_handovers").select("country, from_bd, to_bd, handover_date").order("id").range(f, t),
   );
   for (const r of hRows) {
     const arr = handovers.get(r.country) ?? [];
@@ -159,6 +165,7 @@ export async function loadAttrContext(db: SupabaseClient): Promise<AttrContext> 
       db
         .from("creator_registry")
         .select("staff_name, country, nickname_norm, handle_norm, register_date, sample_date")
+        .order("id")
         .range(f, t),
     );
     for (const r of rows) {
@@ -185,7 +192,7 @@ export async function loadAttrContext(db: SupabaseClient): Promise<AttrContext> 
   // 6) 人工判定（审查表读回）
   const reviewOverrides = new Map<string, string>();
   const rvRows = await pageAll<{ review_key: string; manual_bd: string | null }>((f, t) =>
-    db.from("attribution_review").select("review_key, manual_bd").not("manual_bd", "is", null).range(f, t),
+    db.from("attribution_review").select("review_key, manual_bd").not("manual_bd", "is", null).order("id").range(f, t),
   );
   for (const r of rvRows) if (r.manual_bd) reviewOverrides.set(r.review_key, r.manual_bd);
 
@@ -206,7 +213,7 @@ export async function persistRunArtifacts(db: SupabaseClient, result: AttrRunRes
     // 全表拉取 MANUAL 别名（人工判定表通常很小）比按 alias_norm 分块 .in() 更稳：
     // 大文件推断出的别名可能上千个、含中日文/emoji 昵称，chunked GET 请求的 URL 会被撑到超长导致网络层报错。
     const manualRows = await pageAll<{ alias_norm: string; country: string }>((f, t) =>
-      db.from("creator_alias").select("alias_norm, country").eq("source", "MANUAL").range(f, t),
+      db.from("creator_alias").select("alias_norm, country").eq("source", "MANUAL").order("id").range(f, t),
     );
     const manualNorms = new Set(manualRows.map((r) => identityKey(r.country, r.alias_norm)));
     const rows = aliasesToPersist
@@ -309,7 +316,7 @@ export type ExchangeRateMap = Map<string, number>; // currency ? USD rate
 /** Load enabled front-end maintained USD conversion rates for the calculation. */
 export async function loadExchangeRates(db: SupabaseClient): Promise<ExchangeRateMap> {
   const rows = await pageAll<{ currency: string; usd_rate: number; enabled: boolean }>((f, t) =>
-    db.from("gmv_exchange_rates").select("currency, usd_rate, enabled").eq("enabled", true).range(f, t),
+    db.from("gmv_exchange_rates").select("currency, usd_rate, enabled").eq("enabled", true).order("currency").range(f, t),
   );
   const rates: ExchangeRateMap = new Map([["USD", 1]]);
   for (const row of rows) {
@@ -322,7 +329,7 @@ export async function loadExchangeRates(db: SupabaseClient): Promise<ExchangeRat
 
 export async function loadTargets(db: SupabaseClient, month: string): Promise<TargetMap> {
   const rows = await pageAll<{ staff_name: string; role: string; target_usd: number }>((f, t) =>
-    db.from("gmv_targets").select("staff_name, role, target_usd").eq("month", month).range(f, t),
+    db.from("gmv_targets").select("staff_name, role, target_usd").eq("month", month).order("id").range(f, t),
   );
   const m: TargetMap = new Map();
   for (const r of rows) m.set(`${r.staff_name}|${r.role}`, Number(r.target_usd) || 0);
