@@ -98,6 +98,11 @@ export type VidSummaryRow = {
   month: string;
   vid: string;
   account_name: string;
+  /** 归属（取该月最新快照里这个 VID 金额最大的那条判定）；没有快照时为空 */
+  staff: string;
+  role: string;
+  bucket: string;
+  match_type: string;
   product_id: string;
   sku: string;
   gmv: number;

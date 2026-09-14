@@ -36,7 +36,7 @@ import { attributionView } from "@/lib/attributionView";
  * 「数据准备」三个按钮的说明文案。写在按钮右侧的「?」里，不占版面。
  * 口径提醒：这三个按钮只更新基础数据；归因结果每次出报表时按当下数据现算，不需要重传广告表。
  */
-const SYNC_HELP: Record<"creators" | "targets" | "handovers", { title: string; lines: string[] }> = {
+const SYNC_HELP: Record<"creators" | "targets" | "handovers" | "progress" | "export", { title: string; lines: string[] }> = {
   creators: {
     title: "同步达人登记",
     lines: [
@@ -63,6 +63,31 @@ const SYNC_HELP: Record<"creators" | "targets" | "handovers", { title: string; l
       "发布时间早于转移日的素材仍算原 BD；新 BD 没接手过的达人，这条交接对他不生效。VID 强匹配不受交接影响。",
     ],
   },
+  progress: {
+    title: "回写飞书进度",
+    lines: [
+      "把当前月份快照的结果**追加**写进飞书主表格的「绩效统计记录」sheet（从第一个空行往下加，不覆盖历史）。",
+      "一个同事 × 一个站点一行，另外末尾补两行汇总：「商品卡」和「未归因」。",
+      "列顺序（A–S）：",
+      "A 回写时间 · B 月份 · C 站点 · D 同事 · E 角色（BD/剪辑）",
+      "F GMV(USD) · G 消耗(USD) · H 订单 · I 目标 · J 进度%",
+      "K VID匹配GMV · L 昵称匹配GMV · M 商品卡GMV · N 未归因GMV",
+      "O–R 预留空列 · S 状态（离职的人标「已离职」）",
+      "「商品卡」行只填 F/G/H 与 M，「未归因」行只填 F/G/H 与 N，C、I–L 留空。",
+      "只写不读，不会改动飞书里已有的行；同一个月点多次会追加多份，注意别重复点。",
+    ],
+  },
+  export: {
+    title: "导出唯一VID汇总",
+    lines: [
+      "导出当前月份的 Excel，一行 = 一个「站点 × VID × 商品ID」，跨文件跨天已合并求和。",
+      "达人昵称取该 VID 出现次数最多的那个写法；SKU 由商品ID 关联 sku_product_map 得到。",
+      "金额已按归并时的汇率折成 USD；ROI / CTR / CVR 用汇总后的分子分母重算，不是平均值。",
+      "列顺序：站点 · 月份 · VID · 达人昵称 · 归属人 · 角色 · 归属类别 · 匹配方式 · PID · SKU · GMV · 消耗 · 订单量 · ROI · PV · 点击 · CTR · CVR",
+      "归属四列来自该月最新快照：一个 VID 可能有多条判定（视频/直播…），取金额最大的那条。没跑过快照时这四列为空。",
+      "这是与本地 Excel 对账用的底表——站点、VID、归属人三列齐全，可以直接和手工结果逐行比。",
+    ],
+  },
 };
 
 function SyncHelp({ kind }: { kind: keyof typeof SYNC_HELP }) {
@@ -82,7 +107,11 @@ function SyncHelp({ kind }: { kind: keyof typeof SYNC_HELP }) {
   );
 }
 
-const VID_SUMMARY_HEADER = ["站点", "月份", "VID", "达人昵称", "PID", "SKU", "GMV", "消耗", "订单量", "ROI", "PV", "点击", "CTR", "CVR"];
+const VID_SUMMARY_HEADER = [
+  "站点", "月份", "VID", "达人昵称",
+  "归属人", "角色", "归属类别", "匹配方式",
+  "PID", "SKU", "GMV", "消耗", "订单量", "ROI", "PV", "点击", "CTR", "CVR",
+];
 
 export const Route = createFileRoute("/gmv-attribution-admin")({
   head: () => ({ meta: [{ title: "GMV 归因·管理 - TikTok授权工具" }] }),
@@ -230,7 +259,9 @@ function MonthlyView() {
       const aoa = [
         VID_SUMMARY_HEADER,
         ...rows.map((r) => [
-          r.country, r.month, r.vid, r.account_name, r.product_id, r.sku,
+          r.country, r.month, r.vid, r.account_name,
+          r.staff, r.role, r.bucket, r.match_type,
+          r.product_id, r.sku,
           r.gmv, r.cost, r.orders, r.roi ?? "", r.pv, r.clicks, r.ctr ?? "", r.cvr ?? "",
         ]),
       ];
@@ -333,12 +364,18 @@ function MonthlyView() {
               <Button size="sm" variant="outline" onClick={refresh} disabled={loading || refreshing} title="按当下的飞书登记数据重跑该月全站点全人员归因，生成一条新快照">
                 <RefreshCw className={`h-4 w-4 mr-1.5 ${refreshing ? "animate-spin" : ""}`} />重新计算
               </Button>
-              <Button size="sm" variant="outline" onClick={() => doSync("progress")} disabled={!!busy || !report}>
-                <Upload className="h-4 w-4 mr-1.5" />回写飞书进度
-              </Button>
-              <Button size="sm" variant="outline" onClick={exportVidSummary} disabled={!!busy || !report}>
-                <Download className={`h-4 w-4 mr-1.5 ${busy === "export" ? "animate-spin" : ""}`} />导出唯一VID汇总
-              </Button>
+              <div className="flex items-center gap-0.5">
+                <Button size="sm" variant="outline" onClick={() => doSync("progress")} disabled={!!busy || !report}>
+                  <Upload className="h-4 w-4 mr-1.5" />回写飞书进度
+                </Button>
+                <SyncHelp kind="progress" />
+              </div>
+              <div className="flex items-center gap-0.5">
+                <Button size="sm" variant="outline" onClick={exportVidSummary} disabled={!!busy || !report}>
+                  <Download className={`h-4 w-4 mr-1.5 ${busy === "export" ? "animate-spin" : ""}`} />导出唯一VID汇总
+                </Button>
+                <SyncHelp kind="export" />
+              </div>
             </div>
           </div>
         </CardContent>

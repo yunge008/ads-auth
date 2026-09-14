@@ -1359,17 +1359,48 @@ Deno.serve(async (req) => {
         }
       }
 
+      // 归属人从该月最新快照的判定键里取（判定键口径 = 站点 × VID × 达人昵称 × 内容类型，
+      // 这里按 站点|VID 取 GMV 最大的那条，导出粒度是 站点×VID×商品ID，天然会有多个内容类型）。
+      // 没有快照就留空，导出仍然可用，只是没有归属列。
+      const ownerByVid = new Map<string, { staff: string; role: string; match: string; bucket: string }>();
+      {
+        const run = await latestRun(db, month);
+        if (run) {
+          const { data, error } = await db.rpc("attribution_run_owner_by_vid", { _run_id: run.id });
+          if (error) throw new Error(`读取归属失败：${error.message}`);
+          for (const r of (data ?? []) as Array<Record<string, unknown>>) {
+            ownerByVid.set(`${str(r.country)}|${str(r.vid)}`, {
+              staff: str(r.staff),
+              role: str(r.role) === "EDITOR" ? "剪辑" : str(r.role) === "BD" ? "BD" : "",
+              match: str(r.match_type),
+              bucket: str(r.bucket),
+            });
+          }
+        }
+      }
+      const BUCKET_LABEL: Record<string, string> = {
+        STAFF: "归到人",
+        PRODUCT_CARD: "商品卡片",
+        OTHER: "其他类型",
+        UNMATCHED: "未建联达人",
+      };
+
       const rowsOut = Array.from(groups.values()).map((g) => {
         let bestName = "";
         let bestCount = -1;
         for (const [name, cnt] of g.accountNameCounts) {
           if (cnt > bestCount) { bestName = name; bestCount = cnt; }
         }
+        const own = ownerByVid.get(`${g.country}|${g.vid}`);
         return {
           country: g.country,
           month,
           vid: g.vid,
           account_name: bestName,
+          staff: own?.staff ?? "",
+          role: own?.role ?? "",
+          bucket: own ? (BUCKET_LABEL[own.bucket] ?? own.bucket) : "",
+          match_type: own?.match ?? "",
           product_id: g.product_id,
           sku: skuByKey.get(`${g.country}|${g.product_id}`) ?? "",
           gmv: g.gmvUsd,
@@ -1407,10 +1438,16 @@ Deno.serve(async (req) => {
           missingSnapshots.push(trendMonth);
           continue;
         }
-        const rows = await fetchRunUnmatched(db, run.id, 5000);
+        // 库内直接按 (站点, 归一化昵称) 聚合，不再「取前 5000 条明细」——
+        // 一个月的无建联明细有几万条，截断会把长尾整段砍掉，月度数字偏小、跨月还不可比。
+        const { data: aggRows, error: aggErr } = await db.rpc("attribution_run_unmatched_by_creator", {
+          _run_id: run.id,
+        });
+        if (aggErr) throw new Error(`读取无建联汇总失败：${aggErr.message}`);
+        const rows = (aggRows ?? []) as Array<{ country: string; account_name: string; name_norm: string; gmv_usd: number }>;
         for (const r of rows) {
           const name = (r.account_name ?? "").trim();
-          const norm = normalizeName(name);
+          const norm = r.name_norm || normalizeName(name);
           if (!norm) continue;
           const key = `${r.country}|${norm}`;
           let agg = aggMap.get(key);
