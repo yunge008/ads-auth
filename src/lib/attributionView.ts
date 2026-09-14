@@ -51,6 +51,9 @@ function restore() {
       "admin-monthly": { ...emptyView(), ...(parsed["admin-monthly"] ?? {}) },
       user: { ...emptyView(), ...(parsed.user ?? {}) },
     };
+    // 整页刷新后轮询回调已不存在，重算状态必须复位，否则会卡在转圈
+    state["admin-monthly"].refreshing = false;
+    state.user.refreshing = false;
   } catch {
     /* 坏数据忽略 */
   }
