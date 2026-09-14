@@ -290,7 +290,7 @@ export const exportApi = {
         { action: "export_vid_summary", month, limit: PAGE, offset },
         { timeout: 300000 },
       );
-      total = Number(r.total ?? 0);
+      total = Number(r.total ?? 0) || total;
       const page = r.rows ?? [];
       rows.push(...page);
       onPage?.(rows.length, total);
