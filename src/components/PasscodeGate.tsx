@@ -19,13 +19,32 @@ export function PasscodeGate({ children }: { children: ReactNode }) {
   const [val, setVal] = useState("");
   const [checking, setChecking] = useState(false);
 
+  // Transient gateway/network hiccups (503 / 504 IDLE_TIMEOUT / offline) must
+  // not log the user out — retry a few times before giving up.
+  const isTransient = (e: unknown) => {
+    const m = String((e as Error)?.message ?? "");
+    return /50[234]|IDLE_TIMEOUT|DEGRADED|timeout|Failed to fetch|NetworkError|network/i.test(m);
+  };
+
   const login = async () => {
-    const { account } = await invokeFn<{ account: CurrentAccount }>(
-      "app-accounts",
-      { op: "me" },
-    );
-    accountStore.set(account);
-    setUnlocked(true);
+    let lastErr: unknown;
+    for (let i = 0; i < 3; i++) {
+      try {
+        const { account } = await invokeFn<{ account: CurrentAccount }>(
+          "app-accounts",
+          { op: "me" },
+          { timeout: 20000 },
+        );
+        accountStore.set(account);
+        setUnlocked(true);
+        return;
+      } catch (e) {
+        lastErr = e;
+        if (!isTransient(e)) break;
+        await new Promise((r) => setTimeout(r, 1500 * 2 ** i));
+      }
+    }
+    throw lastErr;
   };
 
   useEffect(() => {
