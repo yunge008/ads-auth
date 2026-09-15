@@ -1679,15 +1679,9 @@ export type Database = {
           vid: string
         }[]
       }
-      attribution_run_unmatched_by_creator: {
-        Args: { _run_id: string }
-        Returns: {
-          account_name: string
-          country: string
-          gmv_usd: number
-          name_norm: string
-          rows_count: number
-        }[]
+      attribution_run_unmatched_by_creator_json: {
+        Args: { _limit?: number; _offset?: number; _run_id: string }
+        Returns: Json
       }
       attribution_run_unmatched_top: {
         Args: { _limit?: number; _run_id: string }
