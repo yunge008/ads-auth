@@ -54,12 +54,16 @@ export function PasscodeGate({ children }: { children: ReactNode }) {
     if (code) {
       setChecking(true);
       login()
-        .catch(() => {
-          if (!cancelled) {
-            setPasscode("");
-            setAdminName("");
-            accountStore.set(null);
+        .catch((e) => {
+          if (cancelled) return;
+          if (isTransient(e)) {
+            // Keep credentials;服务暂时不可用时只提示，不强制退出登录。
+            toast.error("服务暂时不可用，请稍后重试登录");
+            return;
           }
+          setPasscode("");
+          setAdminName("");
+          accountStore.set(null);
         })
         .finally(() => {
           if (!cancelled) setChecking(false);
