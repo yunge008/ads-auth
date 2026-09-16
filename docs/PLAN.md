@@ -8,7 +8,7 @@
 1. **自动授权**：每天北京 08:00 pg_cron → `/api/public/hooks/authorize-cron` → 循环执行授权 → 飞书机器人通知（已完成）
 2. **GMV Max 性能优化**：短期索引已落库 ✅；中期 rollup 表、远期月分区待数据再上量后评估
 3. **飞书基础数据自动同步**：每天北京 23:00 pg_cron → `/api/public/hooks/feishu-sync-cron` → 发样及素材统计 / 达人登记 / GMV 目标 / 站点交接 四个同步，早于 23:30 的归因快照（已完成）
-4. **GMV 归因 V3 阶段 0**：migration 跑完后执行 `SELECT * FROM attribution_posted_at_gap ORDER BY month DESC, country;` 确认历史数据缺「发布时间」的影响面（<5% 让它们进 PENDING，高就重新导出历史文件）；并确认 VN 站点林丽洪的权限起始日期（`staff_site_permissions` 里暂填 2024-01-01，备注已标「待确认」）
+4. **GMV 归因 V3 阶段 0**：①VN 站点林丽洪起始日期 **2024-01-01 已确认**（2026-09-16），`staff_site_permissions` 里那行备注的「待确认」字样只是文案，不影响判定；②`attribution_posted_at_gap` 已跑，**缺「发布时间」的 GMV 占比约 15%**，超过计划 §7.5 的 5% 阈值。但「缺发布时间」≠「会进 PENDING」——被 VID 强归因命中的行和商品卡片都不需要发布时间，需再按「缺发布时间 且 非商品卡片 且 VID 未登记」的口径算一遍真实影响面，再决定是否重新导出历史文件覆盖上传。**这个决定是阶段 3.1 的前置条件**：3.1 上线后这类行会进 PENDING（不计入任何人 KPI，但仍留在 GMV 总额里）
 5. **前端「上次自动刷新时间」UI**：展示 `gmv_max_sync_state` 最近运行时间（未做）
 
 ## 任务板

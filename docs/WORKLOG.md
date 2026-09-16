@@ -148,3 +148,4 @@
 
 2026-09-16 | claude | 部署新 Edge Function `attribution-identity-build`，并重新部署 `attribution-feishu`（GMV 归因 V3 阶段 1+2 的待人工部署项）；版本号 0916.087 | supabase/functions/{attribution-identity-build,attribution-feishu}/index.ts, src/lib/version.ts, docs/WORKLOG.md
 
+2026-09-16 | claude | GMV 归因 V3 阶段 0 的两项确认落文档：①VN 站点林丽洪权限起始日 2024-01-01 已确认，不再是待确认项（migration 已执行，按 AGENTS.md 不改历史 migration，DB 里那行备注的「待确认」字样留作历史，可用一句 UPDATE 改文案）；②`attribution_posted_at_gap` 跑出缺「发布时间」GMV 占比约 15%，超过计划 §7.5 的 5% 阈值，但该口径包含了被 VID 强归因命中的行与商品卡片（这两类根本不需要发布时间），真实会进 PENDING 的占比要另算，结论出来前阶段 3.1（posted_at 改必填 + 弃用 VID 反推发布时间）先不动。版本号 0916.087。**不需要做任何事，Lovable 同步 main 后自动生效** | docs/PLAN.md, docs/WORKLOG.md, src/lib/version.ts
