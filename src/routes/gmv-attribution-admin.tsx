@@ -17,6 +17,7 @@ import { SiteMismatchTable } from "@/components/attribution/SiteMismatchTable";
 import { DiagnosePanel } from "@/components/attribution/DiagnosePanel";
 import { ReconcilePanel } from "@/components/attribution/ReconcilePanel";
 import { DataPrepPanel } from "@/components/attribution/DataPrepPanel";
+import { IdentityPreviewPanel } from "@/components/attribution/IdentityPreviewPanel";
 import { TypeMixPanel } from "@/components/attribution/TypeMixPanel";
 import {
   type AttributionReport,
@@ -412,6 +413,8 @@ function MonthlyView() {
       </div>
 
       <DataPrepPanel month={month} />
+
+      <IdentityPreviewPanel />
 
       {refreshing ? (
         <div className="text-sm text-muted-foreground text-center py-16 space-y-1">

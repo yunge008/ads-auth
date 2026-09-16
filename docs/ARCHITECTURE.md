@@ -96,3 +96,35 @@
   **刻意排在快照之前半小时**：快照按「当下的登记数据」现算，先同步登记/目标/交接，当晚快照才吃得到当天的新数据。
   Edge Function 侧的 cron 免口令统一走 `_shared/cron.ts` 的 `cronAuthed(req)`（`x-cron-key` → `verify_gmv_cron_key` RPC）；
   `attribution-feishu` 只对 `sync-targets` / `sync-handovers` 放行 cron 身份，回写飞书类 action 仍必须带管理口令。
+
+## GMV 归因 V3（阶段 1–2 已落地，引擎尚未切换）
+
+按 `GMV_ATTRIBUTION_V3_PLAN`（v3.0）推进。**到阶段 2 为止，归因数字与切换前完全一致**——新表已建、数据已生成，但归因引擎（`attribution-run` / `attribution-upload` / `_shared/attribution.ts`）仍然读 `creator_ownership` 的单值归属。
+
+### 阶段 1：纯函数测试基建
+- `supabase/functions/_shared/attribution.test.ts`（35 例）固化**现有行为**，与 V3 规范不一致处用 `// V3:` 注明将来要改成什么；
+- `supabase/functions/_shared/identity.test.ts`（27 例）覆盖身份层与区间生成，用例编号对应计划 §九测试矩阵；
+- 零依赖：不引 vitest/jest，也不引 std/assert（deno.land 在云端会话不可达），断言函数写在测试文件内。
+- 跑法：`deno test supabase/functions/_shared/`
+
+### 阶段 2：事实层 / 身份层 / 区间层建模（只生成不使用）
+| 层 | 表 | 说明 |
+|---|---|---|
+| 事实层 | `staff_site_permissions` | 同事×站点的权限区间 `[start, end)`，已导入计划 §7.1 的 14 行；同人同站点区间不得重叠（EXCLUDE gist） |
+| 事实层 | `site_permission_enforcement` | 站点权限校验的灰度开关，**阶段 2 全部留空 = 校验未启用**；启用后该站点无权限记录 = 无权限 |
+| 事实层 | `attribution_exclusion_rules` | 「都不算」长期规则：VID 非空只按 VID 精确匹配；VID 为空则站点必填 + 昵称/用户名联合命中 |
+| 事实层 | `attribution_manual_rules` | VID 级人工强归因，永久有效可停用 |
+| 事实层 | `attribution_manual_decisions` | 人工达人判定**事实**（与派生区间分离，区间重建不会抹掉人工判定） |
+| 事实层 | `creator_identity_edges` | 身份证据边，append-only；人工否决错误合并靠把边标 `REJECTED` |
+| 半持久 | `creator_entities` | `creator_id` 分配表，一经分配永不重新随机生成；合并时保留创建更早的一方，另一方记 `merged_into` |
+| 派生层 | `creator_identity_aliases` | 达人历史昵称/用户名，每次从边重算；`UNIQUE(site, identity_type, normalized_value)` |
+| 派生层 | `creator_attribution_stages` | 达人「新素材」归属区间，`daterange [start,end)` + `EXCLUDE USING gist` 防重叠 |
+
+- 纯逻辑在 `_shared/identity.ts`（并查集算身份分量、`creator_id` 稳定分配、字段级最新值）与 `_shared/stages.ts`（发样/回收双事件、90 自然天保护期、交接 > 人工判定 > 90 天的事件优先级）；
+- 生成入口 `attribution-identity-build`（`action=build` 全量重建 / `action=report` 只读差异），前端在「GMV 归因·管理」页的「达人身份层 · 归属区间预演」面板；
+- 对账视图 `creator_stage_ownership_diff`（区间末段 vs 现有单值归属）、`attribution_posted_at_gap`（计划 §7.5：历史数据缺「发布时间」的影响面）；
+- 站点交接同步已按计划 §7.2 过滤「原BD=无」的初始分配行（那类行会让引擎去找一个名叫「无」的 BD），这些站点归属统一由 `staff_site_permissions` 维护。
+
+### 尚未做（阶段 3 起）
+发布时间改必填 + `posted_site_date`、归因弃用 VID 反推发布时间、引擎改读身份层与区间、站点权限校验、`PENDING`/`EXCLUDED` 两个桶、`pickVidOwner` 按 `staff+role` 去重、冲突表阻塞/提示分离、二级归属分类。这些都会改变归因数字，按计划 §八逐项单独提交、单独验收。
+

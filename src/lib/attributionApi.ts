@@ -192,6 +192,60 @@ export function syncCreators() {
   );
 }
 
+/**
+ * GMV 归因 V3 阶段 2：身份层与归属区间的「只生成不使用」预演。
+ *
+ * 【不改变任何归因数字】——引擎此刻仍读 creator_ownership 的单值归属。
+ * 这里生成的身份实体与归属区间只用来先回答「阶段 3 切引擎后会变多少」。
+ */
+export type IdentityBuildResult = {
+  country: string;
+  gmv_months?: number;
+  registry_rows?: number;
+  edges?: number;
+  components?: number;
+  components_multi_name?: number;
+  /** 靠 GMV MAX 昵称才和飞书身份连上的分量数：达人改名导致被拆成两个人的量级 */
+  components_linked_via_gmv_nickname?: number;
+  entities_created?: number;
+  entities_merged?: number;
+  identity_conflicts?: number;
+  identity_conflict_sample?: unknown[];
+  identity_merge_sample?: Array<{
+    site: string;
+    creator_id: string | null;
+    current_nickname: string | null;
+    current_username: string | null;
+    names: string[];
+  }>;
+  unusable_vids?: number;
+  aliases?: number;
+  stages?: number;
+  /** 归属区间多于一段的达人数 = 现有「单值归属」抹平掉的历史转移 */
+  creators_with_multiple_stages?: number;
+  protection_grabs?: number;
+  /** action='report' 才有：区间最后一段 vs 现有单值归属的差异 */
+  diff_by_kind?: Record<string, number>;
+  diff_sample?: Array<{
+    country: string;
+    creator_key: string;
+    display_name: string | null;
+    current_owner_bd: string | null;
+    stage_owner_bd: string | null;
+    stage_type: string | null;
+    diff_kind: string;
+  }>;
+  note?: string;
+};
+
+export function identityBuild(action: "build" | "report", p?: { country?: string; gmv_months?: number }) {
+  return invokeFn<IdentityBuildResult>(
+    "attribution-identity-build",
+    { action, ...(p ?? {}) },
+    { timeout: 300000 },
+  );
+}
+
 export function feishuAction<T = Record<string, unknown>>(action: string, extra?: Record<string, unknown>) {
   return invokeFn<T>("attribution-feishu", { action, ...(extra ?? {}) }, { timeout: 300000 });
 }

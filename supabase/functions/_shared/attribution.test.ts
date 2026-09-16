@@ -37,8 +37,15 @@ function assert(cond: unknown, msg = "断言失败"): asserts cond {
 }
 
 function assertEquals<T>(actual: T, expected: T, msg?: string): void {
-  const a = JSON.stringify(actual);
-  const e = JSON.stringify(expected);
+  // 键顺序不参与比较：这里比的是值，不是对象字面量的写法
+  const stable = (v: unknown): unknown =>
+    Array.isArray(v)
+      ? v.map(stable)
+      : v && typeof v === "object"
+      ? Object.fromEntries(Object.keys(v as object).sort().map((k) => [k, stable((v as Record<string, unknown>)[k])]))
+      : v;
+  const a = JSON.stringify(stable(actual));
+  const e = JSON.stringify(stable(expected));
   if (a !== e) throw new Error(`${msg ? msg + "：" : ""}实际 ${a} ≠ 预期 ${e}`);
 }
 
@@ -77,7 +84,7 @@ Deno.test("hasCjk / isHeaderLikeSite：汉字站点是数据填错，表头词�
 
 Deno.test("identityKey / splitIdentityKey：站点必带，往返一致", () => {
   const k = identityKey("ph", "wang888");
-  assertEquals(k, "PHwang888");
+  assertEquals(k, "PH\u001fwang888");
   assertEquals(splitIdentityKey(k), { country: "PH", normalizedName: "wang888" });
   // 站点不同即视为不同的人，不做跨站点兜底
   assert(identityKey("PH", "x") !== identityKey("PH2", "x"));
@@ -182,7 +189,7 @@ Deno.test("resolveOwnership: 保护期内抢注 → 归属不变 + PROTECTION_GR
   assertEquals(owners[0].transferCount, 0);
   assertEquals(reviews.length, 1);
   assertEquals(reviews[0].type, "PROTECTION_GRAB");
-  assertEquals(reviews[0].reviewKey, "GRAB:NICKNAME:PHwang888");
+  assertEquals(reviews[0].reviewKey, "GRAB:NICKNAME:PH\u001fwang888");
 });
 
 Deno.test("resolveOwnership: 无日期行排最前；owner 无日期时异 BD 直接转移", () => {

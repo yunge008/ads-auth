@@ -28,6 +28,13 @@ import { buildMonthlyReport } from "../_shared/attribution-report.ts";
 /** cron 身份只放行这两个动作：纯读飞书配置表 + 写自己库，任何回写飞书的 action 仍必须带管理口令。 */
 const CRON_ACTIONS = new Set(["sync-targets", "sync-handovers"]);
 
+/**
+ * 站点交接表「原BD」列里表示「没有前任」的写法。命中这些值的行是初始分配而非交接，
+ * 不入 site_handovers（V3 计划 §7.2），站点归属统一由 staff_site_permissions 维护。
+ * normalizeName 已把 '-' / 'N/A' / 'none' 之类归一成空串，所以这里只需要再补汉字写法。
+ */
+const NO_FROM_BD = new Set(["", "\u65e0", "\u7121"]);
+
 const SHEET_PROGRESS = "\u7ee9\u6548\u7edf\u8ba1\u8bb0\u5f55";
 const SHEET_REVIEWS = "\u5f52\u56e0\u5ba1\u67e5";
 const SHEET_CONFIG = "\u7ee9\u6548\u914d\u7f6e\u8868";
@@ -482,6 +489,8 @@ Deno.serve(async (req) => {
       const rows = await readRange(token, perf.ss, `${sid}!H2:L`);
       const payload: Array<{ country: string; from_bd: string; to_bd: string; handover_date: string; note: string | null }> = [];
       const skipped: string[] = [];
+      /** 「原BD=无」的行不是交接，是「这个站点从这天起有人负责」的初始分配（V3 计划 §7.2）。 */
+      const initialAssignments: string[] = [];
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i] ?? [];
         const country = cellText(r[0]);
@@ -489,6 +498,12 @@ Deno.serve(async (req) => {
         const toBd = cellText(r[2]);
         const date = parseDate(r[3]);
         if (!country && !fromBd && !toBd) continue;
+        // 初始分配不入交接表：灌进去会让引擎去找一个名叫「无」的 BD 名下的达人，
+        // 要么空跑要么匹配出奇怪结果。这类站点归属统一由 staff_site_permissions 维护。
+        if (NO_FROM_BD.has(normalizeName(fromBd))) {
+          initialAssignments.push(`第 ${i + 2} 行（${country} → ${toBd} ${cellText(r[3])}）`);
+          continue;
+        }
         if (!country || !fromBd || !toBd || !date) {
           skipped.push(`第 ${i + 2} 行（${country}/${fromBd}→${toBd}/${cellText(r[3])}）`);
           continue;
@@ -506,7 +521,7 @@ Deno.serve(async (req) => {
         const { error } = await db.from("site_handovers").insert(finalRows);
         if (error) throw new Error(error.message);
       }
-      return json({ synced: finalRows.length, skipped, spreadsheet: perf.ss });
+      return json({ synced: finalRows.length, skipped, initial_assignments: initialAssignments, spreadsheet: perf.ss });
     }
 
     // ---------- 达人归因表镜像（覆盖写） ----------
