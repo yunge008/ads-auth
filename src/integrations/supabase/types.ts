@@ -440,6 +440,132 @@ export type Database = {
         }
         Relationships: []
       }
+      attribution_exclusion_rules: {
+        Row: {
+          country: string
+          created_at: string
+          created_by: string | null
+          enabled: boolean
+          handle_norm: string
+          id: string
+          nickname_norm: string
+          note: string | null
+          reason: string
+          updated_at: string
+          vid: string
+        }
+        Insert: {
+          country?: string
+          created_at?: string
+          created_by?: string | null
+          enabled?: boolean
+          handle_norm?: string
+          id?: string
+          nickname_norm?: string
+          note?: string | null
+          reason: string
+          updated_at?: string
+          vid?: string
+        }
+        Update: {
+          country?: string
+          created_at?: string
+          created_by?: string | null
+          enabled?: boolean
+          handle_norm?: string
+          id?: string
+          nickname_norm?: string
+          note?: string | null
+          reason?: string
+          updated_at?: string
+          vid?: string
+        }
+        Relationships: []
+      }
+      attribution_manual_decisions: {
+        Row: {
+          country: string
+          created_at: string
+          created_by: string | null
+          creator_key: string
+          decision: string
+          effective_from: string
+          effective_to: string | null
+          enabled: boolean
+          id: string
+          reason: string | null
+          scope: string
+          staff_name: string | null
+          updated_at: string
+        }
+        Insert: {
+          country: string
+          created_at?: string
+          created_by?: string | null
+          creator_key: string
+          decision: string
+          effective_from: string
+          effective_to?: string | null
+          enabled?: boolean
+          id?: string
+          reason?: string | null
+          scope?: string
+          staff_name?: string | null
+          updated_at?: string
+        }
+        Update: {
+          country?: string
+          created_at?: string
+          created_by?: string | null
+          creator_key?: string
+          decision?: string
+          effective_from?: string
+          effective_to?: string | null
+          enabled?: boolean
+          id?: string
+          reason?: string | null
+          scope?: string
+          staff_name?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      attribution_manual_rules: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          enabled: boolean
+          id: string
+          reason: string | null
+          role: string
+          staff_name: string
+          updated_at: string
+          vid: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          enabled?: boolean
+          id?: string
+          reason?: string | null
+          role: string
+          staff_name: string
+          updated_at?: string
+          vid: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          enabled?: boolean
+          id?: string
+          reason?: string | null
+          role?: string
+          staff_name?: string
+          updated_at?: string
+          vid?: string
+        }
+        Relationships: []
+      }
       attribution_review: {
         Row: {
           created_at: string
@@ -934,6 +1060,201 @@ export type Database = {
         }
         Relationships: []
       }
+      creator_attribution_stages: {
+        Row: {
+          built_at: string
+          country: string
+          created_at: string
+          creator_id: string | null
+          creator_key: string
+          end_date: string | null
+          evidence: Json | null
+          id: string
+          staff_name: string
+          stage_type: string
+          start_date: string
+          updated_at: string
+          valid_range: unknown
+        }
+        Insert: {
+          built_at?: string
+          country: string
+          created_at?: string
+          creator_id?: string | null
+          creator_key: string
+          end_date?: string | null
+          evidence?: Json | null
+          id?: string
+          staff_name: string
+          stage_type: string
+          start_date: string
+          updated_at?: string
+          valid_range?: unknown
+        }
+        Update: {
+          built_at?: string
+          country?: string
+          created_at?: string
+          creator_id?: string | null
+          creator_key?: string
+          end_date?: string | null
+          evidence?: Json | null
+          id?: string
+          staff_name?: string
+          stage_type?: string
+          start_date?: string
+          updated_at?: string
+          valid_range?: unknown
+        }
+        Relationships: [
+          {
+            foreignKeyName: "creator_attribution_stages_creator_id_fkey"
+            columns: ["creator_id"]
+            isOneToOne: false
+            referencedRelation: "creator_entities"
+            referencedColumns: ["creator_id"]
+          },
+        ]
+      }
+      creator_entities: {
+        Row: {
+          created_at: string
+          creator_id: string
+          identity_signature: string
+          merged_into: string | null
+          site: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          creator_id?: string
+          identity_signature: string
+          merged_into?: string | null
+          site: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          creator_id?: string
+          identity_signature?: string
+          merged_into?: string | null
+          site?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "creator_entities_merged_into_fkey"
+            columns: ["merged_into"]
+            isOneToOne: false
+            referencedRelation: "creator_entities"
+            referencedColumns: ["creator_id"]
+          },
+        ]
+      }
+      creator_identity_aliases: {
+        Row: {
+          created_at: string
+          creator_id: string
+          first_seen_date: string | null
+          id: string
+          identity_type: string
+          identity_value: string
+          last_seen_date: string | null
+          normalized_value: string
+          site: string
+          source: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          creator_id: string
+          first_seen_date?: string | null
+          id?: string
+          identity_type: string
+          identity_value?: string
+          last_seen_date?: string | null
+          normalized_value: string
+          site: string
+          source: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          creator_id?: string
+          first_seen_date?: string | null
+          id?: string
+          identity_type?: string
+          identity_value?: string
+          last_seen_date?: string | null
+          normalized_value?: string
+          site?: string
+          source?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "creator_identity_aliases_creator_id_fkey"
+            columns: ["creator_id"]
+            isOneToOne: false
+            referencedRelation: "creator_entities"
+            referencedColumns: ["creator_id"]
+          },
+        ]
+      }
+      creator_identity_edges: {
+        Row: {
+          created_at: string
+          decided_by: string | null
+          evidence: Json | null
+          feishu_nickname_norm: string
+          feishu_username_norm: string
+          gmv_nickname_norm: string
+          id: string
+          last_observed_date: string | null
+          observed_date: string | null
+          site: string
+          source: string
+          status: string
+          updated_at: string
+          vid: string
+        }
+        Insert: {
+          created_at?: string
+          decided_by?: string | null
+          evidence?: Json | null
+          feishu_nickname_norm?: string
+          feishu_username_norm?: string
+          gmv_nickname_norm?: string
+          id?: string
+          last_observed_date?: string | null
+          observed_date?: string | null
+          site: string
+          source: string
+          status?: string
+          updated_at?: string
+          vid: string
+        }
+        Update: {
+          created_at?: string
+          decided_by?: string | null
+          evidence?: Json | null
+          feishu_nickname_norm?: string
+          feishu_username_norm?: string
+          gmv_nickname_norm?: string
+          id?: string
+          last_observed_date?: string | null
+          observed_date?: string | null
+          site?: string
+          source?: string
+          status?: string
+          updated_at?: string
+          vid?: string
+        }
+        Relationships: []
+      }
       creator_ownership: {
         Row: {
           country: string
@@ -1265,31 +1586,64 @@ export type Database = {
         Row: {
           country: string
           created_at: string
+          creator_keys: string[]
           from_bd: string
           handover_date: string
           id: string
           note: string | null
+          scope: string
           to_bd: string
           updated_at: string
         }
         Insert: {
           country: string
           created_at?: string
+          creator_keys?: string[]
           from_bd: string
           handover_date: string
           id?: string
           note?: string | null
+          scope?: string
           to_bd: string
           updated_at?: string
         }
         Update: {
           country?: string
           created_at?: string
+          creator_keys?: string[]
           from_bd?: string
           handover_date?: string
           id?: string
           note?: string | null
+          scope?: string
           to_bd?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      site_permission_enforcement: {
+        Row: {
+          country: string
+          created_at: string
+          enabled: boolean
+          enforcement_start_date: string
+          note: string | null
+          updated_at: string
+        }
+        Insert: {
+          country: string
+          created_at?: string
+          enabled?: boolean
+          enforcement_start_date: string
+          note?: string | null
+          updated_at?: string
+        }
+        Update: {
+          country?: string
+          created_at?: string
+          enabled?: boolean
+          enforcement_start_date?: string
+          note?: string | null
           updated_at?: string
         }
         Relationships: []
@@ -1357,6 +1711,45 @@ export type Database = {
           sheet_name?: string
           sort_order?: number
           updated_at?: string
+        }
+        Relationships: []
+      }
+      staff_site_permissions: {
+        Row: {
+          country: string
+          created_at: string
+          created_by: string | null
+          end_date: string | null
+          id: string
+          note: string | null
+          staff_name: string
+          start_date: string
+          updated_at: string
+          valid_range: unknown
+        }
+        Insert: {
+          country: string
+          created_at?: string
+          created_by?: string | null
+          end_date?: string | null
+          id?: string
+          note?: string | null
+          staff_name: string
+          start_date: string
+          updated_at?: string
+          valid_range?: unknown
+        }
+        Update: {
+          country?: string
+          created_at?: string
+          created_by?: string | null
+          end_date?: string | null
+          id?: string
+          note?: string | null
+          staff_name?: string
+          start_date?: string
+          updated_at?: string
+          valid_range?: unknown
         }
         Relationships: []
       }
@@ -1515,7 +1908,32 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      attribution_posted_at_gap: {
+        Row: {
+          country: string | null
+          missing_gmv_pct: number | null
+          missing_gmv_usd: number | null
+          missing_rows: number | null
+          month: string | null
+          total_gmv_usd: number | null
+          total_rows: number | null
+        }
+        Relationships: []
+      }
+      creator_stage_ownership_diff: {
+        Row: {
+          country: string | null
+          creator_key: string | null
+          current_owner_bd: string | null
+          diff_kind: string | null
+          display_name: string | null
+          stage_owner_bd: string | null
+          stage_start_date: string | null
+          stage_type: string | null
+          transfer_count: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       attribution_apply_run: {
@@ -1582,6 +2000,15 @@ export type Database = {
           raw_rows: number
           total_cost_usd: number
           total_revenue_usd: number
+        }[]
+      }
+      attribution_identity_gmv_names: {
+        Args: { _country?: string; _months?: number }
+        Returns: {
+          account_name: string
+          country: string
+          month: string
+          vid: string
         }[]
       }
       attribution_month_key_count: { Args: { _month: string }; Returns: number }
