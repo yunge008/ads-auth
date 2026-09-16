@@ -128,3 +128,26 @@
 ### 尚未做（阶段 3 起）
 发布时间改必填 + `posted_site_date`、归因弃用 VID 反推发布时间、引擎改读身份层与区间、站点权限校验、`PENDING`/`EXCLUDED` 两个桶、`pickVidOwner` 按 `staff+role` 去重、冲突表阻塞/提示分离、二级归属分类。这些都会改变归因数字，按计划 §八逐项单独提交、单独验收。
 
+## 保护期 = 90 自然天（2026-09-16 起全系统统一）
+
+- 常量与日期工具**只有一份实现**：`_shared/attribution.ts` 的 `PROTECTION_DAYS = 90` / `addDaysISO` / `diffDays`，
+  `_shared/stages.ts` 原样再导出。归因引擎（`resolveOwnership`）与 V3 区间层（`buildStagesForCreator`）同口径。
+- 窗口半开 `[ownerLast, ownerLast+90)`：异 BD 动作落在窗口内 = 抢注无效（归属不变 + `PROTECTION_GRAB` 审查项），
+  距 owner 最近一次有效动作**满 90 天**才转移。从新动作日 D 往回看即 `[D-90, D)`，两种说法等价。
+- 改动前是「3 个自然月」（`addMonthsISO`），实际长度在 89–92 天之间漂：`2/1 → 5/1` 只有 89 天却算满 3 个月，
+  `1/10 → 4/10` 正好 90 天。改成自然天后边界唯一，与月份长度无关。
+- SQL 侧从未实现过保护期（只把 `creator_ownership` 当查找表用），所以这次只改了 TS 一处。
+- **一致性校验**：`attribution_protection_owner_90d(站点, 天数)` 是一份**独立的 SQL 第二实现**，
+  视图 `attribution_protection_check_90d` 把它与引擎落库的 `creator_ownership` 对账，正常应该零差异。
+  阶段 3.2（发样/回收双事件）落地时必须同步改这个函数，否则会开始报假差异。
+
+## 「发布时间」只有视频/图片类型才有
+
+直播与商品卡片的广告行本身没有「发布时间 / Time posted」，这不是数据缺失。相关口径：
+
+- `attribution_needs_posted_at(creative_type)`：排除 `product_card` / `live`（中英文写法都认），其余都算「应该有发布时间」；
+- `attribution_posted_at_gap` 视图据此重建：`missing_gmv_pct` 的分母是「应该有发布时间」的金额，
+  直播/商品卡单列在 `no_posted_at_by_design_usd`，另有 `pending_gmv_usd` = 应该有发布时间却为空**且**没被 VID 强归因命中的金额，
+  这才是阶段 3.1 之后真正会进 PENDING 的部分；
+- 因此阶段 3.1 的「`posted_at` 改必填」指的是**表头必须有这一列**，不是每行都必须有值 —— 直播/商品卡行为空是正常的。
+

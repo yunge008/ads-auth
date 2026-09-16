@@ -12,8 +12,11 @@ import {
   type AttrInputRow,
   type Handover,
   type RegistryEntry,
+  PROTECTION_DAYS,
+  addDaysISO,
   applyHandover,
   attributeRows,
+  diffDays,
   classifyAttribution,
   hasCjk,
   identityKey,
@@ -167,8 +170,7 @@ Deno.test("resolveOwnership: owner = 最早登记 BD，同 BD 再登记刷新最
 });
 
 Deno.test("resolveOwnership: 异 BD 登记满保护期 → 转移", () => {
-  // 现状：保护期 = 3 个「自然月」（addMonthsISO），不是 90 天
-  // V3 §八 3.3：改成 90 自然天、窗口 [D-90, D)
+  // 保护期 = 90 自然天（2026-09-16 起；此前是 3 个自然月，长度在 89–92 天之间漂）
   const groups = new Map([[
     identityKey("PH", "wang888"),
     [entry("李汝华", "2026-01-10"), entry("何莎莎", "2026-04-10")],
@@ -204,15 +206,25 @@ Deno.test("resolveOwnership: 无日期行排最前；owner 无日期时异 BD �
   assertEquals(owners[0].firstDate, null);
 });
 
-Deno.test("resolveOwnership: 保护期月数可调，边界为「≥ 起始日 + N 月」", () => {
-  const mk = (d: string) =>
-    new Map([[identityKey("PH", "wang888"), [entry("李汝华", "2026-01-10"), entry("何莎莎", d)]]]);
-  // 恰好 3 个月 → 转移
-  assertEquals(resolveOwnership(mk("2026-04-10"), "NICKNAME").owners[0].ownerBd, "何莎莎");
-  // 差一天 → 抢注
-  assertEquals(resolveOwnership(mk("2026-04-09"), "NICKNAME").owners[0].ownerBd, "李汝华");
-  // 参数化
-  assertEquals(resolveOwnership(mk("2026-04-10"), "NICKNAME", 6).owners[0].ownerBd, "李汝华");
+Deno.test("resolveOwnership: 保护期边界 = 「距最近动作满 90 自然天」，天数可调", () => {
+  const mk = (first: string, second: string) =>
+    new Map([[identityKey("PH", "wang888"), [entry("李汝华", first), entry("何莎莎", second)]]]);
+  // 恰好第 90 天 → 转移；第 89 天 → 抢注
+  assertEquals(resolveOwnership(mk("2026-01-10", "2026-04-10"), "NICKNAME").owners[0].ownerBd, "何莎莎");
+  assertEquals(resolveOwnership(mk("2026-01-10", "2026-04-09"), "NICKNAME").owners[0].ownerBd, "李汝华");
+  // 跨 2 月也是整 90 天，不再受月份长度影响（旧的 3 个自然月在这里只有 89 天，会判成抢注）
+  assertEquals(resolveOwnership(mk("2026-02-01", "2026-05-02"), "NICKNAME").owners[0].ownerBd, "何莎莎");
+  assertEquals(resolveOwnership(mk("2026-02-01", "2026-04-30"), "NICKNAME").owners[0].ownerBd, "李汝华");
+  // 天数可调
+  assertEquals(resolveOwnership(mk("2026-01-10", "2026-04-10"), "NICKNAME", 180).owners[0].ownerBd, "李汝华");
+});
+
+Deno.test("PROTECTION_DAYS / diffDays / addDaysISO：全系统同一份口径", () => {
+  assertEquals(PROTECTION_DAYS, 90);
+  assertEquals(addDaysISO("2026-01-10", 90), "2026-04-10");
+  assertEquals(diffDays("2026-01-10", "2026-04-10"), 90);
+  assertEquals(diffDays("2026-02-01", "2026-05-01"), 89); // 旧的「3 个自然月」在这里只有 89 天
+  assertEquals(addDaysISO("2026-12-31", 1), "2027-01-01");
 });
 
 // ---------- applyHandover ----------

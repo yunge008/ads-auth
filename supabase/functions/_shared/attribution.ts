@@ -212,13 +212,35 @@ export type AttrRunResult = {
   newAliases: NewAlias[];
 };
 
-// ---------- 站点交接分段 ----------
+// ---------- 日期与保护期 ----------
 
-function addMonthsISO(dateStr: string, months: number): string {
+/**
+ * 达人归属保护期 = **90 自然天**（2026-09-16 起，全系统统一，归因与报表同口径）。
+ *
+ * 之前是「3 个自然月」：月份长度不一，1/10 起算落在 4/10、3/1 起算落在 6/1，
+ * 实际长度在 89–92 天之间来回漂，同一条规则在不同月份松紧不一样。改成自然天后边界唯一。
+ *
+ * 窗口是半开的 `[ownerLast, ownerLast+90)`：
+ * 异 BD 动作落在窗口内 = 抢注无效（归属不变 + 记审查项）；
+ * 落在窗口外（即距 ownerLast **满 90 天**）= 归属转移。
+ * 从新动作日 D 往回看就是计划里写的 `[D-90, D)`，两种说法等价。
+ */
+export const PROTECTION_DAYS = 90;
+
+/** 日期加天数（按 UTC 自然天，不受运行环境时区影响）。 */
+export function addDaysISO(dateStr: string, days: number): string {
   const d = new Date(`${dateStr}T00:00:00Z`);
-  d.setUTCMonth(d.getUTCMonth() + months);
+  d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }
+
+/** b - a 的自然天数。 */
+export function diffDays(a: string, b: string): number {
+  const ms = new Date(`${b}T00:00:00Z`).getTime() - new Date(`${a}T00:00:00Z`).getTime();
+  return Math.round(ms / 86400000);
+}
+
+// ---------- 站点交接分段 ----------
 
 /** 某个同事对某个达人、在 `from`（含）之后的第一次登记动作日期；没有则返回 null。 */
 function firstActionOnOrAfter(dates: string[] | undefined, from: string): string | null {
@@ -331,12 +353,12 @@ export type OwnershipResolution = {
 /**
  * 每个 matchKey 独立解析：按登记日期升序迭代（无日期行排最前）。
  * owner=最早登记 BD；同 BD 再登记刷新最后建联日期；
- * 异 BD 登记距 owner 最后日期 ≥ protectionMonths 个月 → 归属转移，否则为保护期抢注（记审查项）。
+ * 异 BD 登记距 owner 最后日期 ≥ protectionDays 个自然天 → 归属转移，否则为保护期抢注（记审查项）。
  */
 export function resolveOwnership(
   groups: Map<string, RegistryEntry[]>,
   keyType: "NICKNAME" | "HANDLE",
-  protectionMonths = 3,
+  protectionDays = PROTECTION_DAYS,
 ): { owners: OwnershipResolution[]; reviews: ReviewItem[] } {
   const owners: OwnershipResolution[] = [];
   const reviews: ReviewItem[] = [];
@@ -372,7 +394,7 @@ export function resolveOwnership(
         owner = e.staff;
         ownerLast = e.date;
         transferCount++;
-      } else if (e.date && e.date >= addMonthsISO(ownerLast, protectionMonths)) {
+      } else if (e.date && diffDays(ownerLast, e.date) >= protectionDays) {
         owner = e.staff;
         ownerLast = e.date;
         transferCount++;
@@ -400,7 +422,7 @@ export function resolveOwnership(
         type: "PROTECTION_GRAB",
         subject: last?.display ?? matchKey,
         detail: { keyType, owner, ownerLastDate: ownerLast, grabs },
-        defaultResolution: `保护期内抢注无效，归属维持 ${owner}（最后建联 ${ownerLast ?? "无日期"}）`,
+        defaultResolution: `保护期（90 自然天）内抢注无效，归属维持 ${owner}（最后建联 ${ownerLast ?? "无日期"}）`,
       });
     }
   }

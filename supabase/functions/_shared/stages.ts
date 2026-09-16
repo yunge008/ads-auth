@@ -9,13 +9,15 @@
 //    这里把发样(SAMPLE)/回收素材(RECLAIM)展开成同一条时间线上的两个事件：
 //    firstDate = min(所有事件)，ownerLast = max(当前 owner 的所有事件)。
 //
-// 2. **保护期 = 90 自然天**，窗口 `[D-90, D)`；现有实现是「3 个自然月」（addMonthsISO），
-//    月份长度不一，2 月/大小月的边界会漂。
+// 2. **保护期 = 90 自然天**，窗口 `[D-90, D)`，与线上引擎同口径
+//    （2026-09-16 起两边都改成 90 天，常量与日期工具共用 attribution.ts 的同一份实现）。
 //
 // 3. **产出是区间而不是单值**。现有 creator_ownership 只有「当前 owner」一个值，
 //    历史月份的 GMV 会被今天的归属改判；区间按发布日期命中，历史数字才稳定。
 //
 // 事件优先级（同一天多个事件时）：正式交接 > 人工达人判定 > 90 天规则自动切换。
+
+import { PROTECTION_DAYS, addDaysISO, diffDays } from "./attribution.ts";
 
 export type ActionKind = "SAMPLE" | "RECLAIM";
 
@@ -55,20 +57,9 @@ export type StageGrab = { country: string; creatorKey: string; owner: string; gr
 
 export type StageBuild = { stages: Stage[]; grabs: StageGrab[] };
 
-export const PROTECTION_DAYS = 90;
-
-/** 日期加天数（按 UTC 自然天，不受时区影响）。 */
-export function addDaysISO(dateStr: string, days: number): string {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-/** a 与 b 相差的自然天数（b - a）。 */
-export function diffDays(a: string, b: string): number {
-  const ms = new Date(`${b}T00:00:00Z`).getTime() - new Date(`${a}T00:00:00Z`).getTime();
-  return Math.round(ms / 86400000);
-}
+// 保护期天数与日期工具**只有一份实现**，在 attribution.ts 里 —— 区间层与线上引擎
+// 必须永远同口径，各写一套迟早会漂。这里原样再导出，方便本模块的调用方直接用。
+export { PROTECTION_DAYS, addDaysISO, diffDays };
 
 /**
  * 登记行 → 动作事件。**一行最多两条**：发样日一条、回收素材日一条。
