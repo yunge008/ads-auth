@@ -21,6 +21,7 @@ import { Route as ApiTestRouteImport } from './routes/api-test'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as OauthTiktokCallbackRouteImport } from './routes/oauth.tiktok.callback'
 import { Route as ApiPublicHooksGmvMaxCronRouteImport } from './routes/api/public/hooks/gmv-max-cron'
+import { Route as ApiPublicHooksFeishuSyncCronRouteImport } from './routes/api/public/hooks/feishu-sync-cron'
 import { Route as ApiPublicHooksAuthorizeCronRouteImport } from './routes/api/public/hooks/authorize-cron'
 import { Route as ApiPublicHooksAttributionCronRouteImport } from './routes/api/public/hooks/attribution-cron'
 
@@ -85,6 +86,12 @@ const ApiPublicHooksGmvMaxCronRoute =
     path: '/api/public/hooks/gmv-max-cron',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicHooksFeishuSyncCronRoute =
+  ApiPublicHooksFeishuSyncCronRouteImport.update({
+    id: '/api/public/hooks/feishu-sync-cron',
+    path: '/api/public/hooks/feishu-sync-cron',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicHooksAuthorizeCronRoute =
   ApiPublicHooksAuthorizeCronRouteImport.update({
     id: '/api/public/hooks/authorize-cron',
@@ -112,6 +119,7 @@ export interface FileRoutesByFullPath {
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
   '/api/public/hooks/attribution-cron': typeof ApiPublicHooksAttributionCronRoute
   '/api/public/hooks/authorize-cron': typeof ApiPublicHooksAuthorizeCronRoute
+  '/api/public/hooks/feishu-sync-cron': typeof ApiPublicHooksFeishuSyncCronRoute
   '/api/public/hooks/gmv-max-cron': typeof ApiPublicHooksGmvMaxCronRoute
 }
 export interface FileRoutesByTo {
@@ -128,6 +136,7 @@ export interface FileRoutesByTo {
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
   '/api/public/hooks/attribution-cron': typeof ApiPublicHooksAttributionCronRoute
   '/api/public/hooks/authorize-cron': typeof ApiPublicHooksAuthorizeCronRoute
+  '/api/public/hooks/feishu-sync-cron': typeof ApiPublicHooksFeishuSyncCronRoute
   '/api/public/hooks/gmv-max-cron': typeof ApiPublicHooksGmvMaxCronRoute
 }
 export interface FileRoutesById {
@@ -145,6 +154,7 @@ export interface FileRoutesById {
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
   '/api/public/hooks/attribution-cron': typeof ApiPublicHooksAttributionCronRoute
   '/api/public/hooks/authorize-cron': typeof ApiPublicHooksAuthorizeCronRoute
+  '/api/public/hooks/feishu-sync-cron': typeof ApiPublicHooksFeishuSyncCronRoute
   '/api/public/hooks/gmv-max-cron': typeof ApiPublicHooksGmvMaxCronRoute
 }
 export interface FileRouteTypes {
@@ -163,6 +173,7 @@ export interface FileRouteTypes {
     | '/oauth/tiktok/callback'
     | '/api/public/hooks/attribution-cron'
     | '/api/public/hooks/authorize-cron'
+    | '/api/public/hooks/feishu-sync-cron'
     | '/api/public/hooks/gmv-max-cron'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -179,6 +190,7 @@ export interface FileRouteTypes {
     | '/oauth/tiktok/callback'
     | '/api/public/hooks/attribution-cron'
     | '/api/public/hooks/authorize-cron'
+    | '/api/public/hooks/feishu-sync-cron'
     | '/api/public/hooks/gmv-max-cron'
   id:
     | '__root__'
@@ -195,6 +207,7 @@ export interface FileRouteTypes {
     | '/oauth/tiktok/callback'
     | '/api/public/hooks/attribution-cron'
     | '/api/public/hooks/authorize-cron'
+    | '/api/public/hooks/feishu-sync-cron'
     | '/api/public/hooks/gmv-max-cron'
   fileRoutesById: FileRoutesById
 }
@@ -212,6 +225,7 @@ export interface RootRouteChildren {
   OauthTiktokCallbackRoute: typeof OauthTiktokCallbackRoute
   ApiPublicHooksAttributionCronRoute: typeof ApiPublicHooksAttributionCronRoute
   ApiPublicHooksAuthorizeCronRoute: typeof ApiPublicHooksAuthorizeCronRoute
+  ApiPublicHooksFeishuSyncCronRoute: typeof ApiPublicHooksFeishuSyncCronRoute
   ApiPublicHooksGmvMaxCronRoute: typeof ApiPublicHooksGmvMaxCronRoute
 }
 
@@ -301,6 +315,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicHooksGmvMaxCronRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/hooks/feishu-sync-cron': {
+      id: '/api/public/hooks/feishu-sync-cron'
+      path: '/api/public/hooks/feishu-sync-cron'
+      fullPath: '/api/public/hooks/feishu-sync-cron'
+      preLoaderRoute: typeof ApiPublicHooksFeishuSyncCronRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/hooks/authorize-cron': {
       id: '/api/public/hooks/authorize-cron'
       path: '/api/public/hooks/authorize-cron'
@@ -332,6 +353,7 @@ const rootRouteChildren: RootRouteChildren = {
   OauthTiktokCallbackRoute: OauthTiktokCallbackRoute,
   ApiPublicHooksAttributionCronRoute: ApiPublicHooksAttributionCronRoute,
   ApiPublicHooksAuthorizeCronRoute: ApiPublicHooksAuthorizeCronRoute,
+  ApiPublicHooksFeishuSyncCronRoute: ApiPublicHooksFeishuSyncCronRoute,
   ApiPublicHooksGmvMaxCronRoute: ApiPublicHooksGmvMaxCronRoute,
 }
 export const routeTree = rootRouteImport
