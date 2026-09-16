@@ -7,12 +7,14 @@
 
 1. **自动授权**：每天北京 08:00 pg_cron → `/api/public/hooks/authorize-cron` → 循环执行授权 → 飞书机器人通知（已完成）
 2. **GMV Max 性能优化**：短期索引已落库 ✅；中期 rollup 表、远期月分区待数据再上量后评估
-3. **前端「上次自动刷新时间」UI**：展示 `gmv_max_sync_state` 最近运行时间（未做）
+3. **飞书基础数据自动同步**：每天北京 23:00 pg_cron → `/api/public/hooks/feishu-sync-cron` → 发样及素材统计 / 达人登记 / GMV 目标 / 站点交接 四个同步，早于 23:30 的归因快照（已完成）
+4. **前端「上次自动刷新时间」UI**：展示 `gmv_max_sync_state` 最近运行时间（未做）
 
 ## 任务板
 
 | 任务 | 状态 | 认领 | 涉及文件 | 备注 |
 | --- | --- | --- | --- | --- |
+| 飞书基础数据每晚自动同步（发样及素材统计 + 达人登记 / GMV 目标 / 站点交接） | ✅ 完成 2026-09-16（**待人工：跑 migration `20260916120000_feishu_sync_cron.sql`；重新部署 `feishu-read-connection-stats`、`attribution-sync-creators`、`attribution-feishu`**） | claude 2026-09-16 | src/routes/api/public/hooks/feishu-sync-cron.ts、supabase/migrations/20260916120000_feishu_sync_cron.sql、supabase/functions/_shared/cron.ts、supabase/functions/{feishu-read-connection-stats,attribution-sync-creators,attribution-feishu}/index.ts、src/routes/{connection-stats,gmv-attribution-admin}.tsx | pg_cron job `feishu-sync-nightly`（`0 15 * * *` = 北京 23:00）→ 新服务端路由串行跑四个同步，排在归因快照（23:30）之前半小时，保证当晚快照用的是当天的登记/目标/交接数据。单步 4 分钟超时、失败不影响后面几步，结果写 `gmv_max_sync_state('feishu_nightly_sync')`，有失败发飞书机器人通知。cron 免口令统一走 `_shared/cron.ts`，`attribution-feishu` 只放行两个纯同步 action。 |
 | GMV 归因进度（按审核计划重构） | ⏸ 已由下方「GMV 归因 V1 落地」接手/取代 2026-09-09 | codex 2026-07-11 → claude 2026-09-09 | docs/GMV_ATTRIBUTION_REVIEW_PLAN.md、supabase/migrations/、supabase/functions/attribution-*、supabase/functions/_shared/{attribution,attribution-report}.ts、src/routes/gmv-attribution*.tsx、src/components/attribution/*、src/lib/{attributionApi,adExcel,tabs}.ts、src/routes/settings.tsx | 该任务近两个月未推进（认领于 2026-07-11），批次固化/定时刷新/原子切换/目标组/2000 美元阈值展示规则等第 7-11 节内容已过时。2026-09-09 claude 按新方案 `GMV_ATTRIBUTION_V1_PLAN.md` 接手同一批文件（范围更小、已落地，见下一行任务），本行仅保留历史记录，不再单独推进；`attribution_batches`/`attribution_batch_details`/`attribution_run_state` 三张表继续保留不接线。 |
 | GMV 归因 V1（Excel 上传合并汇总 + 汇率修正 + 唯一VID导出 + 审查判定 + 上传体验） | ✅ 完成 2026-09-09（`attribution-upload`、`attribution-feishu` 已重新部署） | claude 2026-09-09 | supabase/functions/{attribution-upload,attribution-feishu}/index.ts、supabase/functions/_shared/attribution-report.ts、src/routes/gmv-attribution*.tsx、src/components/attribution/{UploadView,ReviewPanel,UploadStatusMatrix,UnmatchedTrendTable}.tsx、src/components/settings/ExchangeRateCard.tsx、src/routes/settings.tsx、src/lib/{api,attributionApi}.ts | 见下方「已完成」条目详细说明（第二轮：修复上传去重误伤分卷文件、大文件 finalize 报错、飞书判定读回列错位；新增网页端直接判定+双写飞书、上传历史分页与状态矩阵、无建联达人12个月趋势表、GMV归因页表格化）。 |
 | GMV 归因 V2（大文件上传进度/断点 + 归因口径自查） | ✅ 完成 2026-09-10（**待人工：重新部署 attribution-upload**） | claude 2026-09-10 | src/lib/uploadQueue.ts、src/components/attribution/{UploadView,DiagnosePanel}.tsx、src/routes/gmv-attribution-admin.tsx、src/lib/attributionApi.ts、supabase/functions/attribution-upload/index.ts | ①上传队列与上传循环挪到模块级 store，切标签页/切页面回来进度不丢；状态列右侧新增「进度」列（百分比+已传行数/总行数+当前阶段），sessionStorage 镜像使刷新后仍能看到上一轮进度 ②分批 1000→2000、3 并发、单批失败指数退避重试 3 次 ③finalize 只读归因需要的 9 列、回填只发主键+4 个 attr 列（原来 22 列全量回传是 10 万行卡在「上传中」的主因）④上传历史对非 READY 批次新增「重新归因」按钮，行数已传完不必重传 ⑤新增 `diagnose` action + 「归因口径自查」面板：逐批次统计商品卡/带VID行/VID命中/昵称同站点命中/昵称登记在别站点/从未登记，并对照上传站点与建联表站点写法，直接指出归因断在哪一层 |

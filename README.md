@@ -70,6 +70,21 @@ pg_cron（北京 08:00 = UTC 00:00）
 
 通知内容示例：`✅ 成功 12 条 ｜ ❌ 失败 2 条 ｜ ⚠️ 无授权账号 1 条`
 
+### 2.5 飞书基础数据自动同步（每晚）
+
+```
+pg_cron（北京 23:00 = UTC 15:00）
+  └─ POST /api/public/hooks/feishu-sync-cron
+       ├─ feishu-read-connection-stats（发样及素材统计）
+       ├─ attribution-sync-creators（达人登记：建联 + 归档 + 剪辑）
+       ├─ attribution-feishu / sync-targets（GMV 目标）
+       └─ attribution-feishu / sync-handovers（站点交接）
+            ├─ upsert gmv_max_sync_state('feishu_nightly_sync')
+            └─ 有失败时发飞书机器人通知（FEISHU_BOT_WEBHOOK）
+```
+
+排在归因快照（北京 23:30 的 `attribution-cron`）之前半小时：快照按「当下的登记数据」现算，先同步完当晚快照才用得上当天的新数据。四步串行、互不影响，单步 4 分钟超时。
+
 ### 3. GMV Max 报表流
 
 ```

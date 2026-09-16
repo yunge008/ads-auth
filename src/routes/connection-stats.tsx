@@ -360,7 +360,9 @@ function ConnectionStatsPage() {
       <div className="flex-none flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-lg font-semibold tracking-tight">发样及素材统计</h2>
-          <p className="text-xs text-muted-foreground">BD 建联表发样/回收 + 剪辑登记表产出 · 按人员 / 国家 / SKU</p>
+          <p className="text-xs text-muted-foreground">
+            BD 建联表发样/回收 + 剪辑登记表产出 · 按人员 / 国家 / SKU · 每晚北京 23:00 自动同步一次，需要马上看最新数据再点「同步飞书数据」
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant="outline" disabled={syncing} onClick={doSync}>

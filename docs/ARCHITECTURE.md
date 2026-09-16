@@ -26,6 +26,7 @@
 | `/oauth/tiktok/callback` | TikTok OAuth 回调 |
 | `/api/public/hooks/gmv-max-cron` | **服务端路由**：pg_cron 调用入口，循环驱动 gmv-max-sync 续跑（apikey=anon key 鉴权，5 分钟硬预算） |
 | `/api/public/hooks/attribution-cron` | **服务端路由**：每晚北京 23:30 刷新 GMV 归因结果快照（调 `attribution-upload` 的 `refresh`，默认最近 3 个有批次的月份；**cron 带 `skip_if_unchanged`，该月广告表和达人登记都没变化就直接跳过，不重复计算**；apikey 鉴权） |
+| `/api/public/hooks/feishu-sync-cron` | **服务端路由**：每晚北京 23:00 把四个「读飞书 → 写自己库」的基础同步各跑一次（`feishu-read-connection-stats` 发样及素材统计、`attribution-sync-creators` 达人登记、`attribution-feishu` 的 `sync-targets` / `sync-handovers`）。四步串行且互不影响，任一步失败发飞书机器人通知，运行状态写 `gmv_max_sync_state.id='feishu_nightly_sync'`；body 可传 `{only:["creators",...]}` 只跑其中几步（apikey 鉴权，单步 4 分钟超时） |
 | `/api/public/hooks/authorize-cron` | **服务端路由**：每日 08:00 自动授权入口，循环 feishu-read → authorize-batch → feishu-writeback，结束发飞书机器人通知（apikey 鉴权，10 分钟硬预算 / 最多 4 轮） |
 
 `routeTree.gen.ts` 自动生成，禁止手改。
@@ -52,6 +53,7 @@
 
 1. **授权流**（手动）：飞书素材表 → `feishu-read` → 前端筛选 → `authorize-batch`（TikTok API）→ `feishu-writeback` 回写状态列
 2. **自动授权流**：pg_cron(北京 08:00) → `/api/public/hooks/authorize-cron` → `feishu-read` → `authorize-batch`（最多 4 轮收敛，无授权账号不参与）→ `feishu-writeback` → 飞书自定义机器人（`FEISHU_BOT_WEBHOOK`）富文本通知 → upsert `authorize_cron_state`
+2.5. **飞书基础数据自动同步流**：pg_cron(北京 23:00) → `/api/public/hooks/feishu-sync-cron` → `feishu-read-connection-stats`（发样及素材统计）+ `attribution-sync-creators`（达人登记）+ `attribution-feishu` 的 `sync-targets` / `sync-handovers` → 各自写库 → 有失败时发飞书机器人通知 → upsert `gmv_max_sync_state('feishu_nightly_sync')`
 3. **报表流**：pg_cron → `/api/public/hooks/gmv-max-cron` → `gmv-max-sync`（循环续跑）→ `gmv_max_vid_daily` → `gmv-max-daily-report` 聚合 → 前端
 4. **Token 流**：OAuth 授权 → callback → `tiktok-oauth-exchange` → `tiktok_connections`
 5. **归因流**：`attribution-sync-creators`（飞书 3 处登记 → registry + 保护期解析）→ `attribution-run`/`attribution-upload`（归因引擎瀑布：商品卡单列 → VID 强匹配[BD/剪辑] → BD 昵称路径[人工别名>建联归属>VID推断别名]+站点交接按发布时间分段 → 无建联）→ 前端进度板 / `attribution-feishu` 回写飞书（进度快照、审查项、达人归因表）→ 人工在「归因审查」J 列裁决 → read-judgments 读回。发布时间三级来源：上传表内列 > gmv_max_vid_meta.posted_at > VID>>32 时间戳兜底。**当前两个「GMV 归因」前端页面实际只走 Excel 上传这条支路**：`attribution-upload`(finalize) 单文件归因回填 `attr_*` → `get{month,merged:true}` 按月合并全部站点站点重新聚合展示，不重跑引擎；`attribution-run`/`gmv_attr_monthly_agg`（官方 API 数据）链路代码保留，留待后续接回官方数据时再启用。
@@ -90,3 +92,7 @@
   站点×VID×达人昵称×商品ID×内容类型×币种 重建某批次的归并行（service_role only）。
 - RPC `attribution_runs_prune(_month text, _keep int default 10)`：每月只保留最近 N 条快照（service_role only）。
 - pg_cron job `attribution-snapshot-nightly`：`30 15 * * *`（北京 23:30）→ `/api/public/hooks/attribution-cron`。
+- pg_cron job `feishu-sync-nightly`：`0 15 * * *`（北京 23:00）→ `/api/public/hooks/feishu-sync-cron`。
+  **刻意排在快照之前半小时**：快照按「当下的登记数据」现算，先同步登记/目标/交接，当晚快照才吃得到当天的新数据。
+  Edge Function 侧的 cron 免口令统一走 `_shared/cron.ts` 的 `cronAuthed(req)`（`x-cron-key` → `verify_gmv_cron_key` RPC）；
+  `attribution-feishu` 只对 `sync-targets` / `sync-handovers` 放行 cron 身份，回写飞书类 action 仍必须带管理口令。

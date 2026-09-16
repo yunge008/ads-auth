@@ -13,6 +13,7 @@ import {
   readRange,
 } from "../_shared/feishu.ts";
 import { admin, checkAdminPasscode } from "../_shared/auth.ts";
+import { cronAuthed } from "../_shared/cron.ts";
 import { cellText, isPrecisionLostNumber, parseDate } from "../_shared/cells.ts";
 import {
   type RegistryEntry,
@@ -75,7 +76,9 @@ type RegRow = {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    await checkAdminPasscode(req, "gmv-attribution-admin");
+    // cron 免口令：pg_cron 经服务端路由 /api/public/hooks/feishu-sync-cron 带上 x-cron-key（vault secret）。
+    // 本函数只读飞书 + 重建自己库里的登记/归属表，不回写飞书。
+    if (!(await cronAuthed(req))) await checkAdminPasscode(req, "gmv-attribution-admin");
     const db = admin();
 
     // 全部人员（含离职 active=false），归因需要覆盖历史数据

@@ -46,6 +46,7 @@ const SYNC_HELP: Record<"creators" | "targets" | "handovers" | "progress" | "exp
       "· 剪辑表：剪辑同事的账号与 VID",
       "每次全量重建。同一个达人被多人登记时，按「谁先登记谁拥有 + 3 个月保护期」判归属，冲突项进「审查与回写」。",
       "同步完刷新报表即可生效，不用重传广告表。",
+      "每晚北京 23:00 自动同步一次（在 23:30 的归因快照之前）；飞书刚改完要马上生效就手动点一次。",
     ],
   },
   targets: {
@@ -53,6 +54,7 @@ const SYNC_HELP: Record<"creators" | "targets" | "handovers" | "progress" | "exp
     lines: [
       "读飞书「绩效配置表」A–F 列（月份 / 姓名 / 角色 / 目标金额 / 备注），覆盖写入月度目标。",
       "只决定进度条的分母，不影响归因结果。",
+      "每晚北京 23:00 自动同步一次；飞书刚改完要马上生效就手动点一次。",
     ],
   },
   handovers: {
@@ -61,6 +63,7 @@ const SYNC_HELP: Record<"creators" | "targets" | "handovers" | "progress" | "exp
       "读飞书「绩效配置表」H–L 列（站点 / 原BD / 新BD / 交接日期 / 备注），全量重建交接记录。",
       "交接日只是「允许转移」的起点：真正的转移日是新 BD 在交接日之后，对那个具体达人第一次登记/发样的日期。",
       "发布时间早于转移日的素材仍算原 BD；新 BD 没接手过的达人，这条交接对他不生效。VID 强匹配不受交接影响。",
+      "每晚北京 23:00 自动同步一次；飞书刚改完要马上生效就手动点一次。",
     ],
   },
   progress: {
@@ -344,6 +347,7 @@ function MonthlyView() {
           <CardTitle className="text-base">数据准备</CardTitle>
           <p className="text-xs text-muted-foreground">
             这三个按钮只更新基础数据。归因结果在每次「生成报表」时按当下的登记数据现算，同步完刷新即可，不需要重传广告表。
+            三个同步每晚北京 23:00 会自动各跑一次（早于 23:30 的归因快照），这里的按钮只是「现在就要最新数据」时用。
           </p>
         </CardHeader>
         <CardContent className="flex flex-wrap items-end gap-2">

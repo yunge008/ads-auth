@@ -16,6 +16,7 @@ import {
   readRange,
 } from "../_shared/feishu.ts";
 import { admin, checkAdminPasscode } from "../_shared/auth.ts";
+import { cronAuthed } from "../_shared/cron.ts";
 import { cellText, parseDate } from "../_shared/cells.ts";
 
 const VID_RE = /^7\d{18}$/;
@@ -49,7 +50,9 @@ function toNum(v: unknown): number | null {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    await checkAdminPasscode(req, "connection-stats");
+    // cron 免口令：pg_cron 经服务端路由 /api/public/hooks/feishu-sync-cron 带上 x-cron-key（vault secret）。
+    // 本函数只读飞书 + 重建自己库里的 connection_material_registry，不回写飞书。
+    if (!(await cronAuthed(req))) await checkAdminPasscode(req, "connection-stats");
     const db = admin();
 
     const { data: staffRows, error: staffErr } = await db

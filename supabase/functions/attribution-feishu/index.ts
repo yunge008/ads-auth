@@ -6,6 +6,8 @@
 //   「达人归因表」A类型 B名称 C归一化键 D国家 E当前BD F最后登记日期 G转移/证据 H交接提示 —— 系统覆盖写
 // Body: { action: 'write-progress'|'write-reviews'|'read-judgments'|'submit-judgment'|'sync-targets'|'sync-handovers'|'write-ownership'|'list-reviews', month? }
 //   list-reviews 仅读数据库（前端审查面板用），不访问飞书。
+//   sync-targets / sync-handovers 每晚由 pg_cron 经 /api/public/hooks/feishu-sync-cron 自动各跑一次（带 x-cron-key 免口令）；
+//     其余 action 只能带管理口令人工触发。
 //   submit-judgment { review_key, manual_bd, manual_note? } → 网页端直接判定：立即写 attribution_review（+ 昵称类型顺带写
 //     creator_alias source=MANUAL），并尽力把同一条判定同步进飞书「归因审查」表对应行（J/K/L，找不到该行则连同判定一起补一行）；
 //     飞书同步失败不影响数据库判定已生效，只在返回里带 mirror_warning。
@@ -18,9 +20,13 @@ import {
   writeValues,
 } from "../_shared/feishu.ts";
 import { admin, verifyPasscode } from "../_shared/auth.ts";
+import { cronAuthed } from "../_shared/cron.ts";
 import { cellText, parseDate } from "../_shared/cells.ts";
 import { normalizeName, splitIdentityKey } from "../_shared/attribution.ts";
 import { buildMonthlyReport } from "../_shared/attribution-report.ts";
+
+/** cron 身份只放行这两个动作：纯读飞书配置表 + 写自己库，任何回写飞书的 action 仍必须带管理口令。 */
+const CRON_ACTIONS = new Set(["sync-targets", "sync-handovers"]);
 
 const SHEET_PROGRESS = "\u7ee9\u6548\u7edf\u8ba1\u8bb0\u5f55";
 const SHEET_REVIEWS = "\u5f52\u56e0\u5ba1\u67e5";
@@ -167,7 +173,9 @@ async function writeRowsAt(
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    const account = await verifyPasscode(req, "gmv-attribution-admin");
+    // cron 免口令：pg_cron 经服务端路由 /api/public/hooks/feishu-sync-cron 带上 x-cron-key（vault secret）。
+    // 只放行 CRON_ACTIONS 里的两个同步动作；回写飞书 / 人工判定类 action 一律仍走口令校验。
+    const isCron = await cronAuthed(req);
     const body = (await req.json()) as {
       action?: string;
       month?: string;
@@ -176,6 +184,10 @@ Deno.serve(async (req) => {
       manual_note?: string;
     };
     const action = (body.action ?? "").trim();
+    if (isCron && !CRON_ACTIONS.has(action)) throw new Error("cron 只允许调用 sync-targets / sync-handovers");
+    const account = isCron
+      ? { id: "cron", name: "cron", isAdmin: true, tabs: [] }
+      : await verifyPasscode(req, "gmv-attribution-admin");
     const db = admin();
 
     // 仅查库的 action 不访问飞书
