@@ -171,79 +171,74 @@ export function runAttribution(month: string, view: "admin" | "user", detailFor?
   }>("attribution-run", { month, view, detail_for: detailFor }, { timeout: 120000 });
 }
 
-export function syncCreators() {
-  return invokeFn<{
-    registry_rows: number;
-    /** 其中带有效 VID 的行数：为 0 说明 VID 强匹配这一层必然全落空 */
-    registry_vid_rows?: number;
-    ownership_keys: number;
-    reviews_open: number;
-    missing_sheets: string[];
-    /** 飞书把 VID 列当数字返回、超出 2^53 丢精度而被丢弃的单元格数（读取已统一 ToString，正常应为 0） */
-    vid_precision_lost?: number;
-    /** 含汉字的站点写法（站点统一用英文简写，这些行永远匹配不上） */
-    cjk_sites?: Array<{ site: string; rows: number }>;
-    /** 读到粉丝量的登记行数（数据先存下来，前台暂不展示） */
-    follower_rows?: number;
-  }>(
-    "attribution-sync-creators",
-    {},
-    { timeout: 300000 },
-  );
-}
-
-/**
- * GMV 归因 V3 阶段 2：身份层与归属区间的「只生成不使用」预演。
- *
- * 【不改变任何归因数字】——引擎此刻仍读 creator_ownership 的单值归属。
- * 这里生成的身份实体与归属区间只用来先回答「阶段 3 切引擎后会变多少」。
- */
-export type IdentityBuildResult = {
-  country: string;
-  gmv_months?: number;
-  registry_rows?: number;
-  edges?: number;
-  components?: number;
-  components_multi_name?: number;
-  /** 靠 GMV MAX 昵称才和飞书身份连上的分量数：达人改名导致被拆成两个人的量级 */
-  components_linked_via_gmv_nickname?: number;
-  entities_created?: number;
-  entities_merged?: number;
-  identity_conflicts?: number;
-  identity_conflict_sample?: unknown[];
-  identity_merge_sample?: Array<{
-    site: string;
-    creator_id: string | null;
-    current_nickname: string | null;
-    current_username: string | null;
-    names: string[];
-  }>;
-  unusable_vids?: number;
-  aliases?: number;
-  stages?: number;
-  /** 归属区间多于一段的达人数 = 现有「单值归属」抹平掉的历史转移 */
-  creators_with_multiple_stages?: number;
-  protection_grabs?: number;
-  /** action='report' 才有：区间最后一段 vs 现有单值归属的差异 */
-  diff_by_kind?: Record<string, number>;
-  diff_sample?: Array<{
-    country: string;
-    creator_key: string;
-    display_name: string | null;
-    current_owner_bd: string | null;
-    stage_owner_bd: string | null;
-    stage_type: string | null;
-    diff_kind: string;
-  }>;
-  note?: string;
+export type SyncCreatorsResult = {
+  /** false = 还没跑完，要带着 next 再调一次 */
+  done?: boolean;
+  phase?: "READ" | "RESOLVE";
+  processed?: string[];
+  remaining?: string[];
+  next?: { sheets?: string[]; resolve_only?: boolean };
+  registry_rows: number;
+  /** 其中带有效 VID 的行数：为 0 说明 VID 强匹配这一层必然全落空 */
+  registry_vid_rows?: number;
+  registry_rows_written?: number;
+  ownership_keys: number;
+  reviews_open: number;
+  missing_sheets: string[];
+  /** 飞书把 VID 列当数字返回、超出 2^53 丢精度而被丢弃的单元格数（读取已统一 ToString，正常应为 0） */
+  vid_precision_lost?: number;
+  /** 含汉字的站点写法（站点统一用英文简写，这些行永远匹配不上） */
+  cjk_sites?: Array<{ site: string; rows: number }>;
+  /** 读到粉丝量的登记行数（数据先存下来，前台暂不展示） */
+  follower_rows?: number;
 };
 
-export function identityBuild(action: "build" | "report", p?: { country?: string; gmv_months?: number }) {
-  return invokeFn<IdentityBuildResult>(
-    "attribution-identity-build",
-    { action, ...(p ?? {}) },
-    { timeout: 300000 },
-  );
+/**
+ * 同步达人登记。
+ *
+ * **必须循环调用**：Edge Function 有 150 秒墙钟上限，超了会被平台直接掐断（连错误体都没有，
+ * 前端只看到「非 2XX」）。登记数据涨到六万行后一次做不完，所以函数按 sheet 分片，
+ * 用完时间预算就返回 `done:false` + `next`，这里带着 `next` 继续调，直到 `done:true`。
+ *
+ * `onProgress` 用来把「正在读第几批 sheet」透出去，否则用户面对一个转两分钟的按钮无从判断死活。
+ */
+export async function syncCreators(onProgress?: (p: { processed: string[]; remaining: string[]; round: number }) => void) {
+  let next: { sheets?: string[]; resolve_only?: boolean } | undefined;
+  const processedAll: string[] = [];
+  let missingAll: string[] = [];
+  let vidPrecisionLost = 0;
+  let followerRows = 0;
+  let vidRows = 0;
+  const cjk = new Map<string, number>();
+  // 每片留足 5 分钟客户端超时；轮数上限防死循环（sheet 数远小于这个数）
+  for (let round = 1; round <= 40; round++) {
+    const r = await invokeFn<SyncCreatorsResult>(
+      "attribution-sync-creators",
+      next ?? {},
+      { timeout: 300000 },
+    );
+    processedAll.push(...(r.processed ?? []));
+    missingAll = missingAll.concat(r.missing_sheets ?? []);
+    vidPrecisionLost += r.vid_precision_lost ?? 0;
+    followerRows += r.follower_rows ?? 0;
+    vidRows += r.registry_vid_rows ?? 0;
+    for (const c of r.cjk_sites ?? []) cjk.set(c.site, (cjk.get(c.site) ?? 0) + c.rows);
+    onProgress?.({ processed: processedAll, remaining: r.remaining ?? [], round });
+    // 旧版本函数没有 done 字段：一次就是全部，直接返回
+    if (r.done === undefined || r.done) {
+      return {
+        ...r,
+        processed: processedAll,
+        missing_sheets: Array.from(new Set(missingAll)),
+        vid_precision_lost: vidPrecisionLost,
+        follower_rows: followerRows,
+        registry_vid_rows: vidRows,
+        cjk_sites: Array.from(cjk.entries()).map(([site, rows]) => ({ site, rows })).sort((a, b) => b.rows - a.rows),
+      } as SyncCreatorsResult;
+    }
+    next = r.next ?? { resolve_only: true };
+  }
+  throw new Error("同步达人登记：分片轮数超过上限仍未完成，请查看 Edge Function 日志");
 }
 
 export function feishuAction<T = Record<string, unknown>>(action: string, extra?: Record<string, unknown>) {

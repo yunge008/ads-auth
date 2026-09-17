@@ -133,9 +133,19 @@ export const Route = createFileRoute("/api/public/hooks/feishu-sync-cron")({
             key: "creators",
             label: "同步达人登记",
             run: async () => {
-              const r = await callFn("attribution-sync-creators", {});
+              // 分片跑：Edge Function 有 150 秒墙钟上限，登记数据涨到六万行后一次做不完，
+              // 函数会返回 done:false + next，这里带着 next 继续调直到 done。
+              let r = await callFn("attribution-sync-creators", {});
+              let rounds = 1;
+              const unfinished = (x: Record<string, unknown>) => x.done === false;
+              while (unfinished(r) && rounds < 40) {
+                const next = (r.next as Record<string, unknown> | undefined) ?? { resolve_only: true };
+                r = await callFn("attribution-sync-creators", next);
+                rounds++;
+              }
+              if (unfinished(r)) throw new Error(`分片轮数超过上限（${rounds} 轮）仍未完成`);
               const missing = Array.isArray(r.missing_sheets) ? (r.missing_sheets as string[]) : [];
-              let s = `登记 ${num(r.registry_rows)} 行（含 VID ${num(r.registry_vid_rows)} 行）· 归属 ${num(r.ownership_keys)} 键 · 待审查 ${num(r.reviews_open)}`;
+              let s = `登记 ${num(r.registry_rows)} 行（含 VID ${num(r.registry_vid_rows)} 行）· 归属 ${num(r.ownership_keys)} 键 · 待审查 ${num(r.reviews_open)} · 分 ${rounds} 批`;
               if (missing.length) s += `（缺失 sheet：${missing.join("、")}）`;
               // 这两项会让归因静默失准，必须冒到通知里，不能只留在返回体里没人看。
               if (num(r.vid_precision_lost)) {

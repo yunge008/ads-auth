@@ -4,7 +4,16 @@
 //      A=BD B=发样日期 C=国家 D=用户名 E=昵称 K=SKU N=登记日期 P=VID
 //   2. 「授权记录」归档 M3:S（同表格，J:K 现为广告户名称/ID）：M=BD N=登记日期 O=国家 P=达人名字 Q=VID
 //   3. 剪辑表（FEISHU_EDITOR_SPREADSHEET_TOKEN）：B=同事 C=日期 D=国家 E=账号 F=SKU G=VID
-// Body: {}（无入参，读全部 staff_sheets 含 active=false）
+// Body: { sheets?: string[], resolve_only?: boolean }
+//   · 不传    → 从头开始，按时间预算能跑多少 sheet 跑多少
+//   · sheets  → 只处理这几个 sheet（续跑用，调用方把上次返回的 remaining 传回来）
+//   · resolve_only → 跳过读飞书，只做「归属解析 + 重建 creator_ownership」这一步
+//
+// 【为什么要分片】Supabase Edge Function 有 150 秒墙钟上限，超了直接被平台掐断，
+// 连错误体都返回不了（前端只看到「非 2XX」）。登记数据涨到六万行后，
+// 「读十来个飞书 sheet + 全量重建登记表 + 解析归属 + 重建归属表」一次做完必然超时。
+// 现在按 sheet 分片：每片先删后插自己那个 source_sheet 的行（粒度安全，中断不会留下半张表），
+// 时间预算用完就返回 remaining，由调用方（前端/cron）继续调，全部 sheet 处理完才做归属解析。
 import {
   corsHeaders,
   getSpreadsheetToken,
@@ -80,6 +89,16 @@ Deno.serve(async (req) => {
     // 本函数只读飞书 + 重建自己库里的登记/归属表，不回写飞书。
     if (!(await cronAuthed(req))) await checkAdminPasscode(req, "gmv-attribution-admin");
     const db = admin();
+    const body = (await req.json().catch(() => ({}))) as { sheets?: string[]; resolve_only?: boolean };
+    const onlySheets = Array.isArray(body.sheets) && body.sheets.length ? new Set(body.sheets) : null;
+    const resolveOnly = !!body.resolve_only;
+
+    // 时间预算：平台 150 秒硬上限，留 40 秒余量，做完一个 sheet 就检查一次。
+    const T0 = Date.now();
+    const BUDGET_MS = 110_000;
+    /** 归属解析（读全表 + 解析 + 重建归属表）至少要留这么多时间，不够就让调用方再调一次 */
+    const RESOLVE_MIN_MS = 55_000;
+    const leftMs = () => BUDGET_MS - (Date.now() - T0);
 
     // 全部人员（含离职 active=false），归因需要覆盖历史数据
     const { data: staffRows, error: staffErr } = await db
@@ -90,7 +109,6 @@ Deno.serve(async (req) => {
     const activeByName = new Map(staff.map((s) => [s.name, !!s.active]));
 
     const token = await getTenantAccessToken();
-    const regRows: RegRow[] = [];
     const missing: string[] = [];
     /** VID 单元格被飞书按数字返回导致丢精度的次数（读取已统一走 ToString，这里是最后一道保险） */
     let vidPrecisionLost = 0;
@@ -114,153 +132,225 @@ Deno.serve(async (req) => {
       const raw = cellText(cell);
       return VID_RE.test(raw) ? raw : "";
     };
-    const processedSheets = new Set<string>();
-
-    // ---- 1) BD 建联表 + 2) 授权记录归档（主表格）----
+    // ---- 工作清单：一个 sheet 一片，按顺序处理，时间用完就交给下一次调用 ----
     const mainToken = getSpreadsheetToken();
     const mainSheets = await listSheets(token, mainToken);
     const mainByName = new Map(mainSheets.map((s) => [s.title, s.sheet_id]));
-
-    for (const t of staff.filter((s) => s.role === "BD")) {
-      const sid = mainByName.get(t.sheet_name);
-      if (!sid) {
-        missing.push(t.sheet_name);
-        continue;
-      }
-      // 先读表头找「粉丝量」列：各人的建联表列位并不完全一致，写死列号迟早读错
-      let followerIdx = -1;
-      try {
-        const header = await readRange(token, mainToken, `${sid}!A1:Z1`);
-        const cells = header[0] ?? [];
-        followerIdx = cells.findIndex((c) => FOLLOWER_HEADER_RE.test(cellText(c)));
-      } catch {
-        /* 读不到表头就当没有粉丝量列，不影响主流程 */
-      }
-      // 26 列 × 180 行 ≈ 4680 cells，低于飞书 ~5000 上限
-      const rows = await readRange(token, mainToken, `${sid}!A2:Z`, 180);
-      processedSheets.add(t.sheet_name);
-      for (let i = 0; i < rows.length; i++) {
-        const r = rows[i] ?? [];
-        const handleRaw = cellText(r[3]);
-        const nicknameRaw = cellText(r[4]);
-        const vid = readVid(r[15]);
-        const handleNorm = normalizeName(handleRaw);
-        const nicknameNorm = normalizeName(nicknameRaw);
-        if (!handleNorm && !nicknameNorm && !vid) continue;
-        regRows.push({
-          source: "JIANLIAN",
-          source_sheet: t.sheet_name,
-          row_number: i + 2,
-          role: "BD",
-          staff_name: t.name,
-          staff_active: !!t.active,
-          register_date: parseDate(r[13]),
-          sample_date: parseDate(r[1]),
-          country: readSite(r[2]),
-          handle_raw: handleRaw,
-          handle_norm: handleNorm,
-          nickname_raw: nicknameRaw,
-          nickname_norm: nicknameNorm,
-          vid,
-          registered_sku: cellText(r[10]) || null,
-          follower_count: followerIdx >= 0 ? parseFollowerCount(r[followerIdx]) : null,
-        });
-      }
-    }
-
-    const logSid = mainByName.get(LOG_SHEET_TITLE);
-    if (logSid) {
-      const rows = await readRange(token, mainToken, `${logSid}!M3:S`);
-      processedSheets.add(LOG_SHEET_TITLE);
-      for (let i = 0; i < rows.length; i++) {
-        const r = rows[i] ?? [];
-        const bd = cellText(r[0]) || "原数据";
-        const nicknameRaw = cellText(r[3]);
-        const vid = readVid(r[4]);
-        const nicknameNorm = normalizeName(nicknameRaw);
-        if (!nicknameNorm && !vid) continue;
-        regRows.push({
-          source: "ARCHIVE",
-          source_sheet: LOG_SHEET_TITLE,
-          row_number: i + 3,
-          role: "BD",
-          staff_name: bd,
-          staff_active: activeByName.get(bd) ?? false,
-          register_date: parseDate(r[1]),
-          sample_date: null,
-          country: readSite(r[2]),
-          handle_raw: "",
-          handle_norm: "",
-          nickname_raw: nicknameRaw,
-          nickname_norm: nicknameNorm,
-          vid,
-          registered_sku: cellText(r[6]) || null,
-          follower_count: null,
-        });
-      }
-    } else {
-      missing.push(LOG_SHEET_TITLE);
-    }
-
-    // ---- 3) 剪辑表 ----
     const editors = staff.filter((s) => s.role === "EDITOR");
+    let edByName = new Map<string, string>();
+    let edToken = "";
     if (editors.length) {
-      const edToken = getSpreadsheetToken("FEISHU_EDITOR_SPREADSHEET_TOKEN");
-      const edSheets = await listSheets(token, edToken);
-      const edByName = new Map(edSheets.map((s) => [s.title, s.sheet_id]));
-      for (const t of editors) {
-        const sid = edByName.get(t.sheet_name);
-        if (!sid) {
-          missing.push(t.sheet_name);
-          continue;
+      edToken = getSpreadsheetToken("FEISHU_EDITOR_SPREADSHEET_TOKEN");
+      edByName = new Map((await listSheets(token, edToken)).map((s) => [s.title, s.sheet_id]));
+    }
+
+    type Job = { sheet: string; kind: "JIANLIAN" | "ARCHIVE" | "EDITOR"; staffName: string; active: boolean };
+    const jobs: Job[] = [
+      ...staff.filter((s) => s.role === "BD").map((t): Job => ({ sheet: t.sheet_name, kind: "JIANLIAN", staffName: t.name, active: !!t.active })),
+      { sheet: LOG_SHEET_TITLE, kind: "ARCHIVE", staffName: "", active: false },
+      ...editors.map((t): Job => ({ sheet: t.sheet_name, kind: "EDITOR", staffName: t.name, active: !!t.active })),
+    ];
+    const todo = onlySheets ? jobs.filter((j) => onlySheets.has(j.sheet)) : jobs;
+
+    /** 处理完一个 sheet 就把它那一段登记行先删后插：中断也不会留下半张表 */
+    const rewriteSheet = async (sheetName: string, rows: RegRow[]) => {
+      const { error: delErr } = await db.from("creator_registry").delete().eq("source_sheet", sheetName);
+      if (delErr) throw new Error(`删除 ${sheetName} 旧登记行失败：${delErr.message}`);
+      for (let i = 0; i < rows.length; i += 500) {
+        const { error } = await db.from("creator_registry").insert(rows.slice(i, i + 500));
+        if (error) throw new Error(`写入 ${sheetName} 登记行失败：${error.message}`);
+      }
+    };
+
+    const processed: string[] = [];
+    let remaining: string[] = [];
+    let writtenRows = 0;
+    let writtenVidRows = 0;
+    let followerRows = 0;
+
+    if (!resolveOnly) {
+      for (let ji = 0; ji < todo.length; ji++) {
+        const job = todo[ji];
+        // 预算用完 → 剩下的交给下一次调用。判断放在每个 sheet 开头，保证当前 sheet 要么没开始、要么整段写完。
+        if (leftMs() < 20_000) {
+          remaining = todo.slice(ji).map((j) => j.sheet);
+          break;
         }
-        const rows = await readRange(token, edToken, `${sid}!A2:H`);
-        processedSheets.add(t.sheet_name);
-        for (let i = 0; i < rows.length; i++) {
-          const r = rows[i] ?? [];
-          const who = cellText(r[1]);
-          if (!who || who !== t.name) continue; // 与 feishu-read-editors 同规则：B 列同事须等于表名对应姓名
-          const vid = readVid(r[6]);
-          if (!vid) continue;
-          const acctRaw = cellText(r[4]);
-          regRows.push({
-            source: "EDITOR",
-            source_sheet: t.sheet_name,
-            row_number: i + 2,
-            role: "EDITOR",
-            staff_name: t.name,
-            staff_active: !!t.active,
-            register_date: parseDate(r[2]),
-            sample_date: null,
-            country: readSite(r[3]),
-            handle_raw: "",
-            handle_norm: "",
-            nickname_raw: acctRaw,
-            nickname_norm: normalizeName(acctRaw),
-            vid,
-            registered_sku: cellText(r[5]) || null,
-            follower_count: null,
-          });
+        const rows: RegRow[] = [];
+
+        if (job.kind === "JIANLIAN") {
+          const sid = mainByName.get(job.sheet);
+          if (!sid) {
+            missing.push(job.sheet);
+            continue;
+          }
+          // 先读表头找「粉丝量」列：各人的建联表列位并不完全一致，写死列号迟早读错
+          let followerIdx = -1;
+          try {
+            const header = await readRange(token, mainToken, `${sid}!A1:Z1`);
+            followerIdx = (header[0] ?? []).findIndex((c) => FOLLOWER_HEADER_RE.test(cellText(c)));
+          } catch {
+            /* 读不到表头就当没有粉丝量列，不影响主流程 */
+          }
+          // 26 列 × 180 行 ≈ 4680 cells，低于飞书 ~5000 上限
+          const raw = await readRange(token, mainToken, `${sid}!A2:Z`, 180);
+          for (let i = 0; i < raw.length; i++) {
+            const r = raw[i] ?? [];
+            const handleRaw = cellText(r[3]);
+            const nicknameRaw = cellText(r[4]);
+            const vid = readVid(r[15]);
+            const handleNorm = normalizeName(handleRaw);
+            const nicknameNorm = normalizeName(nicknameRaw);
+            if (!handleNorm && !nicknameNorm && !vid) continue;
+            rows.push({
+              source: "JIANLIAN",
+              source_sheet: job.sheet,
+              row_number: i + 2,
+              role: "BD",
+              staff_name: job.staffName,
+              staff_active: job.active,
+              register_date: parseDate(r[13]),
+              sample_date: parseDate(r[1]),
+              country: readSite(r[2]),
+              handle_raw: handleRaw,
+              handle_norm: handleNorm,
+              nickname_raw: nicknameRaw,
+              nickname_norm: nicknameNorm,
+              vid,
+              registered_sku: cellText(r[10]) || null,
+              follower_count: followerIdx >= 0 ? parseFollowerCount(r[followerIdx]) : null,
+            });
+          }
+        } else if (job.kind === "ARCHIVE") {
+          const sid = mainByName.get(LOG_SHEET_TITLE);
+          if (!sid) {
+            missing.push(LOG_SHEET_TITLE);
+            continue;
+          }
+          const raw = await readRange(token, mainToken, `${sid}!M3:S`);
+          for (let i = 0; i < raw.length; i++) {
+            const r = raw[i] ?? [];
+            const bd = cellText(r[0]) || "原数据";
+            const nicknameRaw = cellText(r[3]);
+            const vid = readVid(r[4]);
+            const nicknameNorm = normalizeName(nicknameRaw);
+            if (!nicknameNorm && !vid) continue;
+            rows.push({
+              source: "ARCHIVE",
+              source_sheet: LOG_SHEET_TITLE,
+              row_number: i + 3,
+              role: "BD",
+              staff_name: bd,
+              staff_active: activeByName.get(bd) ?? false,
+              register_date: parseDate(r[1]),
+              sample_date: null,
+              country: readSite(r[2]),
+              handle_raw: "",
+              handle_norm: "",
+              nickname_raw: nicknameRaw,
+              nickname_norm: nicknameNorm,
+              vid,
+              registered_sku: cellText(r[6]) || null,
+              follower_count: null,
+            });
+          }
+        } else {
+          const sid = edByName.get(job.sheet);
+          if (!sid) {
+            missing.push(job.sheet);
+            continue;
+          }
+          const raw = await readRange(token, edToken, `${sid}!A2:H`);
+          for (let i = 0; i < raw.length; i++) {
+            const r = raw[i] ?? [];
+            const who = cellText(r[1]);
+            if (!who || who !== job.staffName) continue; // 与 feishu-read-editors 同规则：B 列同事须等于表名对应姓名
+            const vid = readVid(r[6]);
+            if (!vid) continue;
+            const acctRaw = cellText(r[4]);
+            rows.push({
+              source: "EDITOR",
+              source_sheet: job.sheet,
+              row_number: i + 2,
+              role: "EDITOR",
+              staff_name: job.staffName,
+              staff_active: job.active,
+              register_date: parseDate(r[2]),
+              sample_date: null,
+              country: readSite(r[3]),
+              handle_raw: "",
+              handle_norm: "",
+              nickname_raw: acctRaw,
+              nickname_norm: normalizeName(acctRaw),
+              vid,
+              registered_sku: cellText(r[5]) || null,
+              follower_count: null,
+            });
+          }
         }
+
+        await rewriteSheet(job.sheet, rows);
+        processed.push(job.sheet);
+        writtenRows += rows.length;
+        writtenVidRows += rows.filter((r) => r.vid).length;
+        followerRows += rows.filter((r) => r.follower_count != null).length;
       }
     }
 
-    // ---- 重建 creator_registry（按 source_sheet 全量重建）----
-    const sheetsArr = Array.from(processedSheets);
-    for (let i = 0; i < sheetsArr.length; i += 50) {
-      const { error } = await db
-        .from("creator_registry")
-        .delete()
-        .in("source_sheet", sheetsArr.slice(i, i + 50));
-      if (error) throw new Error(error.message);
+    const json = (b: unknown) =>
+      new Response(JSON.stringify(b), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const cjkList = Array.from(cjkSites.entries())
+      .map(([site, rows]) => ({ site, rows }))
+      .sort((a, b) => b.rows - a.rows)
+      .slice(0, 20);
+
+    // 还有 sheet 没读完，或者剩余时间不够做归属解析 → 先回一趟，让调用方续跑
+    if (remaining.length || (!resolveOnly && leftMs() < RESOLVE_MIN_MS)) {
+      return json({
+        done: false,
+        phase: "READ",
+        processed,
+        remaining,
+        // remaining 为空但时间不够 → 下一次只需要做归属解析
+        next: remaining.length ? { sheets: remaining } : { resolve_only: true },
+        registry_rows: writtenRows,
+        registry_vid_rows: writtenVidRows,
+        follower_rows: followerRows,
+        missing_sheets: missing,
+        vid_precision_lost: vidPrecisionLost,
+        cjk_sites: cjkList,
+      });
     }
-    for (let i = 0; i < regRows.length; i += 500) {
-      const { error } = await db.from("creator_registry").insert(regRows.slice(i, i + 500));
-      if (error) throw new Error(error.message);
+
+    // ---- 归属解析：从**数据库**读全部 BD 登记行（分片跑完后内存里只有最后一片）----
+    const PAGE = 1000;
+    const bdRows: Array<{
+      staff_name: string;
+      country: string;
+      nickname_raw: string;
+      nickname_norm: string;
+      handle_raw: string;
+      handle_norm: string;
+      register_date: string | null;
+      sample_date: string | null;
+      source_sheet: string;
+      row_number: number | null;
+      follower_count: number | null;
+    }> = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await db
+        .from("creator_registry")
+        .select("staff_name, country, nickname_raw, nickname_norm, handle_raw, handle_norm, register_date, sample_date, source_sheet, row_number, follower_count")
+        .eq("role", "BD")
+        .order("id")
+        .range(from, from + PAGE - 1);
+      if (error) throw new Error(`读取登记表失败：${error.message}`);
+      const page = data ?? [];
+      bdRows.push(...(page as typeof bdRows));
+      if (page.length < PAGE) break;
     }
 
     // ---- 保护期归属解析（仅 BD 行；NICKNAME / HANDLE 各一遍）----
-    const bdRows = regRows.filter((r) => r.role === "BD");
     const nickGroups = new Map<string, RegistryEntry[]>();
     const handleGroups = new Map<string, RegistryEntry[]>();
     for (const r of bdRows) {
@@ -330,22 +420,22 @@ Deno.serve(async (req) => {
       .select("id", { count: "exact", head: true })
       .eq("status", "OPEN");
 
-    return new Response(
-      JSON.stringify({
-        registry_rows: regRows.length,
-        registry_vid_rows: regRows.filter((r) => r.vid).length,
-        ownership_keys: ownRows.length,
-        reviews_open: reviewsOpen ?? 0,
-        missing_sheets: missing,
-        vid_precision_lost: vidPrecisionLost,
-        follower_rows: regRows.filter((r) => r.follower_count != null).length,
-        cjk_sites: Array.from(cjkSites.entries())
-          .map(([site, rows]) => ({ site, rows }))
-          .sort((a, b) => b.rows - a.rows)
-          .slice(0, 20),
-      }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+    return json({
+      done: true,
+      phase: "RESOLVE",
+      processed,
+      remaining: [],
+      // 归属解析读的是整张表，所以这里报的是全库口径，不是本次写入的片
+      registry_rows: bdRows.length,
+      registry_vid_rows: writtenVidRows,
+      registry_rows_written: writtenRows,
+      ownership_keys: ownRows.length,
+      reviews_open: reviewsOpen ?? 0,
+      missing_sheets: missing,
+      vid_precision_lost: vidPrecisionLost,
+      follower_rows: followerRows,
+      cjk_sites: cjkList,
+    });
   } catch (e) {
     const status = (e as Error & { status?: number }).status ?? 400;
     console.error("attribution-sync-creators", e);

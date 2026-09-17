@@ -311,7 +311,12 @@ function MonthlyView() {
     setBusy(kind);
     try {
       if (kind === "creators") {
-        const r = await syncCreators();
+        // 分片跑：每跑完一批 sheet 更新一次提示，避免按钮转两分钟看不出死活
+        const r = await syncCreators(({ processed, remaining, round }) => {
+          if (remaining.length) {
+            toast.info(`同步达人登记：第 ${round} 批完成（已处理 ${processed.length} 个表，还剩 ${remaining.length} 个）`);
+          }
+        });
         toast.success(
           `达人登记同步完成：登记 ${r.registry_rows} 行（含 VID ${r.registry_vid_rows ?? "?"} 行）· 归属 ${r.ownership_keys} 键 · 待审查 ${r.reviews_open}`,
         );
