@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { RotateCw, Upload, Download, BookUser, Check } from "lucide-react";
 import { toast } from "sonner";
 import { type ReviewRec, REVIEW_TYPE_LABELS, feishuAction } from "@/lib/attributionApi";
+import { ReviewExcelPanel } from "./ReviewExcelPanel";
 
 type Candidate = { value: string; label: string };
 
@@ -218,7 +219,7 @@ function ReviewCard({ r, onSubmitted }: { r: ReviewRec; onSubmitted: () => void 
   );
 }
 
-export function ReviewPanel() {
+export function ReviewPanel({ staffNames = [] }: { staffNames?: string[] }) {
   const [reviews, setReviews] = React.useState<ReviewRec[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [busy, setBusy] = React.useState<string | null>(null);
@@ -256,6 +257,9 @@ export function ReviewPanel() {
   const visible = showResolved ? reviews : open;
 
   return (
+    <div className="space-y-4">
+      {/* 批量通道：几百条审查项逐条点不现实，导出 Excel 线下填完再传回来 */}
+      <ReviewExcelPanel reviews={visible} staffNames={staffNames} onApplied={load} />
     <Card>
       <CardHeader className="pb-3 space-y-2">
         <CardTitle className="text-base">
@@ -292,5 +296,6 @@ export function ReviewPanel() {
         )}
       </CardContent>
     </Card>
+    </div>
   );
 }

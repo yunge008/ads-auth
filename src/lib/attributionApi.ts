@@ -241,6 +241,46 @@ export async function syncCreators(onProgress?: (p: { processed: string[]; remai
   throw new Error("同步达人登记：分片轮数超过上限仍未完成，请查看 Edge Function 日志");
 }
 
+export type BulkJudgmentRow = {
+  row_no: number;
+  review_key: string;
+  /** JUDGE | OVERRIDE_VID | OVERRIDE_CREATOR | IGNORE */
+  decision_type: string;
+  staff_name: string;
+  reason: string;
+  note?: string;
+  vid?: string;
+  country?: string;
+  creator_key?: string;
+  effective_from?: string;
+};
+
+export type BulkJudgmentResult = {
+  applied?: number;
+  judged?: number;
+  override_vid?: number;
+  override_creator?: number;
+  ignored?: number;
+  warnings?: string[];
+  /** dry_run 或校验不通过时返回；有值就表示这一批一行都没写 */
+  errors?: Array<{ row: number; review_key: string; message: string }>;
+  valid?: number;
+  checked?: number;
+  note?: string;
+};
+
+/**
+ * Excel 批量回填审查判定。
+ * `dryRun=true` 只校验不写 —— 导入前必跑一次：填表错误往往成片出现，写一半比不写更难收拾。
+ */
+export function bulkJudgment(rows: BulkJudgmentRow[], dryRun = false) {
+  return invokeFn<BulkJudgmentResult>(
+    "attribution-feishu",
+    { action: "bulk-judgment", rows, dry_run: dryRun },
+    { timeout: 300000 },
+  );
+}
+
 export function feishuAction<T = Record<string, unknown>>(action: string, extra?: Record<string, unknown>) {
   return invokeFn<T>("attribution-feishu", { action, ...(extra ?? {}) }, { timeout: 300000 });
 }

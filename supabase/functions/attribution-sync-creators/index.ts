@@ -436,13 +436,19 @@ Deno.serve(async (req) => {
       .select("id", { count: "exact", head: true })
       .eq("status", "OPEN");
 
+    // 报表口径统一成「整张登记表有多少行」：分片之后内存里只有最后一片，
+    // 而归属解析只读 BD 行，两个数都不能代表全库，所以单独 count 一次。
+    const { count: registryTotal } = await db
+      .from("creator_registry")
+      .select("id", { count: "exact", head: true });
+
     return json({
       done: true,
       phase: "RESOLVE",
       processed,
       remaining: [],
-      // 归属解析读的是整张表，所以这里报的是全库口径，不是本次写入的片
-      registry_rows: bdRows.length,
+      registry_rows: registryTotal ?? bdRows.length,
+      registry_bd_rows: bdRows.length,
       registry_vid_rows: writtenVidRows,
       registry_rows_written: writtenRows,
       ownership_keys: ownRows.length,

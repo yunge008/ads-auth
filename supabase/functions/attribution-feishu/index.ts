@@ -8,6 +8,14 @@
 //   list-reviews 仅读数据库（前端审查面板用），不访问飞书。
 //   sync-targets / sync-handovers 每晚由 pg_cron 经 /api/public/hooks/feishu-sync-cron 自动各跑一次（带 x-cron-key 免口令）；
 //     其余 action 只能带管理口令人工触发。
+//   bulk-judgment { rows: [...], dry_run? } → Excel 批量回填（导出审查表 → 线下填 → 传回来）。
+//     每行的 decision_type 决定写进哪张表，这是「人工判定」与「人工覆盖」的分界：
+//       · JUDGE            普通人工判定：写 attribution_review.manual_bd（昵称类顺带写 creator_alias MANUAL），
+//                          仍然在归因瀑布的原位置生效，会被更高优先级的规则盖掉
+//       · OVERRIDE_VID     人工覆盖（VID 级）：写 attribution_manual_rules，**优先级最高**，永久有效可停用
+//       · OVERRIDE_CREATOR 人工覆盖（达人级）：写 attribution_manual_decisions，从 effective_from 起建立一个归属阶段
+//       · IGNORE           只把审查项标成已处理，不改任何归属
+//     批量动作不回写飞书（几百行逐行写必然超时），判定结果以数据库为准。
 //   submit-judgment { review_key, manual_bd, manual_note? } → 网页端直接判定：立即写 attribution_review（+ 昵称类型顺带写
 //     creator_alias source=MANUAL），并尽力把同一条判定同步进飞书「归因审查」表对应行（J/K/L，找不到该行则连同判定一起补一行）；
 //     飞书同步失败不影响数据库判定已生效，只在返回里带 mirror_warning。
@@ -62,6 +70,20 @@ const TYPE_LABELS: Record<string, string> = {
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
+
+/** Excel 批量回填的一行（列名与导出模板一一对应）。 */
+type BulkRow = {
+  row_no?: number;
+  review_key?: string;
+  decision_type?: string;
+  staff_name?: string;
+  reason?: string;
+  note?: string;
+  vid?: string;
+  country?: string;
+  creator_key?: string;
+  effective_from?: string;
+};
 
 /** 从 ReviewItem.detail 里提炼「候选人」摘要文本，write-reviews 与 submit-judgment 共用。 */
 function candidatesSummary(detail: unknown): string {
@@ -189,6 +211,8 @@ Deno.serve(async (req) => {
       review_key?: string;
       manual_bd?: string;
       manual_note?: string;
+      rows?: BulkRow[];
+      dry_run?: boolean;
     };
     const action = (body.action ?? "").trim();
     if (isCron && !CRON_ACTIONS.has(action)) throw new Error("cron 只允许调用 sync-targets / sync-handovers");
@@ -207,6 +231,151 @@ Deno.serve(async (req) => {
         .limit(500);
       if (error) throw new Error(error.message);
       return json({ reviews: data ?? [] });
+    }
+
+    // ---------- Excel 批量回填判定 / 覆盖 ----------
+    // 放在取飞书 token 之前：这个动作只写数据库，不该因为飞书挂了就判不了，也不该白等一次鉴权往返。
+    if (action === "bulk-judgment") {
+      const rows = Array.isArray(body.rows) ? (body.rows as BulkRow[]) : [];
+      const dryRun = !!body.dry_run;
+      if (!rows.length) throw new Error("没有可提交的行");
+      if (rows.length > 2000) throw new Error(`一次最多提交 2000 行，本次 ${rows.length} 行，请拆分`);
+
+      // 人员表只读一次：姓名写错是最常见的填表错误，必须当场拦下，
+      // 否则会写进一条永远匹配不上任何同事的归属规则。
+      const { data: staffRows, error: staffErr } = await db.from("staff_sheets").select("name, role");
+      if (staffErr) throw new Error(staffErr.message);
+      const staffByName = new Map(
+        ((staffRows ?? []) as Array<{ name: string; role: string }>).map((s) => [s.name.trim(), s.role]),
+      );
+
+      const errors: Array<{ row: number; review_key: string; message: string }> = [];
+      const ok: Array<{ idx: number; r: BulkRow; type: string }> = [];
+      rows.forEach((raw, i) => {
+        const rowNo = Number(raw.row_no ?? i + 2);
+        const key = (raw.review_key ?? "").trim();
+        const type = (raw.decision_type ?? "").trim().toUpperCase();
+        const staff = (raw.staff_name ?? "").trim();
+        const fail = (m: string) => errors.push({ row: rowNo, review_key: key, message: m });
+        if (!key) return fail("缺 review_key");
+        if (!["JUDGE", "OVERRIDE_VID", "OVERRIDE_CREATOR", "IGNORE"].includes(type)) {
+          return fail(`判定类型「${raw.decision_type ?? ""}」无法识别，只能是 JUDGE / OVERRIDE_VID / OVERRIDE_CREATOR / IGNORE`);
+        }
+        if (type !== "IGNORE") {
+          if (!staff) return fail("归因同事必填");
+          if (!staffByName.has(staff)) return fail(`「${staff}」不在人员表中，请检查姓名拼写`);
+        }
+        if (type === "OVERRIDE_VID" && !/^\d{15,20}$/.test((raw.vid ?? "").trim())) {
+          return fail("VID 级覆盖必须填写 15–20 位的 VID");
+        }
+        if (type === "OVERRIDE_CREATOR" && (!(raw.country ?? "").trim() || !(raw.creator_key ?? "").trim())) {
+          return fail("达人级覆盖必须同时填写站点与达人昵称");
+        }
+        if (!(raw.reason ?? "").trim()) return fail("原因必填（便于以后复核这条人工决定）");
+        ok.push({ idx: i, r: raw, type });
+      });
+
+      if (dryRun || errors.length) {
+        return json({
+          dry_run: true,
+          applied: 0,
+          checked: rows.length,
+          valid: ok.length,
+          errors,
+          // 有错就整批不写：填表错误往往成片出现，写一半更难收拾
+          note: errors.length ? "存在无法识别的行，本次未写入任何数据，请修正后重新上传" : "校验通过，可以提交",
+        });
+      }
+
+      let judged = 0;
+      let overrideVid = 0;
+      let overrideCreator = 0;
+      let ignored = 0;
+      const warnings: string[] = [];
+
+      for (const item of ok) {
+        const raw = item.r;
+        const key = (raw.review_key ?? "").trim();
+        const staff = (raw.staff_name ?? "").trim();
+        const reason = (raw.reason ?? "").trim();
+        const note = [reason, (raw.note ?? "").trim()].filter(Boolean).join(" | ");
+
+        const { data: rv } = await db
+          .from("attribution_review")
+          .select("review_key, review_type, subject")
+          .eq("review_key", key)
+          .maybeSingle();
+        if (!rv) {
+          warnings.push(`审查项 ${key} 不存在（可能已被重跑覆盖），该行跳过`);
+          continue;
+        }
+        const review = rv as { review_key: string; review_type: string; subject: string };
+
+        if (item.type === "JUDGE") {
+          const res = await applyJudgment(db, review, staff, note, account.name);
+          if (res.warning) warnings.push(res.warning);
+          judged++;
+        } else if (item.type === "IGNORE") {
+          const { error } = await db
+            .from("attribution_review")
+            .update({ manual_bd: null, manual_note: note || null, status: "RESOLVED" })
+            .eq("review_key", key);
+          if (error) throw new Error(error.message);
+          ignored++;
+        } else if (item.type === "OVERRIDE_VID") {
+          const { error } = await db.from("attribution_manual_rules").upsert(
+            {
+              vid: (raw.vid ?? "").trim(),
+              staff_name: staff,
+              role: staffByName.get(staff) === "EDITOR" ? "EDITOR" : "BD",
+              enabled: true,
+              reason,
+              created_by: account.name,
+            },
+            { onConflict: "vid" },
+          );
+          if (error) throw new Error(`写入 VID 覆盖规则失败：${error.message}`);
+          const { error: e2 } = await db
+            .from("attribution_review")
+            .update({ manual_bd: staff, manual_note: `[VID覆盖] ${note}`, status: "RESOLVED" })
+            .eq("review_key", key);
+          if (e2) throw new Error(e2.message);
+          overrideVid++;
+        } else {
+          const from = (raw.effective_from ?? "").trim() || "2000-01-01";
+          const { error } = await db.from("attribution_manual_decisions").upsert(
+            {
+              country: (raw.country ?? "").trim().toUpperCase(),
+              creator_key: (raw.creator_key ?? "").trim(),
+              decision: "ASSIGN",
+              staff_name: staff,
+              effective_from: from,
+              scope: "CREATOR",
+              enabled: true,
+              reason,
+              created_by: account.name,
+            },
+            { onConflict: "country,creator_key,effective_from,decision" },
+          );
+          if (error) throw new Error(`写入达人覆盖判定失败：${error.message}`);
+          const { error: e2 } = await db
+            .from("attribution_review")
+            .update({ manual_bd: staff, manual_note: `[达人覆盖] ${note}`, status: "RESOLVED" })
+            .eq("review_key", key);
+          if (e2) throw new Error(e2.message);
+          overrideCreator++;
+        }
+      }
+
+      return json({
+        applied: judged + overrideVid + overrideCreator + ignored,
+        judged,
+        override_vid: overrideVid,
+        override_creator: overrideCreator,
+        ignored,
+        warnings,
+        note: "批量判定只写数据库、不回写飞书。人工覆盖要等阶段 3 引擎接入后才会在归因中生效；人工判定立即生效。",
+      });
     }
 
     const token = await getTenantAccessToken();
