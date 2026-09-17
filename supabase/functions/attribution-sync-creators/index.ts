@@ -152,13 +152,29 @@ Deno.serve(async (req) => {
     ];
     const todo = onlySheets ? jobs.filter((j) => onlySheets.has(j.sheet)) : jobs;
 
+    /** 网关抖动（521/502/503/504、HTML 错误页、fetch failed）自动重试，业务错误立即抛出 */
+    const isTransient = (msg: string) =>
+      /<!DOCTYPE html|<html|\b5\d\d\b|fetch failed|timeout|ECONNRESET|Web server is down/i.test(msg);
+    const withRetry = async <T,>(label: string, fn: () => Promise<{ error: { message: string } | null }>) => {
+      let last = "";
+      for (let a = 0; a < 3; a++) {
+        const { error } = await fn();
+        if (!error) return;
+        last = error.message;
+        if (!isTransient(last)) break;
+        await new Promise((r) => setTimeout(r, 1000 * 2 ** a));
+      }
+      throw new Error(`${label}：${isTransient(last) ? "数据库网关暂时不可用，请稍后重试" : last}`);
+    };
+
     /** 处理完一个 sheet 就把它那一段登记行先删后插：中断也不会留下半张表 */
     const rewriteSheet = async (sheetName: string, rows: RegRow[]) => {
-      const { error: delErr } = await db.from("creator_registry").delete().eq("source_sheet", sheetName);
-      if (delErr) throw new Error(`删除 ${sheetName} 旧登记行失败：${delErr.message}`);
+      await withRetry(`删除 ${sheetName} 旧登记行失败`, () =>
+        db.from("creator_registry").delete().eq("source_sheet", sheetName),
+      );
       for (let i = 0; i < rows.length; i += 500) {
-        const { error } = await db.from("creator_registry").insert(rows.slice(i, i + 500));
-        if (error) throw new Error(`写入 ${sheetName} 登记行失败：${error.message}`);
+        const chunk = rows.slice(i, i + 500);
+        await withRetry(`写入 ${sheetName} 登记行失败`, () => db.from("creator_registry").insert(chunk));
       }
     };
 
