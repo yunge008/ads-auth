@@ -626,6 +626,45 @@ export function unmatchedTrend(month: string) {
   );
 }
 
+// ---------- 身份层 / 归属区间预演（attribution-identity-build） ----------
+
+export type IdentityMergeSample = {
+  site: string;
+  current_nickname: string | null;
+  current_username: string | null;
+  names: string[];
+};
+export type IdentityDiffSample = {
+  country: string;
+  creator_key: string;
+  display_name: string | null;
+  current_owner_bd: string | null;
+  stage_owner_bd: string | null;
+  diff_kind: string;
+};
+export type IdentityBuildResult = {
+  components?: number;
+  components_multi_name?: number;
+  components_linked_via_gmv_nickname?: number;
+  stages?: number;
+  creators_with_multiple_stages?: number;
+  identity_conflicts?: number;
+  unusable_vids?: number;
+  diff_by_kind?: Record<string, number>;
+  identity_merge_sample?: IdentityMergeSample[];
+  diff_sample?: IdentityDiffSample[];
+  note?: string;
+};
+
+export function identityBuild(action: "build" | "report", opts?: { country?: string }) {
+  return invokeFn<IdentityBuildResult>(
+    "attribution-identity-build",
+    { action, country: opts?.country },
+    { timeout: 300000 },
+  );
+}
+
+
 // ---------- 格式化 ----------
 
 export const fmtUsd = (n: number | null | undefined) =>
