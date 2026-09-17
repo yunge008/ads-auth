@@ -1915,8 +1915,28 @@ export type Database = {
           missing_gmv_usd: number | null
           missing_rows: number | null
           month: string | null
+          need_posted_at_rows: number | null
+          no_posted_at_by_design_usd: number | null
+          pending_gmv_pct_of_total: number | null
+          pending_gmv_usd: number | null
           total_gmv_usd: number | null
           total_rows: number | null
+        }
+        Relationships: []
+      }
+      attribution_protection_check_90d: {
+        Row: {
+          country: string | null
+          diff_kind: string | null
+          display_name: string | null
+          engine_owner_bd: string | null
+          engine_owner_last_date: string | null
+          engine_transfer_count: number | null
+          match_key: string | null
+          sql_grab_count: number | null
+          sql_owner_bd: string | null
+          sql_owner_last_date: string | null
+          sql_transfer_count: number | null
         }
         Relationships: []
       }
@@ -2051,6 +2071,10 @@ export type Database = {
           scope: string
         }[]
       }
+      attribution_needs_posted_at: {
+        Args: { _creative_type: string }
+        Returns: boolean
+      }
       attribution_next_chunk_json: { Args: { _run_id: string }; Returns: Json }
       attribution_norm_creative_type: {
         Args: { _raw: string }
@@ -2058,6 +2082,18 @@ export type Database = {
       }
       attribution_norm_name: { Args: { _s: string }; Returns: string }
       attribution_norm_site: { Args: { _s: string }; Returns: string }
+      attribution_protection_owner_90d: {
+        Args: { _country?: string; _protection_days?: number }
+        Returns: {
+          country: string
+          first_date: string
+          grab_count: number
+          match_key: string
+          owner_bd: string
+          owner_last_date: string
+          transfer_count: number
+        }[]
+      }
       attribution_rebuild_agg_usd: { Args: { _month: string }; Returns: number }
       attribution_registry_matrix: {
         Args: never
