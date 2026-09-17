@@ -1908,6 +1908,28 @@ export type Database = {
       }
     }
     Views: {
+      attribution_creator_audit: {
+        Row: {
+          最早动作日: string | null
+          最近动作日: string | null
+          占位日期行数: number | null
+          备注: string | null
+          带vid行数: number | null
+          归一化昵称: string | null
+          归属转移次数: number | null
+          当前归属bd: string | null
+          无日期行数: number | null
+          来源类型: string | null
+          来源表: string | null
+          用户名: string | null
+          登记人数: number | null
+          登记行数: number | null
+          登记过的同事: string | null
+          站点: string | null
+          达人昵称: string | null
+        }
+        Relationships: []
+      }
       attribution_posted_at_gap: {
         Row: {
           country: string | null
@@ -1937,6 +1959,22 @@ export type Database = {
           sql_owner_bd: string | null
           sql_owner_last_date: string | null
           sql_transfer_count: number | null
+        }
+        Relationships: []
+      }
+      attribution_vid_audit: {
+        Row: {
+          vid: string | null
+          来源类型: string | null
+          来源表: string | null
+          用户名: string | null
+          登记sku: string | null
+          登记人: string | null
+          登记日期: string | null
+          站点: string | null
+          表内行号: number | null
+          角色: string | null
+          达人昵称: string | null
         }
         Relationships: []
       }
