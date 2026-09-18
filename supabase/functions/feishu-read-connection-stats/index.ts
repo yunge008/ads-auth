@@ -18,6 +18,7 @@ import {
 import { admin, checkAdminPasscode } from "../_shared/auth.ts";
 import { cronAuthed } from "../_shared/cron.ts";
 import { cellText, parseDate } from "../_shared/cells.ts";
+import { isSheetEnabled, loadSheetConfig, makeOptionalResolver } from "../_shared/sheetConfig.ts";
 
 const VID_RE = /^7\d{18}$/;
 const COUNTRY_RE = /^[\u4e00-\u9fa5A-Za-z0-9\-\s]{1,10}$/;
@@ -65,17 +66,29 @@ Deno.serve(async (req) => {
     const bdTargets = staff.filter((s) => s.role === "BD");
     const editorTargets = staff.filter((s) => s.role === "EDITOR");
 
+    // sheet 名统一走配置表（设置 → 飞书表名称）。这两路读的都是「每人一张」的 sheet，
+    // 名字来自人员表 staff_sheets，配置表里存的是带占位符的模板（建联-{同事姓名} / {剪辑姓名}），
+    // 只说明「这类 sheet 读哪些列」，不参与匹配 —— 所以这里配置能控制的是**启不启用**：
+    // 在设置里停用 CONNECTION_STATS / EDITOR，这一路就整个不读，而不是读回一堆空行。
+    // 匹配本身统一用 makeOptionalResolver：只归一空白后精确比较，不做别名猜测；
+    // 找不到不抛错（离职同事的 sheet 可能真被删了），记进 missing 一起汇报。
+    const sheetCfg = await loadSheetConfig(db);
+    const bdEnabled = isSheetEnabled(sheetCfg, "CONNECTION_STATS");
+    const editorEnabled = isSheetEnabled(sheetCfg, "EDITOR");
+    const disabledSources: string[] = [];
+    if (!bdEnabled) disabledSources.push("CONNECTION_STATS");
+    if (!editorEnabled) disabledSources.push("EDITOR");
+
     const token = await getTenantAccessToken();
     const rows: Row[] = [];
     const missing: string[] = [];
     const touchedSheets = new Set<string>();
 
-    if (bdTargets.length) {
+    if (bdEnabled && bdTargets.length) {
       const mainToken = getSpreadsheetToken();
-      const mainSheets = await listSheets(token, mainToken);
-      const byName = new Map(mainSheets.map((s) => [s.title, s.sheet_id]));
+      const resolve = makeOptionalResolver(await listSheets(token, mainToken));
       for (const t of bdTargets) {
-        const sid = byName.get(t.sheet_name);
+        const sid = resolve(t.sheet_name);
         if (!sid) { missing.push(t.sheet_name); continue; }
         touchedSheets.add(t.sheet_name);
         const data = await readRange(token, mainToken, `${sid}!A2:Q`, 250);
@@ -107,12 +120,11 @@ Deno.serve(async (req) => {
       }
     }
 
-    if (editorTargets.length) {
+    if (editorEnabled && editorTargets.length) {
       const edToken = getSpreadsheetToken("FEISHU_EDITOR_SPREADSHEET_TOKEN");
-      const edSheets = await listSheets(token, edToken);
-      const byName = new Map(edSheets.map((s) => [s.title, s.sheet_id]));
+      const resolve = makeOptionalResolver(await listSheets(token, edToken));
       for (const t of editorTargets) {
-        const sid = byName.get(t.sheet_name);
+        const sid = resolve(t.sheet_name);
         if (!sid) { missing.push(t.sheet_name); continue; }
         touchedSheets.add(t.sheet_name);
         const data = await readRange(token, edToken, `${sid}!A2:G`, 500);
@@ -162,7 +174,13 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ inserted, sheets_synced: touchedSheets.size, missing_sheets: missing }),
+      JSON.stringify({
+        inserted,
+        sheets_synced: touchedSheets.size,
+        missing_sheets: missing,
+        // 配置表里被停用、这一轮整个没读的数据源
+        disabled_sources: disabledSources,
+      }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {

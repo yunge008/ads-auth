@@ -30,6 +30,7 @@ import {
 import { admin, verifyPasscode } from "../_shared/auth.ts";
 import { cronAuthed } from "../_shared/cron.ts";
 import { cellText, parseDate } from "../_shared/cells.ts";
+import { configuredSheetName, loadSheetConfig, makeSheetResolver } from "../_shared/sheetConfig.ts";
 import { normalizeName, splitIdentityKey } from "../_shared/attribution.ts";
 import { buildMonthlyReport } from "../_shared/attribution-report.ts";
 
@@ -459,33 +460,13 @@ Deno.serve(async (req) => {
     // sheet 名来自配置表 feishu_sheet_config（设置 → 飞书表名称可改），**不做别名猜测**：
     // 猜对一次的代价是真改名时静默读到另一张表、或者读空还以为「本期没数据」。
     // 只归一空白后精确匹配；对不上就报错，并把该表格现有的 sheet 列出来，让人去设置页改。
-    const { data: cfgRows } = await db
-      .from("feishu_sheet_config")
-      .select("config_key, sheet_name")
-      .eq("enabled", true);
-    const cfgByKey = new Map(
-      ((cfgRows ?? []) as Array<{ config_key: string; sheet_name: string }>).map((c) => [c.config_key, c.sheet_name]),
-    );
-    /** 配置里改过就用配置的，没配就退回代码里的默认名（配置表没跑 migration 时也不至于全挂）。 */
-    const cfgName = (key: string, fallback: string) => (cfgByKey.get(key) || fallback).trim();
-    const SHEET_PROGRESS_NAME = cfgName("PROGRESS", SHEET_PROGRESS);
-    const SHEET_REVIEWS_NAME = cfgName("REVIEWS", SHEET_REVIEWS);
-    const SHEET_CONFIG_NAME = cfgName("CONFIG", SHEET_CONFIG);
-    const SHEET_OWNERSHIP_NAME = cfgName("OWNERSHIP", SHEET_OWNERSHIP);
-
-    const normTitle = (t: string) => t.replace(/[\s\u00a0\u3000]/g, "").trim();
-    /** 针对某一个飞书表格建一个 sheet 名 → sheet_id 的解析器；找不到时把该表格里现有的 sheet 全列出来。 */
-    const makeSheetResolver = (sheets: Array<{ sheet_id: string; title: string }>, label: string) => {
-      const byName = new Map(sheets.map((s) => [normTitle(s.title), s.sheet_id]));
-      return (title: string) => {
-        const sid = byName.get(normTitle(title));
-        if (sid) return sid;
-        throw new Error(
-          `${label}里没有 sheet「${title}」。若飞书那边改了表名，请到「设置 → 飞书表名称」改配置，不要改代码。` +
-            `该表格现有的 sheet：${sheets.map((s) => s.title).join("、") || "（空）"}`,
-        );
-      };
-    };
+    // 解析逻辑统一在 _shared/sheetConfig.ts（sync-creators、connection-stats 用的是同一份），
+    // 免得同一件事「飞书改了表名」在不同函数里报出三种不同的表现。
+    const sheetCfg = await loadSheetConfig(db);
+    const SHEET_PROGRESS_NAME = configuredSheetName(sheetCfg, "PROGRESS", SHEET_PROGRESS);
+    const SHEET_REVIEWS_NAME = configuredSheetName(sheetCfg, "REVIEWS", SHEET_REVIEWS);
+    const SHEET_CONFIG_NAME = configuredSheetName(sheetCfg, "CONFIG", SHEET_CONFIG);
+    const SHEET_OWNERSHIP_NAME = configuredSheetName(sheetCfg, "OWNERSHIP", SHEET_OWNERSHIP);
 
     const mainSheets = await listSheets(token, ss);
     const sheetId = makeSheetResolver(mainSheets, "飞书主表格");

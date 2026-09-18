@@ -25,6 +25,13 @@ import { admin, checkAdminPasscode } from "../_shared/auth.ts";
 import { cronAuthed } from "../_shared/cron.ts";
 import { cellText, isPrecisionLostNumber, parseDate } from "../_shared/cells.ts";
 import {
+  configuredSheetName,
+  isSheetEnabled,
+  loadSheetConfig,
+  makeOptionalResolver,
+  makeSheetResolver,
+} from "../_shared/sheetConfig.ts";
+import {
   type RegistryEntry,
   type ReviewItem,
   hasCjk,
@@ -61,7 +68,11 @@ function parseFollowerCount(v: unknown): number | null {
   const n = Math.round(base * mult);
   return n >= 0 && n < 1e12 ? n : null;
 }
-const LOG_SHEET_TITLE = "授权记录";
+/**
+ * 归档 sheet 的默认名。实际用哪个名字由配置表 `feishu_sheet_config` 的 ARCHIVE 行决定
+ * （设置 → 飞书表名称），这里只是配置表还没跑 migration 时的退路。
+ */
+const LOG_SHEET_TITLE_DEFAULT = "授权记录";
 
 type RegRow = {
   source: "JIANLIAN" | "ARCHIVE" | "EDITOR";
@@ -133,21 +144,40 @@ Deno.serve(async (req) => {
       return VID_RE.test(raw) ? raw : "";
     };
     // ---- 工作清单：一个 sheet 一片，按顺序处理，时间用完就交给下一次调用 ----
+    // sheet 名统一走配置表（设置 → 飞书表名称），匹配只归一空白后**精确比较**，不猜别名。
+    //   · 归档 sheet「授权记录」是固定名字 → 由配置表 ARCHIVE 行给，改名改配置即可；
+    //   · 每人一张的建联/剪辑 sheet 名字来自「人员表」staff_sheets，配置表里存的是
+    //     带占位符的模板（建联-{同事姓名}），只为说明这类 sheet 读哪些列，不参与匹配；
+    //   · 配置里把某一行停用 → 这一路数据源整个跳过，而不是读回一堆空行。
+    const sheetCfg = await loadSheetConfig(db);
+    const LOG_SHEET_TITLE = configuredSheetName(sheetCfg, "ARCHIVE", LOG_SHEET_TITLE_DEFAULT);
+    const jianlianEnabled = isSheetEnabled(sheetCfg, "JIANLIAN");
+    const archiveEnabled = isSheetEnabled(sheetCfg, "ARCHIVE");
+    const editorEnabled = isSheetEnabled(sheetCfg, "EDITOR");
+    /** 被配置停用而没读的数据源，如实返回，免得「数字少了一截」查不到原因 */
+    const disabledSources: string[] = [];
+    if (!jianlianEnabled) disabledSources.push("JIANLIAN");
+    if (!archiveEnabled) disabledSources.push("ARCHIVE");
+    if (!editorEnabled) disabledSources.push("EDITOR");
+
     const mainToken = getSpreadsheetToken();
     const mainSheets = await listSheets(token, mainToken);
-    const mainByName = new Map(mainSheets.map((s) => [s.title, s.sheet_id]));
-    const editors = staff.filter((s) => s.role === "EDITOR");
-    let edByName = new Map<string, string>();
+    /** 每人一张的 sheet：找不到不抛错（离职同事的 sheet 可能真被删了），记进 missing 汇报 */
+    const mainOptional = makeOptionalResolver(mainSheets);
+    /** 固定名字的 sheet：找不到就是配置不对，直接抛错并列出现有 sheet */
+    const mainRequired = makeSheetResolver(mainSheets, "飞书主表格");
+    const editors = editorEnabled ? staff.filter((s) => s.role === "EDITOR") : [];
+    let edOptional: (t: string) => string | null = () => null;
     let edToken = "";
     if (editors.length) {
       edToken = getSpreadsheetToken("FEISHU_EDITOR_SPREADSHEET_TOKEN");
-      edByName = new Map((await listSheets(token, edToken)).map((s) => [s.title, s.sheet_id]));
+      edOptional = makeOptionalResolver(await listSheets(token, edToken));
     }
 
     type Job = { sheet: string; kind: "JIANLIAN" | "ARCHIVE" | "EDITOR"; staffName: string; active: boolean };
     const jobs: Job[] = [
-      ...staff.filter((s) => s.role === "BD").map((t): Job => ({ sheet: t.sheet_name, kind: "JIANLIAN", staffName: t.name, active: !!t.active })),
-      { sheet: LOG_SHEET_TITLE, kind: "ARCHIVE", staffName: "", active: false },
+      ...(jianlianEnabled ? staff.filter((s) => s.role === "BD") : []).map((t): Job => ({ sheet: t.sheet_name, kind: "JIANLIAN", staffName: t.name, active: !!t.active })),
+      ...(archiveEnabled ? [{ sheet: LOG_SHEET_TITLE, kind: "ARCHIVE" as const, staffName: "", active: false }] : []),
       ...editors.map((t): Job => ({ sheet: t.sheet_name, kind: "EDITOR", staffName: t.name, active: !!t.active })),
     ];
     const todo = onlySheets ? jobs.filter((j) => onlySheets.has(j.sheet)) : jobs;
@@ -195,7 +225,7 @@ Deno.serve(async (req) => {
         const rows: RegRow[] = [];
 
         if (job.kind === "JIANLIAN") {
-          const sid = mainByName.get(job.sheet);
+          const sid = mainOptional(job.sheet);
           if (!sid) {
             missing.push(job.sheet);
             continue;
@@ -238,11 +268,9 @@ Deno.serve(async (req) => {
             });
           }
         } else if (job.kind === "ARCHIVE") {
-          const sid = mainByName.get(LOG_SHEET_TITLE);
-          if (!sid) {
-            missing.push(LOG_SHEET_TITLE);
-            continue;
-          }
+          // 归档 sheet 是固定名字，读不到就是配置不对（不像每人一张的 sheet 可能真被删）。
+          // 这里抛错而不是记进 missing：静默少读两万行历史登记，归属会大面积改判且没人知道。
+          const sid = mainRequired(LOG_SHEET_TITLE);
           const raw = await readRange(token, mainToken, `${sid}!M3:S`);
           for (let i = 0; i < raw.length; i++) {
             const r = raw[i] ?? [];
@@ -271,7 +299,7 @@ Deno.serve(async (req) => {
             });
           }
         } else {
-          const sid = edByName.get(job.sheet);
+          const sid = edOptional(job.sheet);
           if (!sid) {
             missing.push(job.sheet);
             continue;
@@ -333,9 +361,29 @@ Deno.serve(async (req) => {
         registry_vid_rows: writtenVidRows,
         follower_rows: followerRows,
         missing_sheets: missing,
+        disabled_sources: disabledSources,
         vid_precision_lost: vidPrecisionLost,
         cjk_sites: cjkList,
       });
+    }
+
+    // ---- 盘点「已经不属于任何数据源」的登记行（只报告，不自动删）----
+    // 触发场景：在设置里把某张 sheet 改了名、或停用了某一路数据源、或人员表删了一个人。
+    // 登记行是按 source_sheet 先删后插的，改名之后新名字写新行、旧名字那批行没人再删它，
+    // 于是同一批登记在库里存了两份，归属解析会当成「两个人各登记过一次」去算保护期 ——
+    // 这是改表名之后最容易出现、又最难自己发现的一种脏数据。
+    // 这里不自动删：删的是六万行量级的历史登记，删错没法回滚，交给人看过再决定。
+    // 返回的 orphan_sheets 就是待确认清单，确认后在 SQL Editor 里按 source_sheet 清理。
+    const liveSheets = new Set(jobs.map((j) => j.sheet));
+    const orphanSheets: string[] = [];
+    {
+      const { data: existing, error } = await db
+        .from("creator_registry")
+        .select("source_sheet")
+        .limit(100000);
+      if (error) throw new Error(`盘点登记来源失败：${error.message}`);
+      const seen = new Set((existing ?? []).map((r) => (r as { source_sheet: string }).source_sheet));
+      for (const sh of seen) if (sh && !liveSheets.has(sh)) orphanSheets.push(sh);
     }
 
     // ---- 归属解析：从**数据库**读全部 BD 登记行（分片跑完后内存里只有最后一片）----
@@ -468,6 +516,11 @@ Deno.serve(async (req) => {
       ownership_keys: ownRows.length,
       reviews_open: reviewsOpen ?? 0,
       missing_sheets: missing,
+      // 配置表里被停用、这一轮整个没读的数据源
+      disabled_sources: disabledSources,
+      // 库里还留着、但已经不属于任何数据源的 source_sheet（多半是 sheet 改过名）。
+      // 不为空说明同一批登记可能存了两份，会让保护期算错，需要人确认后清理。
+      orphan_sheets: orphanSheets,
       vid_precision_lost: vidPrecisionLost,
       follower_rows: followerRows,
       cjk_sites: cjkList,

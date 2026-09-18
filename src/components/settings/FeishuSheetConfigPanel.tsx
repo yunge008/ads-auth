@@ -102,6 +102,8 @@ export function FeishuSheetConfigPanel() {
           带 <Badge variant="outline" className="h-4 px-1 text-[10px]">读写</Badge> 的表系统会写回去，人工手填的内容可能被覆盖。
           <b>读取列范围与列映射只读</b>：它们写死在解析代码里，改这里不改变实际读取行为。
           表格名称或 sheet 名称留空的行 = <b>还没提供给系统</b>，不参与匹配，填上并保存后才生效。
+          带 <code>{"{}"}</code> 占位符的是<b>每人一张的 sheet</b>（建联-同事姓名 / 剪辑姓名），
+          真实名称来自「人员表」，这里只说明这类表读哪些列，改不了。
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -137,6 +139,9 @@ export function FeishuSheetConfigPanel() {
                 {rows.map((r) => {
                   const isEditing = editingKey === r.config_key;
                   const pending = !r.spreadsheet_label.trim() || !r.sheet_name.trim();
+                  // 带 {占位符} 的是「每人一张」的 sheet（建联-{同事姓名} / {剪辑姓名}）：
+                  // 真实 sheet 名来自「人员表」，这里的模板只说明这类表读哪些列，不参与匹配，所以不给改。
+                  const isTemplate = /[{}]/.test(r.sheet_name);
                   return (
                     <React.Fragment key={r.config_key}>
                       <TableRow className={`align-top ${pending ? "bg-amber-50/60" : ""}`}>
@@ -164,7 +169,7 @@ export function FeishuSheetConfigPanel() {
                           </div>
                         </TableCell>
                         <TableCell className="py-2">
-                          {isEditing ? (
+                          {isEditing && !isTemplate ? (
                             <Input
                               value={r.sheet_name}
                               onChange={(e) => updateRow(r.config_key, { sheet_name: e.target.value })}
@@ -176,6 +181,12 @@ export function FeishuSheetConfigPanel() {
                               {r.sheet_name || <span className="text-muted-foreground">—</span>}
                             </span>
                           )}
+                          {isTemplate ? (
+                            // 每人一张的 sheet：真名在人员表里，这里存的是模板，改它不会改变读哪张 sheet
+                            <div className="text-[10px] text-amber-700 mt-0.5">
+                              每人一张，名称取自「人员表」
+                            </div>
+                          ) : null}
                         </TableCell>
                         <TableCell className="py-2 text-xs text-muted-foreground whitespace-nowrap">
                           {r.read_range || "由代码决定"}
