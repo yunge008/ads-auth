@@ -123,16 +123,72 @@ Deno.test("normalizeCreativeType: 只认精确值，不做包含式兜底", () =
 
 // ---------- vidToPostedAt ----------
 
-Deno.test("vidToPostedAt: 高 32 位 = Unix 秒，越界/非法返回 null", () => {
+Deno.test("B7：vidToPostedAt 合理区间收窄到 2022–2030，且已不参与归因判定", () => {
   const d = vidToPostedAt("7400000000000000000");
   assert(d instanceof Date);
-  // UTC 时间戳（V3：归因不再使用它，只留给 isHandoverBoundary 抽查提示）
   assertEquals(d!.toISOString().slice(0, 4), "2024");
   assertEquals(vidToPostedAt("123"), null); // 位数不够
   assertEquals(vidToPostedAt("abc"), null);
-  assertEquals(vidToPostedAt("100000000000000000"), null); // 换算出来早于 2008
+  assertEquals(vidToPostedAt("100000000000000000"), null); // 换算出来早于 2022
+  assertEquals(vidToPostedAt("999999999999999999"), null); // 换算出来晚于 2030
 });
 
+Deno.test("A7：导出表没有发布时间时退到飞书登记日期（取最早一条），不再 VID 反推", () => {
+  const norm = normalizeName("王姐好物");
+  const ownership = new Map([[identityKey("PH", norm), { bd: "阿木", keyType: "NICKNAME" as const, country: "PH" }]]);
+  const handovers = new Map([["PH", HANDOVER]]);
+
+  // 昵称线：creatorActions 里这个达人的登记动作日期就是「素材登记日期」
+  // 转移日 = 李汝华在交接日(7-01)后对该达人的首次动作 = 2026-07-20
+  const early = attributeRows(
+    [row({ vid: "", postedAt: null, postedAtSource: null })],
+    ctx({
+      ownership,
+      handovers,
+      creatorActions: actions([["阿木", ["2026-06-10"]], ["李汝华", ["2026-07-20"]]], norm),
+    }),
+  );
+  // 最早登记日 2026-06-10 早于转移日 → 仍归原 BD
+  assertEquals(early.rows[0].staff, "阿木");
+
+  const late = attributeRows(
+    [row({ vid: "", postedAt: null, postedAtSource: null })],
+    ctx({
+      ownership,
+      handovers,
+      creatorActions: actions([["李汝华", ["2026-07-20", "2026-09-01"]]], norm),
+    }),
+  );
+  // 全部登记日都在转移日之后 → 切给新 BD
+  assertEquals(late.rows[0].staff, "李汝华");
+});
+
+Deno.test("A7：VID 层判不了的行，登记日期也能从该 VID 的登记行取到", () => {
+  const norm = normalizeName("王姐好物");
+  const ownership = new Map([[identityKey("PH", norm), { bd: "阿木", keyType: "NICKNAME" as const, country: "PH" }]]);
+  const handovers = new Map([["PH", HANDOVER]]);
+  // 两个人登记同一 VID 且都不是站点负责人 → A5 判不了 → 落到昵称路径，此时 VID 登记日期可用
+  const vidRegs = new Map([[
+    "7400000000000000000",
+    [
+      { staff: "甲", role: "BD" as const, registerDate: "2026-06-10", country: "PH" },
+      { staff: "乙", role: "BD" as const, registerDate: "2026-06-20", country: "PH" },
+    ],
+  ]]);
+  const r = attributeRows(
+    [row({ postedAt: null, postedAtSource: null })],
+    ctx({
+      ownership,
+      handovers,
+      vidRegs,
+      sitePermissions: new Map(),
+      creatorActions: actions([["李汝华", ["2026-07-20"]]], norm),
+    }),
+  );
+  // 最早的 VID 登记日 2026-06-10 早于转移日 2026-07-20 → 归原 BD
+  assertEquals(r.rows[0].staff, "阿木");
+  assertEquals(r.rows[0].matchType, "REGISTRY");
+});
 // ---------- classifyAttribution ----------
 
 Deno.test("classifyAttribution: 桶/角色/匹配方式 → 归属角色", () => {
@@ -200,16 +256,29 @@ Deno.test("resolveOwnership: 保护期内抢注 → 归属不变 + PROTECTION_GR
   assertEquals(reviews[0].reviewKey, "GRAB:NICKNAME:PH\u001fwang888");
 });
 
-Deno.test("resolveOwnership: 无日期行排最前；owner 无日期时异 BD 直接转移", () => {
+Deno.test("A4：无日期的登记行完全不参与判定，不再凭空抢到归属", () => {
   const groups = new Map([[
     identityKey("PH", "wang888"),
     [entry("何莎莎", "2026-02-01"), entry("李汝华", null)],
   ]]);
   const { owners } = resolveOwnership(groups, "NICKNAME");
-  // 无日期排序在前 → 李汝华先成为 owner，但无 ownerLast 无法主张保护期 → 转给何莎莎
+  // 旧行为：无日期行按 '0000-00-00' 排最前 → 李汝华先当 owner，又因无 ownerLast 立刻被转走
+  // 新行为：无日期行直接跳过，只有何莎莎这条有日期的算数
+  assertEquals(owners.length, 1);
   assertEquals(owners[0].ownerBd, "何莎莎");
-  assertEquals(owners[0].transferCount, 1);
-  assertEquals(owners[0].firstDate, null);
+  assertEquals(owners[0].transferCount, 0);
+  assertEquals(owners[0].firstDate, "2026-02-01");
+  // 被跳过的行留在 evidence 里，方便回飞书查异常
+  const ev = owners[0].evidence as { skippedNoDate: Array<{ bd: string }> };
+  assertEquals(ev.skippedNoDate.map((x) => x.bd), ["李汝华"]);
+});
+
+Deno.test("A4：一个达人全部登记行都没日期 → 不产生任何归属", () => {
+  const groups = new Map([[
+    identityKey("PH", "wang888"),
+    [entry("李汝华", null), entry("何莎莎", null)],
+  ]]);
+  assertEquals(resolveOwnership(groups, "NICKNAME").owners.length, 0);
 });
 
 Deno.test("resolveOwnership: 保护期边界 = 「距最近动作满 90 自然天」，天数可调", () => {
@@ -365,19 +434,66 @@ Deno.test("attributeRows: 直播不走 VID 强归因，只走昵称路径", () =
   assertEquals(rows[0].bucket, "UNMATCHED");
 });
 
-Deno.test("attributeRows: 一个 VID 两个同事登记 → VID_DUAL_SOURCE，默认取登记日较新者", () => {
-  const vidRegs = new Map([[
-    "7400000000000000000",
-    [
-      { staff: "李汝华", role: "BD" as const, registerDate: "2026-05-01", country: "PH" },
-      { staff: "何莎莎", role: "BD" as const, registerDate: "2026-06-01", country: "PH" },
-    ],
-  ]]);
-  const { rows, reviews } = attributeRows([row()], ctx({ vidRegs }));
+const DUAL_REGS = new Map([[
+  "7400000000000000000",
+  [
+    { staff: "李汝华", role: "BD" as const, registerDate: "2026-05-01", country: "PH" },
+    { staff: "何莎莎", role: "BD" as const, registerDate: "2026-06-01", country: "PH" },
+  ],
+]]);
+
+/** staff_site_permissions：李汝华 2026-07-01 起负责 PH，何莎莎 2026-09-15 起也在 PH */
+const PH_PERMS = new Map([[
+  "PH",
+  [
+    { staff: "李汝华", country: "PH", start: "2026-07-01", end: null },
+    { staff: "何莎莎", country: "PH", start: "2026-09-15", end: null },
+  ],
+]]);
+
+Deno.test("A5：最新登记人是站点负责人、其余候选都不是 → 按规则归他", () => {
+  const perms = new Map([["PH", [{ staff: "何莎莎", country: "PH", start: "2026-09-15", end: null }]]]);
+  const { rows, reviews } = attributeRows(
+    [row()],
+    ctx({ vidRegs: DUAL_REGS, sitePermissions: perms, asOfDate: "2026-09-20" }),
+  );
+  assertEquals(rows[0].bucket, "STAFF");
   assertEquals(rows[0].staff, "何莎莎");
-  assertEquals(reviews.length, 1);
+  assertEquals(rows[0].matchType, "VID");
+  // 仍然记一条审查项，但写明是按规则判的
   assertEquals(reviews[0].type, "VID_DUAL_SOURCE");
-  assertEquals(reviews[0].reviewKey, "VID_DUAL:7400000000000000000");
+  assertEquals((reviews[0].detail as { rule: string }).rule, "NEWEST_IS_SITE_OWNER");
+});
+
+Deno.test("A5：两个候选都是站点负责人 → 不猜，VID 层放弃、落到昵称路径等人判", () => {
+  const { rows, reviews } = attributeRows(
+    [row()],
+    ctx({ vidRegs: DUAL_REGS, sitePermissions: PH_PERMS, asOfDate: "2026-09-20" }),
+  );
+  // 昵称路径也没有归属 → UNMATCHED，而不是硬塞给「登记日期较新的人」
+  assertEquals(rows[0].bucket, "UNMATCHED");
+  assertEquals((reviews[0].detail as { rule: string }).rule, "UNRESOLVED");
+  assertEquals((reviews[0].detail as { siteOwners: string[] }).siteOwners.slice().sort(), ["何莎莎", "李汝华"]);
+});
+
+Deno.test("A5：候选都不是站点负责人 → 同样不猜", () => {
+  const { rows, reviews } = attributeRows(
+    [row()],
+    ctx({ vidRegs: DUAL_REGS, sitePermissions: new Map(), asOfDate: "2026-09-20" }),
+  );
+  assertEquals(rows[0].bucket, "UNMATCHED");
+  assertEquals((reviews[0].detail as { rule: string }).rule, "UNRESOLVED");
+});
+
+Deno.test("A5：VID 层放弃后昵称路径照常生效（不是直接丢弃这一行）", () => {
+  const norm = normalizeName("王姐好物");
+  const ownership = new Map([[identityKey("PH", norm), { bd: "林乐欣", keyType: "NICKNAME" as const, country: "PH" }]]);
+  const { rows } = attributeRows(
+    [row()],
+    ctx({ vidRegs: DUAL_REGS, ownership, sitePermissions: PH_PERMS, asOfDate: "2026-09-20" }),
+  );
+  assertEquals(rows[0].staff, "林乐欣");
+  assertEquals(rows[0].matchType, "REGISTRY");
 });
 
 Deno.test("attributeRows: VID_DUAL_SOURCE 的人工判定优先于默认规则", () => {

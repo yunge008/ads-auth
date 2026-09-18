@@ -218,19 +218,6 @@ export async function parseAdExcel(file: File): Promise<ParsedFile> {
       else enHits++;
     }
   });
-  // 「发布时间」列名各站点导出不完全一致（「视频发布时间」「发布日期」「Post time」…），
-  // HEADER_MAP 精确匹配没命中时再做一次模糊兜底：认不出来会让整月数据的发布时间全空，
-  // 而发布时间是站点交接分段与 V3 区间归因的唯一依据，静默丢掉代价太大。
-  if (!colIdx.has("posted_at")) {
-    const fuzzy = headerRow.findIndex((h) => {
-      const t = String(h ?? "").trim();
-      if (!t) return false;
-      if (/发布/.test(t) && /(时间|日期)/.test(t)) return true;
-      return /(posted|publish|post)/i.test(t) && /(time|date|at)/i.test(t);
-    });
-    if (fuzzy >= 0 && !Array.from(colIdx.values()).includes(fuzzy)) colIdx.set("posted_at", fuzzy);
-  }
-
   const missing = REQUIRED.filter((k) => !colIdx.has(k));
   if (missing.length) {
     const labels = missing.map((k) => REQUIRED_LABELS[k] ?? k).join("、");

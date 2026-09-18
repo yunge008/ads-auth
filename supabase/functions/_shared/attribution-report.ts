@@ -13,12 +13,12 @@ import {
   type NewAlias,
   type ReviewItem,
   type Role,
+  type SitePermission,
   type VidRegistration,
   attributeRows,
   identityKey,
   normalizeCreativeType,
   normalizeName,
-  vidToPostedAt,
 } from "./attribution.ts";
 
 /**
@@ -206,14 +206,32 @@ export async function loadAttrContext(db: SupabaseClient, scope?: AttrContextSco
     }
   }
 
-  // 6) 人工判定（审查表读回）
+  // 6) 站点权限区间：A5 的「VID 双登记归谁」要按「谁是该站点当前负责人」判。
+  //    表为空 = 规则判不了任何冲突 → 全部落到人工判定，这正是「不设兜底」想要的行为。
+  const sitePermissions = new Map<string, SitePermission[]>();
+  {
+    const rows = await pageAll<{ staff_name: string; country: string; start_date: string; end_date: string | null }>(
+      (f, t) =>
+        scoped(db.from("staff_site_permissions").select("staff_name, country, start_date, end_date"))
+          .order("id")
+          .range(f, t),
+    );
+    for (const r of rows) {
+      const key = (r.country ?? "").toUpperCase();
+      const arr = sitePermissions.get(key) ?? [];
+      arr.push({ staff: r.staff_name, country: key, start: r.start_date, end: r.end_date });
+      sitePermissions.set(key, arr);
+    }
+  }
+
+  // 7) 人工判定（审查表读回）
   const reviewOverrides = new Map<string, string>();
   const rvRows = await pageAll<{ review_key: string; manual_bd: string | null }>((f, t) =>
     db.from("attribution_review").select("review_key, manual_bd").not("manual_bd", "is", null).order("id").range(f, t),
   );
   for (const r of rvRows) if (r.manual_bd) reviewOverrides.set(r.review_key, r.manual_bd);
 
-  return { vidRegs, manualAlias, ownership, vidAlias, handovers, creatorActions, reviewOverrides };
+  return { vidRegs, manualAlias, ownership, vidAlias, handovers, creatorActions, reviewOverrides, sitePermissions };
 }
 
 // ---------- 引擎产物落库 ----------
@@ -808,18 +826,9 @@ export async function buildMonthlyReport(db: SupabaseClient, month: string): Pro
   }
 
   const inputs: AttrInputRow[] = rpcRows.map((r, i) => {
-    let postedAt: string | null = null;
-    let postedAtSource: AttrInputRow["postedAtSource"] = null;
-    if (r.posted_at) {
-      postedAt = r.posted_at;
-      postedAtSource = "meta";
-    } else if (r.vid) {
-      const d = vidToPostedAt(r.vid);
-      if (d) {
-        postedAt = d.toISOString();
-        postedAtSource = "vid";
-      }
-    }
+    // A7：官方 API 链路同样禁止 VID 反推；没有 meta 发布时间就留空，引擎会退到登记日期
+    const postedAt: string | null = r.posted_at ?? null;
+    const postedAtSource: AttrInputRow["postedAtSource"] = r.posted_at ? "meta" : null;
     return {
       key: `m:${i}`,
       creativeType: normalizeCreativeType(r.shop_content_type),

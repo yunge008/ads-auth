@@ -44,7 +44,6 @@ import {
   normalizeCreativeType,
   normalizeName,
   splitIdentityKey,
-  vidToPostedAt,
 } from "../_shared/attribution.ts";
 import {
   type CompactRow,
@@ -118,18 +117,11 @@ function errWithPayload(message: string, payload: Record<string, unknown>): Erro
 // ---------- 归并行 → 归因输入 ----------
 
 function aggToInput(r: AggRow): AttrInputRow {
-  let postedAt: string | null = null;
-  let postedAtSource: AttrInputRow["postedAtSource"] = null;
-  if (r.posted_at) {
-    postedAt = r.posted_at;
-    postedAtSource = "sheet";
-  } else if (r.vid) {
-    const d = vidToPostedAt(r.vid);
-    if (d) {
-      postedAt = d.toISOString();
-      postedAtSource = "vid";
-    }
-  }
+  // A7（2026-09-18）：发布时间只认 GMV MAX 导出表的「发布时间」列。
+  // 没有就留空，由引擎退到飞书建联表的素材登记日期；**禁止 VID 高 32 位反推** ——
+  // 那算出来是 UTC，当站点当地日期用，MX（UTC-6）与东南亚（UTC+7/8）必然跨日误判。
+  const postedAt: string | null = r.posted_at ?? null;
+  const postedAtSource: AttrInputRow["postedAtSource"] = r.posted_at ? "sheet" : null;
   return {
     key: `g:${r.id}`,
     creativeType: normalizeCreativeType(r.creative_type),
@@ -517,18 +509,9 @@ async function snapshotJudgeNext(
   });
 
   const inputs: AttrInputRow[] = keys.map((k, i) => {
-    let postedAt: string | null = null;
-    let postedAtSource: AttrInputRow["postedAtSource"] = null;
-    if (k.posted_at) {
-      postedAt = k.posted_at;
-      postedAtSource = "sheet";
-    } else if (k.vid) {
-      const d = vidToPostedAt(k.vid);
-      if (d) {
-        postedAt = d.toISOString();
-        postedAtSource = "vid";
-      }
-    }
+    // A7：同上，只认导出表的「发布时间」列，不做 VID 反推
+    const postedAt: string | null = k.posted_at ?? null;
+    const postedAtSource: AttrInputRow["postedAtSource"] = k.posted_at ? "sheet" : null;
     return {
       key: `k:${i}`,
       creativeType: normalizeCreativeType(k.creative_type),

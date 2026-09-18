@@ -113,13 +113,23 @@ export function normalizeCreativeType(raw: string | null | undefined): CreativeT
   return "other";
 }
 
-/** TikTok 视频 ID 高 32 位 = Unix 秒时间戳（样本 99.7% 与实际发布时间 ±2 天吻合）。 */
+/**
+ * TikTok 视频 ID 高 32 位 = Unix 秒时间戳。
+ *
+ * **这个函数不再参与归因判定**（2026-09-18）：它算出来的是 UTC，而站点日期是当地时间，
+ * MX（UTC-6）与东南亚（UTC+7/8）必然跨日误判。发布时间的来源顺序见 attributeRows：
+ * GMV MAX 导出列 → 飞书素材登记日期，没有就是没有。
+ * 这里只剩交接边界抽查提示（isHandoverBoundary）在用，那只是提示、不改判定。
+ *
+ * 合理区间收窄到 2022-01-01 ~ 2030-12-31：业务上不可能出现这之外的发布时间，
+ * 落在区间外说明这串数字根本不是 TikTok VID，返回 null 比返回一个荒谬日期强。
+ */
 export function vidToPostedAt(vid: string): Date | null {
   if (!/^\d{15,20}$/.test(vid)) return null;
   try {
     const sec = Number(BigInt(vid) >> 32n);
-    // sanity: 2008-01-01 .. 2100-01-01
-    if (sec < 1199145600 || sec > 4102444800) return null;
+    // 2022-01-01T00:00:00Z .. 2030-12-31T23:59:59Z
+    if (sec < 1640995200 || sec > 1924991999) return null;
     const d = new Date(sec * 1000);
     return isNaN(d.getTime()) ? null : d;
   } catch {
@@ -137,6 +147,9 @@ export type VidRegistration = {
 };
 
 export type Handover = { fromBd: string; toBd: string; date: string }; // date: 'YYYY-MM-DD'
+
+/** 某人在某站点有权限开发达人的时间区间，半开 [start, end)；end 为空 = 至今。 */
+export type SitePermission = { staff: string; country: string; start: string; end: string | null };
 
 /**
  * 「谁在什么时候对哪个达人有过登记动作」。
@@ -163,6 +176,10 @@ export type AttrContext = {
   creatorActions: CreatorActions;
   /** review_key → 人工判定 BD（attribution_review.manual_bd） */
   reviewOverrides: Map<string, string>;
+  /** country → 站点权限区间（staff_site_permissions）。VID 双登记按「谁是站点负责人」判。 */
+  sitePermissions?: Map<string, SitePermission[]>;
+  /** 判定「站点负责人」用哪一天，默认今天。重跑历史月份时由调用方传当月月末，保证可重放。 */
+  asOfDate?: string;
 };
 
 export type AttrInputRow = {
@@ -172,7 +189,14 @@ export type AttrInputRow = {
   accountName: string; // 原文
   country: string; // 已知站点（数据库路径=广告户国家；上传路径=文件名站点），可为 ''
   postedAt: string | null; // ISO datetime
-  postedAtSource: "sheet" | "meta" | "vid" | null;
+  /**
+   * 发布时间从哪来（A7，2026-09-18 起）：
+   *   sheet    GMV MAX 导出表的「发布时间」列 —— **首选，站点当地时间，直接取前 10 位**
+   *   registry 飞书建联表的素材登记日期 —— 次选，导出表没有这一列时的替代
+   *   meta     gmv_max_vid_meta（官方 API 数据链路，目前前端不走）
+   *   vid      VID 高 32 位反推 —— **禁止用于归因判定**：它是 UTC，当站点日期用必跨日误判
+   */
+  postedAtSource: "sheet" | "registry" | "meta" | "vid" | null;
   currency: string; // '' 视为 USD
   cost: number;
   grossRevenue: number;
@@ -364,11 +388,15 @@ export function resolveOwnership(
   const reviews: ReviewItem[] = [];
 
   for (const [matchKey, entriesRaw] of groups) {
-    const entries = [...entriesRaw].sort((a, b) => {
-      const da = a.date ?? "0000-00-00";
-      const db = b.date ?? "0000-00-00";
-      return da < db ? -1 : da > db ? 1 : 0;
-    });
+    // A4：**无日期的登记行不参与归属判定**。
+    // 以前把它们按 '0000-00-00' 排最前，等于「没填日期的人最早建联」，
+    // 会凭空抢到归属；而且 owner 无日期时无法主张保护期，后面任何人一登记就转移。
+    // 现在直接跳过：没有日期就没有可比较的先后，宁可不判，也不要判错。
+    const skipped = entriesRaw.filter((e) => !e.date);
+    const entries = entriesRaw
+      .filter((e) => !!e.date)
+      .sort((a, b) => (a.date! < b.date! ? -1 : a.date! > b.date! ? 1 : 0));
+    if (!entries.length) continue;
     let owner = "";
     let ownerLast: string | null = null;
     let firstDate: string | null = null;
@@ -388,13 +416,8 @@ export function resolveOwnership(
         if (e.date && (!ownerLast || e.date > ownerLast)) ownerLast = e.date;
         continue;
       }
-      // 异 BD 登记
-      if (!ownerLast) {
-        // owner 无任何日期记录，无法主张保护期 → 转移
-        owner = e.staff;
-        ownerLast = e.date;
-        transferCount++;
-      } else if (e.date && diffDays(ownerLast, e.date) >= protectionDays) {
+      // 异 BD 登记（无日期行已在上面过滤掉，ownerLast 必有值）
+      if (e.date && diffDays(ownerLast!, e.date) >= protectionDays) {
         owner = e.staff;
         ownerLast = e.date;
         transferCount++;
@@ -413,7 +436,7 @@ export function resolveOwnership(
       firstDate,
       ownerLastDate: ownerLast,
       transferCount,
-      evidence: { timeline, grabs },
+      evidence: { timeline, grabs, skippedNoDate: skipped.map((e) => ({ bd: e.staff, sheet: e.sheet, row: e.rowNumber })) },
     });
 
     if (grabs.length) {
@@ -449,11 +472,37 @@ export function classifyAttribution(
 
 // ---------- 归因主流程 ----------
 
+/** 某人在给定日期是不是该站点的负责人（staff_site_permissions 的半开区间 [start, end)）。 */
+export function isSiteOwner(
+  perms: Map<string, SitePermission[]> | undefined,
+  country: string,
+  staff: string,
+  onDate: string,
+): boolean {
+  const list = perms?.get((country ?? "").toUpperCase());
+  if (!list?.length) return false;
+  return list.some((p) => p.staff === staff && p.start <= onDate && (!p.end || onDate < p.end));
+}
+
+/**
+ * 同一个 VID 被多个同事登记时归谁。
+ *
+ * 【A5 规则，2026-09-18 起，不设兜底】
+ *   · 只有一个人登记 → 就是他；
+ *   · 多人登记，且**登记日期最新的那个人是该站点当前负责人、其余候选都不是** → 归他（规则能判，自动生效）；
+ *   · 其余所有情况 → **不猜**：VID 这一层直接放弃（返回 null），这一行落到昵称路径去，
+ *     同时产生 VID_DUAL_SOURCE 审查项等人判。人判完写进 attribution_review.manual_bd，
+ *     下次归因经 reviewOverrides 立即生效。
+ *
+ * 以前是「默认取登记日期较新者」—— 那是在没有依据的情况下替人做决定，
+ * 数字看起来完整，实际有一半可能是错的，而且错了没人知道。
+ */
 function pickVidOwner(
   vid: string,
   regs: VidRegistration[],
-  reviewOverrides: Map<string, string>,
-): { staff: string; role: Role; country: string; review: ReviewItem | null } {
+  ctx: AttrContext,
+  rowCountry: string,
+): { staff: string; role: Role; country: string; review: ReviewItem | null } | { staff: null; review: ReviewItem } {
   const distinctStaff = new Map<string, VidRegistration>();
   for (const r of regs) {
     const prev = distinctStaff.get(r.staff);
@@ -466,34 +515,79 @@ function pickVidOwner(
     return { staff: c.staff, role: c.role, country: c.country, review: null };
   }
 
-  // 多个同事登记同一 VID → 审查项；人工判定优先，否则默认登记日期较新者（缺日期视为较旧，同分优先 BD）
   const reviewKey = `VID_DUAL:${vid}`;
-  const override = reviewOverrides.get(reviewKey);
-  let chosen: VidRegistration | undefined;
-  if (override) chosen = candidates.find((c) => c.staff === override);
-  if (!chosen) {
-    chosen = [...candidates].sort((a, b) => {
-      const da = a.registerDate ?? "0000-00-00";
-      const db = b.registerDate ?? "0000-00-00";
-      if (da !== db) return da > db ? -1 : 1;
-      if (a.role !== b.role) return a.role === "BD" ? -1 : 1;
-      return a.staff.localeCompare(b.staff);
-    })[0];
-  }
-  const review: ReviewItem = {
-    reviewKey,
-    type: "VID_DUAL_SOURCE",
-    subject: vid,
-    detail: {
-      candidates: candidates.map((c) => ({ staff: c.staff, role: c.role, registerDate: c.registerDate, country: c.country })),
-      chosen: chosen.staff,
-      overridden: !!override,
-    },
-    defaultResolution: override
-      ? `人工判定归 ${chosen.staff}`
-      : `默认取登记日期较新者 ${chosen.staff}（${chosen.role}）`,
+  const asOf = ctx.asOfDate ?? new Date().toISOString().slice(0, 10);
+  const detailBase = {
+    candidates: candidates.map((c) => ({ staff: c.staff, role: c.role, registerDate: c.registerDate, country: c.country })),
   };
-  return { staff: chosen.staff, role: chosen.role, country: chosen.country, review };
+
+  // 人工判定优先于任何自动规则
+  const override = ctx.reviewOverrides.get(reviewKey);
+  if (override) {
+    const c = candidates.find((x) => x.staff === override);
+    if (c) {
+      return {
+        staff: c.staff,
+        role: c.role,
+        country: c.country,
+        review: {
+          reviewKey,
+          type: "VID_DUAL_SOURCE",
+          subject: vid,
+          detail: { ...detailBase, chosen: c.staff, overridden: true, asOf },
+          defaultResolution: `人工判定归 ${c.staff}`,
+        },
+      };
+    }
+  }
+
+  // 规则：登记日期最新的人是站点负责人，其他候选都不是 → 归他
+  const sorted = [...candidates].sort((a, b) => {
+    const da = a.registerDate ?? "";
+    const db = b.registerDate ?? "";
+    if (da !== db) return da > db ? -1 : 1;
+    return a.staff.localeCompare(b.staff);
+  });
+  const newest = sorted[0];
+  const site = rowCountry || newest.country || "";
+  const newestIsOwner = isSiteOwner(ctx.sitePermissions, site, newest.staff, asOf);
+  const othersAreOwner = sorted.slice(1).filter((c) => isSiteOwner(ctx.sitePermissions, site, c.staff, asOf));
+  if (newest.registerDate && newestIsOwner && othersAreOwner.length === 0) {
+    return {
+      staff: newest.staff,
+      role: newest.role,
+      country: newest.country,
+      review: {
+        reviewKey,
+        type: "VID_DUAL_SOURCE",
+        subject: vid,
+        detail: { ...detailBase, chosen: newest.staff, overridden: false, rule: "NEWEST_IS_SITE_OWNER", site, asOf },
+        defaultResolution: `最新登记人 ${newest.staff} 是 ${site} 当前负责人、其余候选都不是 → 按规则归 ${newest.staff}`,
+      },
+    };
+  }
+
+  // 其余情况不猜：VID 层放弃，等人判
+  return {
+    staff: null,
+    review: {
+      reviewKey,
+      type: "VID_DUAL_SOURCE",
+      subject: vid,
+      detail: {
+        ...detailBase,
+        chosen: null,
+        overridden: false,
+        rule: "UNRESOLVED",
+        site,
+        asOf,
+        siteOwners: [newest, ...sorted.slice(1)]
+          .filter((c) => isSiteOwner(ctx.sitePermissions, site, c.staff, asOf))
+          .map((c) => c.staff),
+      },
+      defaultResolution: `多人登记且无法按「站点负责人」规则判定，VID 归因不生效，等人工判定（本行改走达人昵称路径）`,
+    },
+  };
 }
 
 /**
@@ -531,8 +625,13 @@ export function attributeRows(rows: AttrInputRow[], ctx: AttrContext): AttrRunRe
     }
     const regs = row.vid ? ctx.vidRegs.get(row.vid) : undefined;
     if (regs?.length) {
-      const picked = pickVidOwner(row.vid, regs, ctx.reviewOverrides);
+      const picked = pickVidOwner(row.vid, regs, ctx, row.country);
       if (picked.review) reviewByKey.set(picked.review.reviewKey, picked.review);
+      if (picked.staff === null) {
+        // A5：多人登记且规则判不了 → VID 层放弃，这一行落到昵称路径，等人工判定
+        pending.push(row);
+        continue;
+      }
       const country = row.country || picked.country || "";
       results.push({
         key: row.key,
@@ -614,6 +713,22 @@ export function attributeRows(rows: AttrInputRow[], ctx: AttrContext): AttrRunRe
   // ---- Pass 2：昵称路径（仅 BD）----
   for (const row of pending) {
     const norm = normalizeName(row.accountName);
+    // A7 发布时间来源顺序：GMV MAX 导出列 → 飞书素材登记日期。**没有就是没有**，不用 VID 反推。
+    //
+    // 「飞书素材登记日期」按两条线找，取最早的一条 —— 最早那次才代表「这条素材什么时候有的」：
+    //   · 该 VID 的登记行（走到这里的带 VID 行是 A5 判不了或直播类型）
+    //   · 该达人（站点 + 归一化昵称）的全部登记动作 —— 昵称路径上多数行没有 VID 登记，
+    //     只有这条线能给出日期
+    let postedAt = row.postedAt;
+    if (!postedAt) {
+      const dates: string[] = [];
+      if (row.vid) {
+        for (const r of ctx.vidRegs.get(row.vid) ?? []) if (r.registerDate) dates.push(r.registerDate);
+      }
+      const byStaff = ctx.creatorActions?.get(identityKey(row.country, norm));
+      if (byStaff) for (const list of byStaff.values()) dates.push(...list);
+      if (dates.length) postedAt = dates.sort()[0];
+    }
     if (!norm) {
       results.push({ key: row.key, bucket: "UNMATCHED", country: row.country });
       continue;
@@ -647,7 +762,7 @@ export function attributeRows(rows: AttrInputRow[], ctx: AttrContext): AttrRunRe
       bd,
       country,
       norm,
-      row.postedAt,
+      postedAt,
       hs,
       ctx.creatorActions,
     );
