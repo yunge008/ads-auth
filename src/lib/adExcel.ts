@@ -132,12 +132,25 @@ const REQUIRED_LABELS: Partial<Record<keyof ParsedRow, string>> = {
 /** 业务上目前只应出现这两种结算币种；其余值仅告警，不阻断（新站点可能引入新币种）。 */
 export const EXPECTED_CURRENCIES = ["USD", "THB"];
 
+/**
+ * 内容类型归一化。先精确匹配，再**包含式兜底** —— 与归因引擎
+ * （supabase/functions/_shared/attribution.ts 的 normalizeCreativeType）保持同一套口径。
+ *
+ * 之前只做精确匹配，「直播带货」「商品卡片推广」这类写法会原样入库，
+ * 后果是这些行既没被归一成 live / product_card，又被「缺发布时间」的统计当成了
+ * 「应该有发布时间却没有」—— 直播行数少但 GMV 高，一下就把缺失占比顶上去。
+ * 认不出来的仍然保留原文（比如「图片」），由归因引擎归入「其他」桶。
+ */
 function normCreativeType(raw: string): string {
-  const s = raw.trim().toLowerCase();
+  const t = raw.trim();
+  const s = t.toLowerCase();
   if (s === "视频" || s === "video") return "video";
-  if (s === "商品卡片" || s === "product card" || s === "商品卡") return "product_card";
+  if (s === "商品卡片" || s === "product card" || s === "product_card" || s === "商品卡") return "product_card";
   if (s === "直播" || s === "live") return "live";
-  return raw.trim();
+  if (s.includes("live") || t.includes("直播")) return "live";
+  if (t.includes("商品卡") || s.includes("product card") || s.includes("product_card")) return "product_card";
+  if (s.includes("video") || t.includes("视频")) return "video";
+  return t;
 }
 
 /**
