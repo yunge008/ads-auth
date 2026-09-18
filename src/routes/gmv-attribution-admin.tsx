@@ -534,7 +534,7 @@ function UploadResultView() {
       </TabsContent>
       <TabsContent value="review" className="mt-4">
         {/* 人员名单从当月报表里取：导出的 Excel 要把合法同事名列进「可选值」页，填错才好当场拦下 */}
-        <ReviewPanel staffNames={Array.from(new Set((report?.staff ?? []).map((s) => s.staff_name)))} />
+        <ReviewPanel staffNames={Array.from(new Set((result?.summary?.staff ?? []).map((s) => s.staff_name)))} />
       </TabsContent>
       <TabsContent value="result" className="mt-4 space-y-4">
         {result ? (
