@@ -133,24 +133,18 @@ const REQUIRED_LABELS: Partial<Record<keyof ParsedRow, string>> = {
 export const EXPECTED_CURRENCIES = ["USD", "THB"];
 
 /**
- * 内容类型归一化。先精确匹配，再**包含式兜底** —— 与归因引擎
- * （supabase/functions/_shared/attribution.ts 的 normalizeCreativeType）保持同一套口径。
+ * 内容类型归一化：**只做精确匹配**。
  *
- * 之前只做精确匹配，「直播带货」「商品卡片推广」这类写法会原样入库，
- * 后果是这些行既没被归一成 live / product_card，又被「缺发布时间」的统计当成了
- * 「应该有发布时间却没有」—— 直播行数少但 GMV 高，一下就把缺失占比顶上去。
- * 认不出来的仍然保留原文（比如「图片」），由归因引擎归入「其他」桶。
+ * 不做包含式兜底是有意的 —— 内容类型是 TikTok 导出的受控取值，模糊匹配的代价是
+ * 「直播带货」这种不存在的写法被猜中一次，换来的是真出现新类型时被静默吞掉、
+ * 当成已知类型混进统计。认不出来的一律保留原文，由归因引擎归入「其他」桶并暴露出来。
  */
 function normCreativeType(raw: string): string {
-  const t = raw.trim();
-  const s = t.toLowerCase();
+  const s = raw.trim().toLowerCase();
   if (s === "视频" || s === "video") return "video";
-  if (s === "商品卡片" || s === "product card" || s === "product_card" || s === "商品卡") return "product_card";
+  if (s === "商品卡片" || s === "product card" || s === "商品卡") return "product_card";
   if (s === "直播" || s === "live") return "live";
-  if (s.includes("live") || t.includes("直播")) return "live";
-  if (t.includes("商品卡") || s.includes("product card") || s.includes("product_card")) return "product_card";
-  if (s.includes("video") || t.includes("视频")) return "video";
-  return t;
+  return raw.trim();
 }
 
 /**
