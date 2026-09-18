@@ -213,6 +213,7 @@ Deno.serve(async (req) => {
       manual_note?: string;
       rows?: BulkRow[];
       dry_run?: boolean;
+      configs?: Array<Record<string, unknown>>;
     };
     const action = (body.action ?? "").trim();
     if (isCron && !CRON_ACTIONS.has(action)) throw new Error("cron 只允许调用 sync-targets / sync-handovers");
@@ -241,6 +242,44 @@ Deno.serve(async (req) => {
         if (page.length < PAGE) break;
       }
       return json({ reviews });
+    }
+
+    // ---------- 飞书表名配置（设置 → 飞书表名称）----------
+    // 纯读写自己库，不碰飞书，所以放在取飞书 token 之前。
+    if (action === "list-sheet-config") {
+      const { data, error } = await db
+        .from("feishu_sheet_config")
+        .select("id, config_key, spreadsheet_label, spreadsheet_env, sheet_name, read_range, access, note, column_map, enabled, sort_order, updated_at, updated_by")
+        .order("sort_order", { ascending: true })
+        .order("config_key", { ascending: true });
+      if (error) throw new Error(error.message);
+      return json({ configs: data ?? [] });
+    }
+
+    if (action === "save-sheet-config") {
+      const rows = Array.isArray(body.configs) ? body.configs : [];
+      if (!rows.length) throw new Error("没有要保存的配置");
+      let saved = 0;
+      for (const raw of rows as Array<Record<string, unknown>>) {
+        const key = String(raw.config_key ?? "").trim();
+        if (!key) throw new Error("config_key 必填");
+        const sheetName = String(raw.sheet_name ?? "").trim();
+        if (!sheetName) throw new Error(`「${key}」的 sheet 名称不能为空`);
+        const { error } = await db
+          .from("feishu_sheet_config")
+          .update({
+            spreadsheet_label: String(raw.spreadsheet_label ?? "").trim(),
+            sheet_name: sheetName,
+            read_range: String(raw.read_range ?? "").trim(),
+            note: String(raw.note ?? "").trim(),
+            enabled: raw.enabled !== false,
+            updated_by: account.name,
+          })
+          .eq("config_key", key);
+        if (error) throw new Error(`${key}: ${error.message}`);
+        saved++;
+      }
+      return json({ saved });
     }
 
     // 判定下拉要用的人员名单（含离职：历史冲突可能要判给已离职的同事）
@@ -410,26 +449,33 @@ Deno.serve(async (req) => {
     const token = await getTenantAccessToken();
     const ss = getSpreadsheetToken();
 
-    // 表名容错：忽略首尾/中间空格与全角空格，并支持历史别名（人工改过表名也能对上）。
+    // sheet 名来自配置表 feishu_sheet_config（设置 → 飞书表名称可改），**不做别名猜测**：
+    // 猜对一次的代价是真改名时静默读到另一张表、或者读空还以为「本期没数据」。
+    // 只归一空白后精确匹配；对不上就报错，并把该表格现有的 sheet 列出来，让人去设置页改。
+    const { data: cfgRows } = await db
+      .from("feishu_sheet_config")
+      .select("config_key, sheet_name")
+      .eq("enabled", true);
+    const cfgByKey = new Map(
+      ((cfgRows ?? []) as Array<{ config_key: string; sheet_name: string }>).map((c) => [c.config_key, c.sheet_name]),
+    );
+    /** 配置里改过就用配置的，没配就退回代码里的默认名（配置表没跑 migration 时也不至于全挂）。 */
+    const cfgName = (key: string, fallback: string) => (cfgByKey.get(key) || fallback).trim();
+    const SHEET_PROGRESS_NAME = cfgName("PROGRESS", SHEET_PROGRESS);
+    const SHEET_REVIEWS_NAME = cfgName("REVIEWS", SHEET_REVIEWS);
+    const SHEET_CONFIG_NAME = cfgName("CONFIG", SHEET_CONFIG);
+    const SHEET_OWNERSHIP_NAME = cfgName("OWNERSHIP", SHEET_OWNERSHIP);
+
     const normTitle = (t: string) => t.replace(/[\s\u00a0\u3000]/g, "").trim();
-    const SHEET_ALIASES: Record<string, string[]> = {
-      [SHEET_PROGRESS]: ["归因进度", "绩效统计", "绩效记录"],
-      [SHEET_REVIEWS]: ["归因审查表", "审查"],
-      [SHEET_CONFIG]: ["绩效配置", "GMV目标", "目标配置表", "站点交接", "配置表"],
-      [SHEET_OWNERSHIP]: ["达人归因表", "归因记录表"],
-    };
     /** 针对某一个飞书表格建一个 sheet 名 → sheet_id 的解析器；找不到时把该表格里现有的 sheet 全列出来。 */
     const makeSheetResolver = (sheets: Array<{ sheet_id: string; title: string }>, label: string) => {
       const byName = new Map(sheets.map((s) => [normTitle(s.title), s.sheet_id]));
       return (title: string) => {
-        for (const cand of [title, ...(SHEET_ALIASES[title] ?? [])]) {
-          const sid = byName.get(normTitle(cand));
-          if (sid) return sid;
-        }
+        const sid = byName.get(normTitle(title));
+        if (sid) return sid;
         throw new Error(
-          `${label}里没有 sheet「${title}」，请先手动创建并填好表头。该表格现有的 sheet：${
-            sheets.map((s) => s.title).join("、") || "（空）"
-          }`,
+          `${label}里没有 sheet「${title}」。若飞书那边改了表名，请到「设置 → 飞书表名称」改配置，不要改代码。` +
+            `该表格现有的 sheet：${sheets.map((s) => s.title).join("、") || "（空）"}`,
         );
       };
     };
@@ -452,7 +498,7 @@ Deno.serve(async (req) => {
     if (action === "write-progress") {
       const month = (body.month ?? "").trim();
       if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("month 必填（YYYY-MM）");
-      const sid = sheetId(SHEET_PROGRESS);
+      const sid = sheetId(SHEET_PROGRESS_NAME);
       const { report } = await buildMonthlyReport(db, month);
       const ts = nowCn();
       const rows: unknown[][] = [];
@@ -477,7 +523,7 @@ Deno.serve(async (req) => {
 
     // ---------- 审查项追加 ----------
     if (action === "write-reviews") {
-      const sid = sheetId(SHEET_REVIEWS);
+      const sid = sheetId(SHEET_REVIEWS_NAME);
       const existing = await readRange(token, ss, `${sid}!A2:A`);
       const seen = new Set(existing.map((r) => cellText((r ?? [])[0])).filter(Boolean));
 
@@ -532,7 +578,7 @@ Deno.serve(async (req) => {
 
     // ---------- 读回人工判定 ----------
     if (action === "read-judgments") {
-      const sid = sheetId(SHEET_REVIEWS);
+      const sid = sheetId(SHEET_REVIEWS_NAME);
       // 列布局：A审查ID...I状态 J人工判定BD K人工备注 L采纳标记 —— 必须读到 L，此前只读到 I 导致 J/K 从未被读到过
       const rows = await readRange(token, ss, `${sid}!A2:L`, 400);
 
@@ -616,7 +662,7 @@ Deno.serve(async (req) => {
       let mirrored = false;
       let mirrorWarning: string | undefined;
       try {
-        const sid = sheetId(SHEET_REVIEWS);
+        const sid = sheetId(SHEET_REVIEWS_NAME);
         const col = await readRange(token, ss, `${sid}!A2:A`);
         const idx = col.findIndex((r) => cellText((r ?? [])[0]) === reviewKey);
         const ignore = !manualBd || manualBd === "忽略" || manualBd === "不处理";
@@ -651,7 +697,7 @@ Deno.serve(async (req) => {
     // ---------- 目标同步 ----------
     if (action === "sync-targets") {
       const perf = await perfSheet();
-      const sid = perf.sheetId(SHEET_CONFIG);
+      const sid = perf.sheetId(SHEET_CONFIG_NAME);
       const rows = await readRange(token, perf.ss, `${sid}!A2:F`);
       const payload: Array<{ month: string; staff_name: string; role: string; target_usd: number; material_target: number; sites: string[]; target_group_id: string; note: string | null }> = [];
       const skipped: string[] = [];
@@ -683,7 +729,7 @@ Deno.serve(async (req) => {
     // ---------- 站点交接同步 ----------
     if (action === "sync-handovers") {
       const perf = await perfSheet();
-      const sid = perf.sheetId(SHEET_CONFIG);
+      const sid = perf.sheetId(SHEET_CONFIG_NAME);
       const rows = await readRange(token, perf.ss, `${sid}!H2:L`);
       const payload: Array<{ country: string; from_bd: string; to_bd: string; handover_date: string; note: string | null }> = [];
       const skipped: string[] = [];
@@ -724,7 +770,7 @@ Deno.serve(async (req) => {
 
     // ---------- 达人归因表镜像（覆盖写） ----------
     if (action === "write-ownership") {
-      const sid = sheetId(SHEET_OWNERSHIP);
+      const sid = sheetId(SHEET_OWNERSHIP_NAME);
       const [ownRows, aliasRows, hRows] = await Promise.all([
         pageAll<{ key_type: string; match_key: string; display_name: string | null; country: string; owner_bd: string; owner_last_register_date: string | null; transfer_count: number }>(
           (f, t) => db.from("creator_ownership").select("key_type, match_key, display_name, country, owner_bd, owner_last_register_date, transfer_count").range(f, t),

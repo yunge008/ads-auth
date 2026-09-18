@@ -339,6 +339,22 @@ export function attributionLookup(q: string, limit = 10, offset = 0) {
   );
 }
 
+export type FeishuSheetConfig = {
+  id: string;
+  config_key: string;
+  spreadsheet_label: string;
+  spreadsheet_env: string;
+  sheet_name: string;
+  read_range: string;
+  access: "READ" | "READWRITE";
+  note: string;
+  column_map: Array<{ col: string; field: string; note: string }>;
+  enabled: boolean;
+  sort_order: number;
+  updated_at: string;
+  updated_by: string | null;
+};
+
 export function feishuAction<T = Record<string, unknown>>(action: string, extra?: Record<string, unknown>) {
   return invokeFn<T>("attribution-feishu", { action, ...(extra ?? {}) }, { timeout: 300000 });
 }

@@ -5,6 +5,7 @@ import { AccountsManager } from "@/components/settings/AccountsManager";
 import { ExchangeRateCard } from "@/components/settings/ExchangeRateCard";
 import { useCurrentAccount } from "@/lib/account";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { FeishuSheetConfigPanel } from "@/components/settings/FeishuSheetConfigPanel";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({
@@ -31,6 +32,7 @@ function SettingsPage() {
           <TabsTrigger value="staff">人员表</TabsTrigger>
           {account?.isAdmin && <TabsTrigger value="accounts">账号管理</TabsTrigger>}
           {account?.isAdmin && <TabsTrigger value="exchange-rates">GMV 归因汇率</TabsTrigger>}
+          {account?.isAdmin && <TabsTrigger value="feishu-sheets">飞书表名称</TabsTrigger>}
         </TabsList>
         <TabsContent value="auth">
           <AccountsTable />
@@ -46,6 +48,11 @@ function SettingsPage() {
         {account?.isAdmin && (
           <TabsContent value="exchange-rates">
             <ExchangeRateCard />
+          </TabsContent>
+        )}
+        {account?.isAdmin && (
+          <TabsContent value="feishu-sheets">
+            <FeishuSheetConfigPanel />
           </TabsContent>
         )}
       </Tabs>
