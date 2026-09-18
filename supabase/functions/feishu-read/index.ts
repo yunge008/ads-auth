@@ -81,10 +81,9 @@ function parseDate(v: unknown): string | null {
     const d2 = new Date(`${iso}T00:00:00Z`);
     if (!isNaN(d2.getTime())) return iso;
   }
-  // Common date strings
-  const norm = s.replace(/[./]/g, "-");
-  const d = new Date(norm);
-  if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  // B6：第四层「换成 - 再丢给 new Date()」的兜底已删除，与 _shared/cells.ts 保持一致。
+  // new Date() 会替你猜 "03-04-2024" 的月/日顺序，猜错也返回一个看着正常的日期。
+  // 现在认不出的格式返回 null，下游按「日期格式不对」拦下来报错，而不是拿错日期继续跑。
   return null;
 }
 

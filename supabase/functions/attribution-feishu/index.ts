@@ -250,6 +250,9 @@ Deno.serve(async (req) => {
       const { data, error } = await db
         .from("feishu_sheet_config")
         .select("id, config_key, spreadsheet_label, spreadsheet_env, sheet_name, read_range, access, note, column_map, enabled, sort_order, updated_at, updated_by")
+        // 按飞书表格名分组、组内按 sort_order：同一个表格的 sheet 要挨在一起，
+        // 否则「这个表格到底被读了几处」得靠人在列表里自己挑。留空名称（还没提供的表）排最后。
+        .order("spreadsheet_label", { ascending: true })
         .order("sort_order", { ascending: true })
         .order("config_key", { ascending: true });
       if (error) throw new Error(error.message);
@@ -263,16 +266,20 @@ Deno.serve(async (req) => {
       for (const raw of rows as Array<Record<string, unknown>>) {
         const key = String(raw.config_key ?? "").trim();
         if (!key) throw new Error("config_key 必填");
+        // sheet 名允许留空 = 这张表还没提供给系统。留空的行强制停用：
+        // 空名字去精确匹配只会匹配到「没有这张 sheet」然后报错，不如根本不参与。
         const sheetName = String(raw.sheet_name ?? "").trim();
-        if (!sheetName) throw new Error(`「${key}」的 sheet 名称不能为空`);
+        const label = String(raw.spreadsheet_label ?? "").trim();
+        const enabled = !!sheetName && !!label && raw.enabled !== false;
         const { error } = await db
           .from("feishu_sheet_config")
           .update({
-            spreadsheet_label: String(raw.spreadsheet_label ?? "").trim(),
+            spreadsheet_label: label,
             sheet_name: sheetName,
-            read_range: String(raw.read_range ?? "").trim(),
+            // read_range 不在可改字段里：读取范围写死在解析代码里，
+            // 改这里不会改变实际读取行为，只会让配置表说的和系统做的不一致。
             note: String(raw.note ?? "").trim(),
-            enabled: raw.enabled !== false,
+            enabled,
             updated_by: account.name,
           })
           .eq("config_key", key);

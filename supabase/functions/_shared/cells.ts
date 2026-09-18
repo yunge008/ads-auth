@@ -58,9 +58,11 @@ export function parseDate(v: unknown): string | null {
     const d2 = new Date(`${iso}T00:00:00Z`);
     if (!isNaN(d2.getTime())) return iso;
   }
-  // Common date strings
-  const norm = s.replace(/[./]/g, "-");
-  const d = new Date(norm);
-  if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  // B6：这里原来还有第四层「把 . / 换成 - 再丢给 new Date()」的兜底，已删除。
+  // 删的理由：new Date() 对 "03-04-2024" 这类写法会按自己的规则猜月/日顺序，猜错时
+  // 返回的是一个**看起来正常**的日期 —— 没有报错、没有告警，保护期和归属转移直接按错的日子算。
+  // 现在认不出的格式一律返回 null，由 A4「无日期的登记行不参与归属判定」接住：
+  // 该行被跳过并记进 evidence.skippedNoDate，能在审查里看到，而不是静默算错。
+  // 要支持新格式，就往上面的精确正则里加一条，不要退回猜测。
   return null;
 }
