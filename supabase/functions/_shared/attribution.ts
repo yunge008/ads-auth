@@ -96,8 +96,12 @@ export function splitIdentityKey(key: string): { country: string; normalizedName
 }
 
 /**
- * 创意作品类型归一化：中英文都认。
- * 认不出来的一律归 "other"（以前是默认当成视频，会把「其他」类型的 GMV 混进视频口径里）。
+ * 创意作品类型归一化：**只做精确匹配**（中英文两种写法都列全）。
+ *
+ * 内容类型是 TikTok 导出的受控取值，不做任何包含式兜底：猜中一次不存在的写法，
+ * 代价是真出现新类型时被静默归进已知类型、再也暴露不出来。
+ * 认不出来的一律归 "other"（不归人但金额照样统计），在「内容类型」面板里看得见。
+ * 与 src/lib/adExcel.ts 的 normCreativeType 同口径，两边改动必须同步。
  */
 export function normalizeCreativeType(raw: string | null | undefined): CreativeType {
   const s = (raw ?? "").trim();
@@ -106,10 +110,6 @@ export function normalizeCreativeType(raw: string | null | undefined): CreativeT
   if (low === "视频" || low === "video") return "video";
   if (low === "商品卡片" || low === "product card" || low === "product_card" || low === "商品卡") return "product_card";
   if (low === "直播" || low === "live") return "live";
-  const up = s.toUpperCase();
-  if (up.includes("CARD") || s.includes("商品卡")) return "product_card";
-  if (up.includes("LIVE") || s.includes("直播")) return "live";
-  if (up.includes("VIDEO") || s.includes("视频")) return "video";
   return "other";
 }
 

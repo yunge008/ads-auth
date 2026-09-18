@@ -102,15 +102,21 @@ Deno.test("lookupIdentity：空名字永不命中", () => {
 
 // ---------- 创意类型 ----------
 
-Deno.test("normalizeCreativeType: 中英文精确值 + 包含式兜底", () => {
+Deno.test("normalizeCreativeType: 只认精确值，不做包含式兜底", () => {
   assertEquals(normalizeCreativeType("视频"), "video");
   assertEquals(normalizeCreativeType("Video"), "video");
   assertEquals(normalizeCreativeType("商品卡片"), "product_card");
+  assertEquals(normalizeCreativeType("商品卡"), "product_card");
   assertEquals(normalizeCreativeType("Product Card"), "product_card");
+  assertEquals(normalizeCreativeType("product_card"), "product_card");
   assertEquals(normalizeCreativeType("直播"), "live");
-  assertEquals(normalizeCreativeType("LIVE_ROOM"), "live");
-  // 认不出来的一律 other（不再默认当视频）
+  assertEquals(normalizeCreativeType("live"), "live");
+  // 受控取值之外的写法一律 other，不猜：真出现新类型时必须暴露出来，不能被静默归进已知类型
+  assertEquals(normalizeCreativeType("LIVE_ROOM"), "other");
+  assertEquals(normalizeCreativeType("直播带货"), "other");
+  assertEquals(normalizeCreativeType("商品卡片推广"), "other");
   assertEquals(normalizeCreativeType("图文"), "other");
+  assertEquals(normalizeCreativeType("图片"), "other");
   assertEquals(normalizeCreativeType(""), "other");
   assertEquals(normalizeCreativeType(null), "other");
 });
