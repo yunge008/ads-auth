@@ -1372,6 +1372,57 @@ export type Database = {
         }
         Relationships: []
       }
+      feishu_sheet_config: {
+        Row: {
+          access: string
+          column_map: Json
+          config_key: string
+          created_at: string
+          enabled: boolean
+          id: string
+          note: string
+          read_range: string
+          sheet_name: string
+          sort_order: number
+          spreadsheet_env: string
+          spreadsheet_label: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          access?: string
+          column_map?: Json
+          config_key: string
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          note?: string
+          read_range?: string
+          sheet_name: string
+          sort_order?: number
+          spreadsheet_env?: string
+          spreadsheet_label: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          access?: string
+          column_map?: Json
+          config_key?: string
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          note?: string
+          read_range?: string
+          sheet_name?: string
+          sort_order?: number
+          spreadsheet_env?: string
+          spreadsheet_label?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       gmv_exchange_rates: {
         Row: {
           currency: string
@@ -2068,6 +2119,10 @@ export type Database = {
           month: string
           vid: string
         }[]
+      }
+      attribution_lookup: {
+        Args: { _limit?: number; _offset?: number; _q: string }
+        Returns: Json
       }
       attribution_month_key_count: { Args: { _month: string }; Returns: number }
       attribution_month_keys: {
