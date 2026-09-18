@@ -104,3 +104,61 @@ export function makeOptionalResolver(
   const byName = new Map(sheets.map((s) => [normTitle(s.title), s.sheet_id]));
   return (title: string) => byName.get(normTitle(title)) ?? null;
 }
+
+// ---------------------------------------------------------------------------
+// 每人一张的 sheet：名称怎么定
+// ---------------------------------------------------------------------------
+// 规则（人员表 sheet名 那一列）：
+//   · 填了值 → 就用这个值，该人单独指定，模板管不着（名字不规范的人走这条）。
+//   · 留空   → 用配置表的模板生成：把模板里的 {占位符} 换成这个人的姓名。
+// 这样飞书整批改名（建联-X → 建联表-X）只要改配置里一行模板，不用一个个改人员表；
+// 而个别人名字特殊，照旧在人员表里单独填。
+//
+// BD 建联 sheet 的模板**只认 JIANLIAN 这一行**：CONNECTION_STATS 读的是同一批 sheet，
+// 如果两行各有各的模板，改了一个没改另一个，两个函数就会去读不同的表，
+// 而且两边都不会报错 —— 只是数字对不上，最难查的那种。
+
+/** 配置表还没跑 migration 时的模板退路，与 20260918170000 的初始数据一致 */
+export const DEFAULT_SHEET_TEMPLATES: Record<string, string> = {
+  JIANLIAN: "建联-{同事姓名}",
+  EDITOR: "{剪辑姓名}",
+};
+
+// 模板里的占位符：`{任意文字}`，整段换成姓名。
+// 两个正则不是冗余：带 g 的那个用来 replace，检测必须用**不带 g** 的 —— 带 g 的正则
+// 在 .test() 之间会记住 lastIndex，同一个字符串连着测两次会一次 true 一次 false。
+const PLACEHOLDER_RE_G = /\{[^}]*\}/g;
+const PLACEHOLDER_RE = /\{[^}]*\}/;
+
+/** 这个 sheet 名是不是「模板」（含占位符）而不是真名 */
+export function isSheetTemplate(name: string): boolean {
+  return PLACEHOLDER_RE.test(name);
+}
+
+export type StaffSheetName = {
+  /** 实际去飞书匹配的名字；空串 = 既没单独填、模板也拿不到，无法确定 */
+  name: string;
+  /** override = 人员表单独填的；template = 模板生成的；none = 定不出来 */
+  source: "override" | "template" | "none";
+};
+
+/**
+ * 算出某个同事实际要读哪张 sheet。
+ * @param key    模板取自配置表的哪一行：BD 建联用 "JIANLIAN"，剪辑用 "EDITOR"
+ * @param staffName  人员表里的姓名
+ * @param override   人员表里填的 sheet 名（留空则用模板）
+ */
+export function staffSheetName(
+  cfg: Map<string, SheetConfigRow>,
+  key: "JIANLIAN" | "EDITOR",
+  staffName: string,
+  override: string,
+): StaffSheetName {
+  const fixed = (override ?? "").trim();
+  if (fixed) return { name: fixed, source: "override" };
+  const who = (staffName ?? "").trim();
+  if (!who) return { name: "", source: "none" };
+  const tpl = (cfg.get(key)?.sheet_name ?? "").trim() || DEFAULT_SHEET_TEMPLATES[key] || "";
+  if (!tpl || !isSheetTemplate(tpl)) return { name: "", source: "none" };
+  return { name: tpl.replace(PLACEHOLDER_RE_G, who), source: "template" };
+}

@@ -10,7 +10,9 @@ import {
   loadSheetConfig,
   makeOptionalResolver,
   makeSheetResolver,
+  isSheetTemplate,
   normTitle,
+  staffSheetName,
 } from "./sheetConfig.ts";
 
 function eq<T>(a: T, b: T, m?: string) {
@@ -75,4 +77,60 @@ Deno.test("makeOptionalResolver: 找不到返回 null 不抛错", () => {
   const r = makeOptionalResolver(sheets);
   eq(r("归因审查"), "s1");
   eq(r("建联-张三"), null);
+});
+
+// ---------- 每人一张的 sheet：模板 vs 单独指定 ----------
+
+const tplCfg = async () =>
+  await loadSheetConfig(fakeDb([
+    { config_key: "JIANLIAN", spreadsheet_label: "主表", sheet_name: "建联-{同事姓名}", enabled: true },
+    { config_key: "EDITOR", spreadsheet_label: "剪辑表", sheet_name: "{剪辑姓名}", enabled: true },
+  ]));
+
+Deno.test("staffSheetName: 人员表填了值 → 单独指定优先，模板管不着", async () => {
+  const m = await tplCfg();
+  const r = staffSheetName(m, "JIANLIAN", "阿南", "阿南的建联表");
+  eq(r.name, "阿南的建联表");
+  eq(r.source, "override");
+});
+
+Deno.test("staffSheetName: 人员表留空 → 按模板生成", async () => {
+  const m = await tplCfg();
+  const r = staffSheetName(m, "JIANLIAN", "阿南", "");
+  eq(r.name, "建联-阿南");
+  eq(r.source, "template");
+  eq(staffSheetName(m, "EDITOR", "小林", "  ").name, "小林");
+});
+
+Deno.test("staffSheetName: 整批改名只改一行模板就全员生效", async () => {
+  const m = await loadSheetConfig(fakeDb([
+    { config_key: "JIANLIAN", spreadsheet_label: "主表", sheet_name: "建联表-{同事姓名}", enabled: true },
+  ]));
+  eq(staffSheetName(m, "JIANLIAN", "阿南", "").name, "建联表-阿南");
+  eq(staffSheetName(m, "JIANLIAN", "小王", "").name, "建联表-小王");
+});
+
+Deno.test("staffSheetName: 配置表还没跑 migration → 用代码里的默认模板", async () => {
+  const m = await loadSheetConfig(fakeDb(null, { message: "relation does not exist" }));
+  eq(staffSheetName(m, "JIANLIAN", "阿南", "").name, "建联-阿南");
+  eq(staffSheetName(m, "EDITOR", "小林", "").name, "小林");
+});
+
+Deno.test("staffSheetName: 姓名为空、或模板里没有占位符 → 定不出名字，不猜", async () => {
+  const m = await tplCfg();
+  eq(staffSheetName(m, "JIANLIAN", "", "").name, "");
+  eq(staffSheetName(m, "JIANLIAN", "", "").source, "none");
+  // 模板被人改成了一个固定名字（没占位符）：不能拿它当所有人的 sheet 名，否则全员读同一张表
+  const bad = await loadSheetConfig(fakeDb([
+    { config_key: "JIANLIAN", spreadsheet_label: "主表", sheet_name: "建联总表", enabled: true },
+  ]));
+  eq(staffSheetName(bad, "JIANLIAN", "阿南", "").name, "");
+  eq(staffSheetName(bad, "JIANLIAN", "阿南", "").source, "none");
+});
+
+Deno.test("isSheetTemplate: 带 g 的正则不能用来 test，连着测两次结果必须一致", () => {
+  eq(isSheetTemplate("建联-{同事姓名}"), true);
+  eq(isSheetTemplate("建联-{同事姓名}"), true, "第二次");
+  eq(isSheetTemplate("授权记录"), false);
+  eq(isSheetTemplate("授权记录"), false, "第二次");
 });

@@ -30,7 +30,8 @@ import {
 import { admin, verifyPasscode } from "../_shared/auth.ts";
 import { cronAuthed } from "../_shared/cron.ts";
 import { cellText, parseDate } from "../_shared/cells.ts";
-import { configuredSheetName, loadSheetConfig, makeSheetResolver } from "../_shared/sheetConfig.ts";
+import { configuredSheetName, loadSheetConfig, makeSheetResolver, staffSheetName } from "../_shared/sheetConfig.ts";
+import { type SheetRename, renameSourceSheets } from "../_shared/sheetRename.ts";
 import { normalizeName, splitIdentityKey } from "../_shared/attribution.ts";
 import { buildMonthlyReport } from "../_shared/attribution-report.ts";
 
@@ -59,6 +60,8 @@ function perfSpreadsheetToken(): string {
   return (m?.[1] ?? raw) || PERF_SPREADSHEET_DEFAULT;
 }
 const SHEET_OWNERSHIP = "\u5f52\u56e0\u8bb0\u5f55";
+/** 归档 sheet 的默认名，与 attribution-sync-creators 一致；实际用哪个名字由配置表 ARCHIVE 行决定。 */
+const SHEET_ARCHIVE_DEFAULT = "\u6388\u6743\u8bb0\u5f55";
 
 const TYPE_LABELS: Record<string, string> = {
   VID_DUAL_SOURCE: "VID双登记",
@@ -263,6 +266,20 @@ Deno.serve(async (req) => {
     if (action === "save-sheet-config") {
       const rows = Array.isArray(body.configs) ? body.configs : [];
       if (!rows.length) throw new Error("没有要保存的配置");
+
+      // 改 sheet 名之前，先把改动前每个同事实际读的是哪张 sheet 记下来：
+      // 改完模板就算不出旧名字了，而库里那批数据还挂在旧名字下面。
+      // 不迁移的话旧行会和新行并存，归属解析当成两次独立建联去算保护期 —— 数字照出、不报错。
+      const cfgBefore = await loadSheetConfig(db);
+      const { data: staffBefore } = await db
+        .from("staff_sheets")
+        .select("id, name, sheet_name, role");
+      const staffList = (staffBefore ?? []) as Array<{ id: string; name: string; sheet_name: string | null; role: string | null }>;
+      const effective = (cfg: typeof cfgBefore, r: { name: string; sheet_name: string | null; role: string | null }) =>
+        staffSheetName(cfg, (r.role ?? "BD") === "EDITOR" ? "EDITOR" : "JIANLIAN", r.name, r.sheet_name ?? "").name;
+      const archiveBefore = configuredSheetName(cfgBefore, "ARCHIVE", SHEET_ARCHIVE_DEFAULT);
+      const staffSheetBefore = new Map(staffList.map((r) => [r.id, effective(cfgBefore, r)]));
+
       let saved = 0;
       for (const raw of rows as Array<Record<string, unknown>>) {
         const key = String(raw.config_key ?? "").trim();
@@ -287,7 +304,22 @@ Deno.serve(async (req) => {
         if (error) throw new Error(`${key}: ${error.message}`);
         saved++;
       }
-      return json({ saved });
+
+      // 保存之后重新算一遍实际 sheet 名，变了的就把库里的数据一起改名（不删、不留孤儿）。
+      const cfgAfter = await loadSheetConfig(db);
+      const renames: SheetRename[] = [];
+      const archiveAfter = configuredSheetName(cfgAfter, "ARCHIVE", SHEET_ARCHIVE_DEFAULT);
+      if (archiveBefore && archiveAfter && archiveBefore !== archiveAfter) {
+        renames.push({ from: archiveBefore, to: archiveAfter });
+      }
+      for (const r of staffList) {
+        const from = staffSheetBefore.get(r.id) ?? "";
+        const to = effective(cfgAfter, r);
+        if (from && to && from !== to) renames.push({ from, to });
+      }
+      const renamed = renames.length ? await renameSourceSheets(db, renames) : [];
+
+      return json({ saved, renamed });
     }
 
     // 判定下拉要用的人员名单（含离职：历史冲突可能要判给已离职的同事）

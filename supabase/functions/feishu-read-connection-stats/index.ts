@@ -18,7 +18,7 @@ import {
 import { admin, checkAdminPasscode } from "../_shared/auth.ts";
 import { cronAuthed } from "../_shared/cron.ts";
 import { cellText, parseDate } from "../_shared/cells.ts";
-import { isSheetEnabled, loadSheetConfig, makeOptionalResolver } from "../_shared/sheetConfig.ts";
+import { isSheetEnabled, loadSheetConfig, makeOptionalResolver, staffSheetName } from "../_shared/sheetConfig.ts";
 
 const VID_RE = /^7\d{18}$/;
 const COUNTRY_RE = /^[\u4e00-\u9fa5A-Za-z0-9\-\s]{1,10}$/;
@@ -66,13 +66,21 @@ Deno.serve(async (req) => {
     const bdTargets = staff.filter((s) => s.role === "BD");
     const editorTargets = staff.filter((s) => s.role === "EDITOR");
 
-    // sheet 名统一走配置表（设置 → 飞书表名称）。这两路读的都是「每人一张」的 sheet，
-    // 名字来自人员表 staff_sheets，配置表里存的是带占位符的模板（建联-{同事姓名} / {剪辑姓名}），
-    // 只说明「这类 sheet 读哪些列」，不参与匹配 —— 所以这里配置能控制的是**启不启用**：
+    // sheet 名统一走配置表（设置 → 飞书表名称）。这两路读的都是「每人一张」的 sheet：
+    // 人员表 staff_sheets 里填了名字就用填的，留空则用配置表的模板（建联-{同事姓名} / {剪辑姓名}）
+    // 把占位符换成姓名生成 —— 飞书整批改名时改一行模板即可。此外配置还能控制**启不启用**：
     // 在设置里停用 CONNECTION_STATS / EDITOR，这一路就整个不读，而不是读回一堆空行。
     // 匹配本身统一用 makeOptionalResolver：只归一空白后精确比较，不做别名猜测；
     // 找不到不抛错（离职同事的 sheet 可能真被删了），记进 missing 一起汇报。
     const sheetCfg = await loadSheetConfig(db);
+    // BD 建联 sheet 的模板只认 JIANLIAN 那一行（CONNECTION_STATS 读的是同一批 sheet，
+    // 两行各有各的模板会导致改了一个没改另一个、两个函数去读不同的表且都不报错）。
+    const unnamedStaff: string[] = [];
+    const sheetOf = (t: { name: string; sheet_name: string }, key: "JIANLIAN" | "EDITOR") => {
+      const r = staffSheetName(sheetCfg, key, t.name, t.sheet_name);
+      if (!r.name) unnamedStaff.push(t.name || "(无姓名)");
+      return r.name;
+    };
     const bdEnabled = isSheetEnabled(sheetCfg, "CONNECTION_STATS");
     const editorEnabled = isSheetEnabled(sheetCfg, "EDITOR");
     const disabledSources: string[] = [];
@@ -88,9 +96,11 @@ Deno.serve(async (req) => {
       const mainToken = getSpreadsheetToken();
       const resolve = makeOptionalResolver(await listSheets(token, mainToken));
       for (const t of bdTargets) {
-        const sid = resolve(t.sheet_name);
-        if (!sid) { missing.push(t.sheet_name); continue; }
-        touchedSheets.add(t.sheet_name);
+        const sheetName = sheetOf(t, "JIANLIAN");
+        if (!sheetName) continue;
+        const sid = resolve(sheetName);
+        if (!sid) { missing.push(sheetName); continue; }
+        touchedSheets.add(sheetName);
         const data = await readRange(token, mainToken, `${sid}!A2:Q`, 250);
         for (let i = 0; i < data.length; i++) {
           const r = data[i] ?? [];
@@ -101,7 +111,7 @@ Deno.serve(async (req) => {
           const vid = VID_RE.test(vidRaw) ? vidRaw : "";
           rows.push({
             source_type: "BD",
-            source_sheet: t.sheet_name,
+            source_sheet: sheetName,
             row_number: i + 2,
             staff_name: t.name,
             staff_active: !!t.active,
@@ -124,9 +134,11 @@ Deno.serve(async (req) => {
       const edToken = getSpreadsheetToken("FEISHU_EDITOR_SPREADSHEET_TOKEN");
       const resolve = makeOptionalResolver(await listSheets(token, edToken));
       for (const t of editorTargets) {
-        const sid = resolve(t.sheet_name);
-        if (!sid) { missing.push(t.sheet_name); continue; }
-        touchedSheets.add(t.sheet_name);
+        const sheetName = sheetOf(t, "EDITOR");
+        if (!sheetName) continue;
+        const sid = resolve(sheetName);
+        if (!sid) { missing.push(sheetName); continue; }
+        touchedSheets.add(sheetName);
         const data = await readRange(token, edToken, `${sid}!A2:G`, 500);
         for (let i = 0; i < data.length; i++) {
           const r = data[i] ?? [];
@@ -136,7 +148,7 @@ Deno.serve(async (req) => {
           if (!vidRaw || !VID_RE.test(vidRaw)) continue;
           rows.push({
             source_type: "EDITOR",
-            source_sheet: t.sheet_name,
+            source_sheet: sheetName,
             row_number: i + 2,
             staff_name: t.name,
             staff_active: !!t.active,
@@ -178,6 +190,8 @@ Deno.serve(async (req) => {
         inserted,
         sheets_synced: touchedSheets.size,
         missing_sheets: missing,
+        // 人员表没填 sheet 名、模板也生成不出名字的同事
+        unnamed_staff: unnamedStaff,
         // 配置表里被停用、这一轮整个没读的数据源
         disabled_sources: disabledSources,
       }),

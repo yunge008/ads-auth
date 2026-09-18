@@ -9,6 +9,7 @@ import {
   readRange,
 } from "../_shared/feishu.ts";
 import { admin, checkAdminPasscode } from "../_shared/auth.ts";
+import { loadSheetConfig, makeOptionalResolver, staffSheetName } from "../_shared/sheetConfig.ts";
 
 const VID_RE = /^7\d{18}$/;
 const COUNTRY_RE = /^[\u4e00-\u9fa5A-Za-z0-9\-\s]{1,10}$/;
@@ -49,8 +50,16 @@ Deno.serve(async (req) => {
 
     const token = await getTenantAccessToken();
     const spreadsheetToken = getSpreadsheetToken();
-    const all = await listSheets(token, spreadsheetToken);
-    const byName = new Map(all.map((s) => [s.title, s.sheet_id]));
+    // sheet 名解析统一走 _shared/sheetConfig：只归一空白后精确比较，不做别名猜测。
+    // 人员表 sheet名 留空的同事，用「设置 → 飞书表名称」里的模板按姓名生成。
+    const resolve = makeOptionalResolver(await listSheets(token, spreadsheetToken));
+    const sheetCfg = await loadSheetConfig(db);
+    const unnamedStaff: string[] = [];
+    const sheetOf = (t: { name: string; sheet_name: string }) => {
+      const r = staffSheetName(sheetCfg, "JIANLIAN", t.name, t.sheet_name);
+      if (!r.name) unnamedStaff.push(t.name || "(无姓名)");
+      return r.name;
+    };
 
     const rows: Array<{
       country: string;
@@ -63,9 +72,11 @@ Deno.serve(async (req) => {
     const missing: string[] = [];
 
     for (const t of targets) {
-      const sid = byName.get(t.sheet_name);
+      const sheetName = sheetOf(t);
+      if (!sheetName) continue;
+      const sid = resolve(sheetName);
       if (!sid) {
-        missing.push(t.sheet_name);
+        missing.push(sheetName);
         continue;
       }
       const data = await readRange(token, spreadsheetToken, `${sid}!A2:P`);
@@ -81,7 +92,7 @@ Deno.serve(async (req) => {
           staff_name: t.name,
           vid,
           source_type: "BD",
-          source_sheet: t.sheet_name,
+          source_sheet: sheetName,
           registered_sku: cellText(row[10]) || null,
         });
       }
@@ -107,7 +118,7 @@ Deno.serve(async (req) => {
 
 
     return new Response(
-      JSON.stringify({ upserted, missing_sheets: missing }),
+      JSON.stringify({ upserted, missing_sheets: missing, unnamed_staff: unnamedStaff }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {

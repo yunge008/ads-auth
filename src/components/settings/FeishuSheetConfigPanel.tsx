@@ -80,8 +80,18 @@ export function FeishuSheetConfigPanel() {
     if (!drafts) return;
     setSaving(true);
     try {
-      const r = await feishuAction<{ saved: number }>("save-sheet-config", { configs: drafts });
-      toast.success(`已保存 ${r.saved} 条配置，下一次同步立即生效（不用重新部署）`);
+      const r = await feishuAction<{
+        saved: number;
+        renamed?: Array<{ from: string; to: string; moved: Record<string, number> }>;
+      }>("save-sheet-config", { configs: drafts });
+      const movedRows = (r.renamed ?? []).reduce(
+        (n, x) => n + Object.values(x.moved ?? {}).reduce((a, b) => a + b, 0),
+        0,
+      );
+      toast.success(
+        `已保存 ${r.saved} 条配置，下一次同步立即生效（不用重新部署）` +
+          (movedRows ? `；已把 ${movedRows} 行历史数据跟着改名` : ""),
+      );
       await load();
     } catch (e) {
       toast.error(`保存失败：${(e as Error).message}`);
@@ -102,8 +112,10 @@ export function FeishuSheetConfigPanel() {
           带 <Badge variant="outline" className="h-4 px-1 text-[10px]">读写</Badge> 的表系统会写回去，人工手填的内容可能被覆盖。
           <b>读取列范围与列映射只读</b>：它们写死在解析代码里，改这里不改变实际读取行为。
           表格名称或 sheet 名称留空的行 = <b>还没提供给系统</b>，不参与匹配，填上并保存后才生效。
-          带 <code>{"{}"}</code> 占位符的是<b>每人一张的 sheet</b>（建联-同事姓名 / 剪辑姓名），
-          真实名称来自「人员表」，这里只说明这类表读哪些列，改不了。
+          带 <code>{"{}"}</code> 占位符的是<b>每人一张的 sheet 模板</b>：
+          占位符会被换成姓名（<code>建联-{"{"}同事姓名{"}"}</code> → <code>建联-阿南</code>）。
+          飞书整批改名时<b>改这一行就全员生效</b>；在「人员表」里单独填了 sheet 名的人不受模板影响。
+          改完保存后，库里原有数据会<b>自动跟着改名</b>，不会丢也不会留下重复。
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -169,7 +181,7 @@ export function FeishuSheetConfigPanel() {
                           </div>
                         </TableCell>
                         <TableCell className="py-2">
-                          {isEditing && !isTemplate ? (
+                          {isEditing ? (
                             <Input
                               value={r.sheet_name}
                               onChange={(e) => updateRow(r.config_key, { sheet_name: e.target.value })}
@@ -182,9 +194,9 @@ export function FeishuSheetConfigPanel() {
                             </span>
                           )}
                           {isTemplate ? (
-                            // 每人一张的 sheet：真名在人员表里，这里存的是模板，改它不会改变读哪张 sheet
+                            // 模板行：{占位符} 会被换成姓名。人员表里单独填了名字的人不受模板影响。
                             <div className="text-[10px] text-amber-700 mt-0.5">
-                              每人一张，名称取自「人员表」
+                              模板：{"{}"} 换成姓名。人员表单独填了的人不受影响
                             </div>
                           ) : null}
                         </TableCell>

@@ -30,6 +30,7 @@ import {
   loadSheetConfig,
   makeOptionalResolver,
   makeSheetResolver,
+  staffSheetName,
 } from "../_shared/sheetConfig.ts";
 import {
   type RegistryEntry,
@@ -146,8 +147,8 @@ Deno.serve(async (req) => {
     // ---- 工作清单：一个 sheet 一片，按顺序处理，时间用完就交给下一次调用 ----
     // sheet 名统一走配置表（设置 → 飞书表名称），匹配只归一空白后**精确比较**，不猜别名。
     //   · 归档 sheet「授权记录」是固定名字 → 由配置表 ARCHIVE 行给，改名改配置即可；
-    //   · 每人一张的建联/剪辑 sheet 名字来自「人员表」staff_sheets，配置表里存的是
-    //     带占位符的模板（建联-{同事姓名}），只为说明这类 sheet 读哪些列，不参与匹配；
+    //   · 每人一张的建联/剪辑 sheet：人员表里填了名字就用填的（该人单独指定），
+    //     留空则用配置表的模板（建联-{同事姓名}）把占位符换成姓名生成 —— 整批改名改一行模板即可；
     //   · 配置里把某一行停用 → 这一路数据源整个跳过，而不是读回一堆空行。
     const sheetCfg = await loadSheetConfig(db);
     const LOG_SHEET_TITLE = configuredSheetName(sheetCfg, "ARCHIVE", LOG_SHEET_TITLE_DEFAULT);
@@ -174,11 +175,24 @@ Deno.serve(async (req) => {
       edOptional = makeOptionalResolver(await listSheets(token, edToken));
     }
 
+    // 每人一张的 sheet 叫什么：人员表填了就用填的，留空则用配置表的模板按姓名生成。
+    // 两样都给不出名字的人（姓名为空 / 模板缺失）记进 unnamed_staff 汇报，不静默跳过。
+    const unnamedStaff: string[] = [];
+    const sheetOf = (t: { name: string; sheet_name: string }, key: "JIANLIAN" | "EDITOR") => {
+      const r = staffSheetName(sheetCfg, key, t.name, t.sheet_name);
+      if (!r.name) unnamedStaff.push(t.name || "(无姓名)");
+      return r.name;
+    };
+
     type Job = { sheet: string; kind: "JIANLIAN" | "ARCHIVE" | "EDITOR"; staffName: string; active: boolean };
     const jobs: Job[] = [
-      ...(jianlianEnabled ? staff.filter((s) => s.role === "BD") : []).map((t): Job => ({ sheet: t.sheet_name, kind: "JIANLIAN", staffName: t.name, active: !!t.active })),
+      ...(jianlianEnabled ? staff.filter((s) => s.role === "BD") : [])
+        .map((t): Job => ({ sheet: sheetOf(t, "JIANLIAN"), kind: "JIANLIAN", staffName: t.name, active: !!t.active }))
+        .filter((j) => !!j.sheet),
       ...(archiveEnabled ? [{ sheet: LOG_SHEET_TITLE, kind: "ARCHIVE" as const, staffName: "", active: false }] : []),
-      ...editors.map((t): Job => ({ sheet: t.sheet_name, kind: "EDITOR", staffName: t.name, active: !!t.active })),
+      ...editors
+        .map((t): Job => ({ sheet: sheetOf(t, "EDITOR"), kind: "EDITOR", staffName: t.name, active: !!t.active }))
+        .filter((j) => !!j.sheet),
     ];
     const todo = onlySheets ? jobs.filter((j) => onlySheets.has(j.sheet)) : jobs;
 
@@ -361,19 +375,19 @@ Deno.serve(async (req) => {
         registry_vid_rows: writtenVidRows,
         follower_rows: followerRows,
         missing_sheets: missing,
+        unnamed_staff: unnamedStaff,
         disabled_sources: disabledSources,
         vid_precision_lost: vidPrecisionLost,
         cjk_sites: cjkList,
       });
     }
 
-    // ---- 盘点「已经不属于任何数据源」的登记行（只报告，不自动删）----
-    // 触发场景：在设置里把某张 sheet 改了名、或停用了某一路数据源、或人员表删了一个人。
-    // 登记行是按 source_sheet 先删后插的，改名之后新名字写新行、旧名字那批行没人再删它，
-    // 于是同一批登记在库里存了两份，归属解析会当成「两个人各登记过一次」去算保护期 ——
-    // 这是改表名之后最容易出现、又最难自己发现的一种脏数据。
-    // 这里不自动删：删的是六万行量级的历史登记，删错没法回滚，交给人看过再决定。
-    // 返回的 orphan_sheets 就是待确认清单，确认后在 SQL Editor 里按 source_sheet 清理。
+    // ---- 盘点「已经不属于任何数据源」的登记行（只报告，不删）----
+    // 正常改名已经不会走到这里：改 sheet 名时（人员表或配置表）会就地把旧 source_sheet
+    // UPDATE 成新名字，数据连续迁移，不产生孤儿（见 _shared/sheetRename.ts）。
+    // 剩下的触发场景是人员表删了人、或某一路数据源被停用 —— 那属于「这批历史数据还要不要」
+    // 的业务决定，代码不替人决定，更不自动删：这是六万行量级的历史登记，删错无法回滚。
+    // 所以这里只出清单，不出 DELETE。
     const liveSheets = new Set(jobs.map((j) => j.sheet));
     const orphanSheets: string[] = [];
     {
@@ -516,10 +530,12 @@ Deno.serve(async (req) => {
       ownership_keys: ownRows.length,
       reviews_open: reviewsOpen ?? 0,
       missing_sheets: missing,
+      // 人员表没填 sheet 名、模板也生成不出名字的同事
+      unnamed_staff: unnamedStaff,
       // 配置表里被停用、这一轮整个没读的数据源
       disabled_sources: disabledSources,
-      // 库里还留着、但已经不属于任何数据源的 source_sheet（多半是 sheet 改过名）。
-      // 不为空说明同一批登记可能存了两份，会让保护期算错，需要人确认后清理。
+      // 库里还留着、但已经不属于任何数据源的 source_sheet。
+      // 改名已由 sheetRename 就地迁移，所以这里不空通常意味着人员表删过人或数据源被停用。
       orphan_sheets: orphanSheets,
       vid_precision_lost: vidPrecisionLost,
       follower_rows: followerRows,

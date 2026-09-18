@@ -353,7 +353,9 @@ function AuthorizePage() {
     setLoadingMode(includeDone ? "all" : "pending");
     try {
       const data = await invokeFn<{ materials: Material[]; missing_sheets?: string[] }>("feishu-read", {
-        staff: activeStaff.map((s) => ({ name: s.name, sheet_name: s.sheet_name })),
+        // 用后端算好的 resolved_sheet_name：人员表 sheet名 留空的人靠模板生成，
+        // 前端自己再算一遍迟早和后端不一致，不一致就是读错表且不报错。
+        staff: activeStaff.map((s) => ({ name: s.name, sheet_name: s.resolved_sheet_name || s.sheet_name })),
         include_done: includeDone,
       });
       const list = (data?.materials ?? []).map((m) => ({

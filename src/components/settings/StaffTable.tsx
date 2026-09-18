@@ -57,7 +57,12 @@ export function StaffTable() {
 
   const handleSave = async () => {
     if (!drafts) return;
-    const cleaned = drafts.filter((r) => r.name.trim() && r.sheet_name.trim());
+    // sheet_name 允许留空（留空 = 用配置表的模板按姓名生成），所以这里只要求姓名非空。
+    // 以前连 sheet_name 一起要求，会把「想用模板」的行在保存时悄悄丢掉。
+    // resolved_sheet_name / sheet_name_source 是后端算出来的只读字段，不回传。
+    const cleaned = drafts
+      .filter((r) => r.name.trim())
+      .map(({ id, name, sheet_name, active, role }) => ({ id, name, sheet_name, active, role }));
     try {
       await save(cleaned);
       setDrafts(null);
@@ -120,11 +125,20 @@ export function StaffTable() {
                           <Input
                             value={row.sheet_name}
                             onChange={(e) => updateRow(row.id, { sheet_name: e.target.value })}
-                            placeholder="张三-达人"
+                            placeholder="留空 = 按模板生成"
                             className="h-8"
                           />
+                        ) : row.sheet_name ? (
+                          row.sheet_name
+                        ) : row.resolved_sheet_name ? (
+                          // 留空的人，把模板算出来的真实名字显示出来 —— 否则这一格是个「—」，
+                          // 没人知道系统到底去读了哪张 sheet
+                          <span className="text-muted-foreground">
+                            {row.resolved_sheet_name}
+                            <span className="ml-1 text-[10px]">（模板）</span>
+                          </span>
                         ) : (
-                          row.sheet_name || <span className="text-muted-foreground">—</span>
+                          <span className="text-destructive text-xs">未配置（模板也生成不出）</span>
                         )}
                       </TableCell>
                       <TableCell>
@@ -203,7 +217,11 @@ export function StaffTable() {
         <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
           <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
           <span>
-            提示：sheet名必须与对应飞书表格（见「飞书表格」列）中的 Tab 名称完全一致，否则无法读取对应人员的数据。「执行授权」只读取 BD 角色的主表格，剪辑角色仅用于归因。
+            提示：sheet名必须与对应飞书表格（见「飞书表格」列）中的 Tab 名称完全一致，否则无法读取对应人员的数据。
+            <b>留空则按「设置 → 飞书表名称」里的模板 + 姓名自动生成</b>（建联-{"{"}同事姓名{"}"} → 建联-阿南），
+            飞书整批改名时改那一行模板即可，不用在这里一个个改；名字不规范的人在这里单独填。
+            改了 sheet名 保存后，库里原有的数据会<b>自动跟着改名</b>，不会丢也不会留下重复。
+            「执行授权」只读取 BD 角色的主表格，剪辑角色仅用于归因。
           </span>
         </div>
 
