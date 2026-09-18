@@ -281,6 +281,64 @@ export function bulkJudgment(rows: BulkJudgmentRow[], dryRun = false) {
   );
 }
 
+export type AttributionLookup = {
+  query: string;
+  is_vid: boolean;
+  total: number;
+  limit: number;
+  offset: number;
+  rows: Array<{
+    month: string;
+    country: string;
+    vid: string;
+    account_name: string;
+    creative_type: string;
+    bucket: string;
+    staff: string | null;
+    role: string | null;
+    match_type: string | null;
+    handover_applied: boolean;
+    posted_at: string | null;
+    rows_count: number;
+    gmv_usd: number;
+  }>;
+  registry: Array<{
+    country: string;
+    staff_name: string;
+    role: string;
+    register_date: string | null;
+    sample_date: string | null;
+    nickname_raw: string;
+    handle_raw: string | null;
+    vid: string;
+    source: string;
+    source_sheet: string;
+    row_number: number | null;
+  }>;
+  ownership: Array<{
+    country: string;
+    key_type: string;
+    match_key: string;
+    display_name: string | null;
+    owner_bd: string;
+    first_register_date: string | null;
+    owner_last_register_date: string | null;
+    transfer_count: number;
+  }>;
+};
+
+/**
+ * 归因查询：一个 VID 或达人名字 → 它每个月归给了谁 + 登记依据 + 当前归属。
+ * 走 RPC 返回单个 JSON —— PostgREST 的 1000 行上限对 RETURNS TABLE 会静默截断，这个坑踩过两次。
+ */
+export function attributionLookup(q: string, limit = 10, offset = 0) {
+  return invokeFn<AttributionLookup>(
+    "attribution-upload",
+    { action: "lookup", q, limit, offset },
+    { timeout: 120000 },
+  );
+}
+
 export function feishuAction<T = Record<string, unknown>>(action: string, extra?: Record<string, unknown>) {
   return invokeFn<T>("attribution-feishu", { action, ...(extra ?? {}) }, { timeout: 300000 });
 }

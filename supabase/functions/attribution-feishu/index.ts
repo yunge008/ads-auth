@@ -223,14 +223,43 @@ Deno.serve(async (req) => {
 
     // 仅查库的 action 不访问飞书
     if (action === "list-reviews") {
+      // 不设上限：审查项常年几百上千条，截断会让人以为「只有这些」而漏判。
+      // 分页在前端做（每页 10 条），这里一次把全量取回。
+      const PAGE = 1000;
+      const reviews: unknown[] = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await db
+          .from("attribution_review")
+          .select("review_key, review_type, subject, detail, default_resolution, manual_bd, manual_note, status, first_seen_at, last_seen_at")
+          .order("status", { ascending: true }) // OPEN 在前（字母序 OPEN < RESOLVED）
+          .order("last_seen_at", { ascending: false })
+          .order("review_key") // 翻页稳定：前两个排序键都可能有大量并列值
+          .range(from, from + PAGE - 1);
+        if (error) throw new Error(error.message);
+        const page = data ?? [];
+        reviews.push(...page);
+        if (page.length < PAGE) break;
+      }
+      return json({ reviews });
+    }
+
+    // 判定下拉要用的人员名单（含离职：历史冲突可能要判给已离职的同事）
+    if (action === "list-staff") {
       const { data, error } = await db
-        .from("attribution_review")
-        .select("review_key, review_type, subject, detail, default_resolution, manual_bd, manual_note, status, first_seen_at, last_seen_at")
-        .order("status", { ascending: true }) // OPEN 在前（字母序 OPEN < RESOLVED）
-        .order("last_seen_at", { ascending: false })
-        .limit(500);
+        .from("staff_sheets")
+        .select("name, role, active")
+        .order("sort_order", { ascending: true })
+        .order("name", { ascending: true });
       if (error) throw new Error(error.message);
-      return json({ reviews: data ?? [] });
+      const seen = new Set<string>();
+      const staff: Array<{ name: string; role: string; active: boolean }> = [];
+      for (const r of (data ?? []) as Array<{ name: string; role: string; active: boolean }>) {
+        // 同一个人可能有 BD 与 EDITOR 两行（阿南），下拉里只出现一次
+        if (seen.has(r.name)) continue;
+        seen.add(r.name);
+        staff.push({ name: r.name, role: r.role, active: !!r.active });
+      }
+      return json({ staff });
     }
 
     // ---------- Excel 批量回填判定 / 覆盖 ----------

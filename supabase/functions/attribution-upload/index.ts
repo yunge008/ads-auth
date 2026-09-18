@@ -1247,6 +1247,20 @@ Deno.serve(async (req) => {
       return json({ handovers: data ?? [] });
     }
 
+    // 归因查询：一个 VID 或达人名字 → 每月归给了谁 + 登记依据 + 当前归属。
+    // 走 RPC 返回单个 JSON：RETURNS TABLE 会被 PostgREST 的 1000 行上限静默截断（项目里踩过两次）。
+    if (action === "lookup") {
+      const q = str(body.q);
+      if (!q) throw new Error("请输入 VID 或达人昵称");
+      const { data, error } = await db.rpc("attribution_lookup", {
+        _q: q,
+        _limit: Number(body.limit) || 10,
+        _offset: Number(body.offset) || 0,
+      });
+      if (error) throw new Error(error.message);
+      return json(data ?? { query: q, total: 0, rows: [], registry: [], ownership: [] });
+    }
+
     if (action === "list_exchange_rates") {
       const { data, error } = await db
         .from("gmv_exchange_rates")

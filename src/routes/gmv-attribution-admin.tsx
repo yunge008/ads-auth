@@ -17,6 +17,7 @@ import { SiteMismatchTable } from "@/components/attribution/SiteMismatchTable";
 import { DiagnosePanel } from "@/components/attribution/DiagnosePanel";
 import { ReconcilePanel } from "@/components/attribution/ReconcilePanel";
 import { DataPrepPanel } from "@/components/attribution/DataPrepPanel";
+import { AttributionLookupPanel } from "@/components/attribution/AttributionLookupPanel";
 import { IdentityPreviewPanel } from "@/components/attribution/IdentityPreviewPanel";
 import { TypeMixPanel } from "@/components/attribution/TypeMixPanel";
 import {
@@ -537,6 +538,9 @@ function UploadResultView() {
         <ReviewPanel staffNames={Array.from(new Set((result?.summary?.staff ?? []).map((s) => s.staff_name)))} />
       </TabsContent>
       <TabsContent value="result" className="mt-4 space-y-4">
+        {/* 先放查询：这个 tab 最常用的问题是「这条 VID / 这个达人到底算给了谁」，
+            而不是「再看一遍上传结果」—— 上传结果在没上传时本来就是空的 */}
+        <AttributionLookupPanel />
         {result ? (
           <>
             <div className="text-sm font-medium">
@@ -545,11 +549,7 @@ function UploadResultView() {
             <ProgressBoard report={result.summary} mode="admin" onDrill={drill} />
             {detail ? <DetailTable rows={detail.rows} loading={detailLoading} title={detail.title} /> : null}
           </>
-        ) : (
-          <div className="text-sm text-muted-foreground text-center py-16">
-            在「Excel 上传」中上传文件或点击历史记录查看，结果会显示在这里
-          </div>
-        )}
+        ) : null}
       </TabsContent>
     </Tabs>
   );

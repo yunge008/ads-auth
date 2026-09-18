@@ -405,7 +405,21 @@ Deno.serve(async (req) => {
           reviewKey: `KEYTYPE:${identityKey(h.country, h.matchKey)}`,
           type: "KEYTYPE_CONFLICT",
           subject: n.displayName || h.displayName,
-          detail: { matchKey: h.matchKey, nicknameOwner: n.ownerBd, handleOwner: h.ownerBd },
+          // 带上国家与两边各自的建联日期：人在审查页要判「归谁」，光看两个名字判不了，
+          // 必须知道各自是什么时候、在哪个站点登记的。
+          detail: {
+            keyType: "BOTH",
+            country: h.country || n.country,
+            matchKey: h.matchKey,
+            nicknameOwner: n.ownerBd,
+            nicknameFirstDate: n.firstDate,
+            nicknameLastDate: n.ownerLastDate,
+            nicknameDisplay: n.displayName,
+            handleOwner: h.ownerBd,
+            handleFirstDate: h.firstDate,
+            handleLastDate: h.ownerLastDate,
+            handleDisplay: h.displayName,
+          },
           defaultResolution: `匹配时昵称归属优先，默认归 ${n.ownerBd}`,
         });
       }
