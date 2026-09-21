@@ -56,6 +56,8 @@
 
 ## 已完成
 
+- ✅ 2026-09-21 [codex] 执行授权拉取说明补齐：明确未授权素材须同时满足 V 列为空、P 列 VID 非空、Q 列授权码格式合法，并保留 C 列国家及 N 列日期条件；所有素材模式补明 VID 必填，增加缺 VID 时两种模式均不返回的提示。仅改页面说明，筛选逻辑不变；版本 0921.112。已对照后端条件检查文案并通过 git diff --check。 | src/routes/index.tsx、src/lib/version.ts、docs/{PLAN,WORKLOG}.md
+
 - ✅ 2026-09-11 [lovable] 复核两条项目监控告警：大文件上传超时引用的旧全量读取、逐行回填和即时全月重算已被数据库归并、快照和紧凑汇总取代，近期线上日志无同类超时，标记为过时；确认「清空全部批次」RPC 漏列 `ad_upload_agg` 会触发外键错误，新迁移将归并表、原始行和批次表一并 TRUNCATE，保留 service_role-only 权限。
 
 - ✅ 2026-09-10 [lovable] 修复 10 万行上传 finalize 超时：新增 service-role-only 的 `attribution_finalize_upload` RPC，在数据库内原子完成归并、汇率校验、金额汇总和置 READY，并用 advisory lock 阻止同批次并发重算；Edge Function 不再读回 9 万余条归并结果生成即时预览，上传完成后统一刷新月度快照。

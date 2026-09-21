@@ -196,3 +196,4 @@
 ## 2026-09-18 10:44 UTC
 [0918.111] 重新部署 Edge Functions: staff-sheets, attribution-sync-creators, feishu-read-connection-stats, feishu-read-bd-vids, feishu-read-editors, attribution-feishu（main 当前版本，无代码改动）。
 
+2026-09-21 | codex | 执行授权拉取说明补齐：获取未授权素材明确 V 列为空、P 列 VID 非空、Q 列授权码格式合法，并保留国家和日期条件；获取所有素材补明 VID 必填，增加缺 VID 时两种模式均不返回的提示。仅改文案，筛选逻辑不变。版本 0921.112。已对照 feishu-read 条件核查并通过 git diff --check；未运行构建（本地未安装项目依赖）。无需人工操作，Lovable 同步 main 后自动生效。 | src/routes/index.tsx、src/lib/version.ts、docs/{PLAN,WORKLOG}.md
