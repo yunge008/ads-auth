@@ -13,6 +13,7 @@ import { createClient } from "@supabase/supabase-js";
 const TIMEZONE_OFFSET_MINUTES = 8 * 60; // CST (UTC+8)
 const HARD_BUDGET_MS = 5 * 60 * 1000;
 const MAX_ROUNDS = 40;
+const GMV_MAX_SYNC_PAUSED = true;
 
 type Mode = "yesterday" | "today";
 
@@ -42,6 +43,12 @@ export const Route = createFileRoute("/api/public/hooks/gmv-max-cron")({
         const callerKey = request.headers.get("apikey") ?? request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
         if (!anonKey || callerKey !== anonKey) {
           return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { "Content-Type": "application/json" } });
+        }
+
+        // GMV Max 官方 API 同步尚未上线，且其明细表把数据库写到容量上限（2026-10-12）。
+        // 暂停：即使 pg_cron 里的 job 还没删，也不再调 gmv-max-sync 写库。恢复时把这里改回 false。
+        if (GMV_MAX_SYNC_PAUSED) {
+          return new Response(JSON.stringify({ ok: true, paused: true, reason: "GMV Max sync paused (database capacity)" }), { status: 200, headers: { "Content-Type": "application/json" } });
         }
 
         // 2. Parse mode

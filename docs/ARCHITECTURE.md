@@ -24,7 +24,7 @@
 | `/settings` | 账号管理、人员表、数据同步（AccountsManager/StaffTable/DataSyncCard） |
 | `/api-test` | API 测试 |
 | `/oauth/tiktok/callback` | TikTok OAuth 回调 |
-| `/api/public/hooks/gmv-max-cron` | **服务端路由**：pg_cron 调用入口，循环驱动 gmv-max-sync 续跑（apikey=anon key 鉴权，5 分钟硬预算） |
+| `/api/public/hooks/gmv-max-cron` | **⏸ 2026-10-12 起暂停**（`GMV_MAX_SYNC_PAUSED=true`，数据库容量告警，GMV Max 官方 API 同步未上线）。**服务端路由**：pg_cron 调用入口，循环驱动 gmv-max-sync 续跑（apikey=anon key 鉴权，5 分钟硬预算） |
 | `/api/public/hooks/attribution-cron` | **服务端路由**：每晚北京 23:30 刷新 GMV 归因结果快照（调 `attribution-upload` 的 `refresh`，默认最近 3 个有批次的月份；**cron 带 `skip_if_unchanged`，该月广告表和达人登记都没变化就直接跳过，不重复计算**；apikey 鉴权） |
 | `/api/public/hooks/feishu-sync-cron` | **服务端路由**：每晚北京 23:00 把四个「读飞书 → 写自己库」的基础同步各跑一次（`feishu-read-connection-stats` 发样及素材统计、`attribution-sync-creators` 达人登记、`attribution-feishu` 的 `sync-targets` / `sync-handovers`）。四步串行且互不影响，任一步失败发飞书机器人通知，运行状态写 `gmv_max_sync_state.id='feishu_nightly_sync'`；body 可传 `{only:["creators",...]}` 只跑其中几步（apikey 鉴权，单步 4 分钟超时） |
 | `/api/public/hooks/authorize-cron` | **服务端路由**：每日 08:00 自动授权入口，循环 feishu-read → authorize-batch → feishu-writeback，结束发飞书机器人通知（apikey 鉴权，10 分钟硬预算 / 最多 4 轮） |

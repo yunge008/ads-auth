@@ -201,3 +201,4 @@
 2026-10-12 | claude | [1012.113] GMV Max 按时间段导出完备性修复（gmv-max-raw-export）：30 天切窗、json 分片续跑（去掉 75s 整单失败和 1 万行上限，最长 365 天）、补齐已删除 campaign、campaign 级汇总对账、多授权兜底、单元失败不中断并提示；API 测试页新增 Excel 导出（ID 文本）与进度；新增离线测试 `_shared/gmv-max-export.test.ts`（6 项通过）。待人工：重新部署 `gmv-max-raw-export`。
 
 2026-10-12 | lovable | 重新部署 Edge Function `gmv-max-raw-export`（main 提交 d1ae0d1，含新文件 `_shared/gmv-max-export.ts`，已一并打包）。版本号 1012.114。无需跑 migration、无需新增 secrets，无其他待人工项。 | supabase/functions/gmv-max-raw-export/index.ts, src/lib/version.ts, docs/{PLAN,WORKLOG}.md
+2026-10-12 | claude | [1012.114] 数据库容量告警应急：`gmv-max-cron` 路由暂停（GMV_MAX_SYNC_PAUSED=true，不再驱动 gmv-max-sync 写库）；新增 migration `20261012130000_purge_gmv_max_storage.sql`（unschedule gmv-max cron + TRUNCATE gmv_max_vid_daily/gmv_max_vid_meta），不碰授权与归因。待人工：先跑诊断 SQL 确认，再跑该 migration。
