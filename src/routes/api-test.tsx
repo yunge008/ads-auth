@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { invokeFn } from "@/lib/api";
+import { downloadGmvMaxCsv, downloadGmvMaxXlsx, fetchGmvMaxRange } from "@/lib/gmvMaxExport";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/api-test")({
@@ -30,17 +31,6 @@ function parseCommand(input: string): { name: string; body: Record<string, unkno
   return { name, body: bodyText ? JSON.parse(bodyText) : {} };
 }
 
-function downloadText(text: string, fileName: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = fileName;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-}
-
 function ApiTestPage() {
   const [command, setCommand] = React.useState(sample);
   const [output, setOutput] = React.useState("");
@@ -49,6 +39,7 @@ function ApiTestPage() {
   const [advertiserId, setAdvertiserId] = React.useState("");
   const [startDate, setStartDate] = React.useState("");
   const [endDate, setEndDate] = React.useState("");
+  const [progress, setProgress] = React.useState("");
 
   const run = async () => {
     setLoading(true);
@@ -66,26 +57,43 @@ function ApiTestPage() {
     }
   };
 
-  const exportGmvMax = async () => {
-    if (!advertiserId || !startDate || !endDate) {
+  const exportGmvMax = async (format: "xlsx" | "csv") => {
+    const adv = advertiserId.trim();
+    if (!adv || !startDate || !endDate) {
       toast.error("请填写广告户 ID、起止日期");
       return;
     }
+    if (startDate > endDate) {
+      toast.error("起始日期不能晚于结束日期");
+      return;
+    }
     setExporting(true);
+    setProgress("正在拉取 campaign 列表…");
     try {
-      const csv = await invokeFn<string>("gmv-max-raw-export", {
-        advertiser_id: advertiserId.trim(), start_date: startDate, end_date: endDate,
-      }, { timeout: 120000 });
-      const fileName = `gmv-max-${advertiserId.trim()}-${startDate}_${endDate}.csv`;
-      downloadText(csv, fileName);
-      setOutput(JSON.stringify({ exported: true, file_name: fileName, scope: "GMV Max / PRODUCT_GMV_MAX" }, null, 2));
-      toast.success("CSV 已开始下载");
+      const result = await fetchGmvMaxRange(
+        { advertiser_id: adv, start_date: startDate, end_date: endDate },
+        (p) => setProgress(`已完成 ${p.done}/${p.total} 个 campaign，累计 ${p.rows.toLocaleString()} 行`),
+      );
+      const fileName = `gmv-max-${adv}-${startDate}_${endDate}.${format}`;
+      if (format === "xlsx") downloadGmvMaxXlsx(result.rows, fileName, result.mismatches);
+      else downloadGmvMaxCsv(result.rows, fileName);
+      const complete = result.errors.length === 0;
+      setOutput(JSON.stringify({
+        exported: true, file_name: fileName, rows: result.rows.length, calls: result.calls,
+        complete, errors: result.errors,
+        reconciliation: result.reconciled
+          ? (result.mismatches.length ? { status: "有差异（明细合计 ≠ campaign 汇总，仅供参考）", mismatches: result.mismatches } : { status: "一致" })
+          : { status: "无法对账（campaign 汇总查询失败）" },
+      }, null, 2));
+      if (complete) toast.success(`已下载 ${result.rows.length.toLocaleString()} 行`);
+      else toast.error(`已下载，但有 ${result.errors.length} 处拉取失败，数据不完整，详见回传内容`);
     } catch (e) {
       const msg = (e as Error).message;
       setOutput(JSON.stringify({ error: msg }, null, 2));
       toast.error(`导出失败：${msg}`);
     } finally {
       setExporting(false);
+      setProgress("");
     }
   };
 
@@ -98,13 +106,15 @@ function ApiTestPage() {
       <Card>
         <CardHeader><CardTitle className="text-base">GMV Max 原始 CSV 导出</CardTitle></CardHeader>
         <CardContent className="space-y-3">
-          <p className="text-xs text-muted-foreground">只读，不会修改同步数据；范围限单广告户、最多 31 天。导出字段以 TikTok API 当前返回为准，仅包含 PRODUCT_GMV_MAX。</p>
+          <p className="text-xs text-muted-foreground">只读，不会修改同步数据；单广告户、最多 365 天（自动按 30 天切窗、分批续拉，大户也能导完整）。按 campaign × 商品组 × 视频 × 天输出，字段以 TikTok API 当前返回为准，仅包含 PRODUCT_GMV_MAX；已删除的 campaign 也会导出（状态列显示 NOT_LISTED）。导出后自动与 campaign 级汇总对账，结果见「回传内容」。Excel 版 ID 列为文本，不会丢精度。</p>
           <div className="flex flex-wrap gap-2">
             <Input value={advertiserId} onChange={(e) => setAdvertiserId(e.target.value)} placeholder="广告户 ID" className="w-56" />
             <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-40" />
             <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-40" />
-            <Button onClick={exportGmvMax} disabled={exporting}><Download className="h-4 w-4 mr-1" />{exporting ? "导出中…" : "下载 CSV"}</Button>
+            <Button onClick={() => exportGmvMax("xlsx")} disabled={exporting}><Download className="h-4 w-4 mr-1" />{exporting ? "导出中…" : "下载 Excel"}</Button>
+            <Button variant="outline" onClick={() => exportGmvMax("csv")} disabled={exporting}>下载 CSV</Button>
           </div>
+          {progress && <p className="text-xs text-muted-foreground">{progress}</p>}
         </CardContent>
       </Card>
       <Card>
