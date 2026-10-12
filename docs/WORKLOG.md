@@ -199,3 +199,5 @@
 2026-09-21 | codex | 执行授权拉取说明补齐：获取未授权素材明确 V 列为空、P 列 VID 非空、Q 列授权码格式合法，并保留国家和日期条件；获取所有素材补明 VID 必填，增加缺 VID 时两种模式均不返回的提示。仅改文案，筛选逻辑不变。版本 0921.112。已对照 feishu-read 条件核查并通过 git diff --check；未运行构建（本地未安装项目依赖）。无需人工操作，Lovable 同步 main 后自动生效。 | src/routes/index.tsx、src/lib/version.ts、docs/{PLAN,WORKLOG}.md
 
 2026-10-12 | claude | [1012.113] GMV Max 按时间段导出完备性修复（gmv-max-raw-export）：30 天切窗、json 分片续跑（去掉 75s 整单失败和 1 万行上限，最长 365 天）、补齐已删除 campaign、campaign 级汇总对账、多授权兜底、单元失败不中断并提示；API 测试页新增 Excel 导出（ID 文本）与进度；新增离线测试 `_shared/gmv-max-export.test.ts`（6 项通过）。待人工：重新部署 `gmv-max-raw-export`。
+
+2026-10-12 | lovable | 重新部署 Edge Function `gmv-max-raw-export`（main 提交 d1ae0d1，含新文件 `_shared/gmv-max-export.ts`，已一并打包）。版本号 1012.114。无需跑 migration、无需新增 secrets，无其他待人工项。 | supabase/functions/gmv-max-raw-export/index.ts, src/lib/version.ts, docs/{PLAN,WORKLOG}.md
