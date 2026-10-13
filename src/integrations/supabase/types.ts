@@ -2187,6 +2187,10 @@ export type Database = {
           transfer_count: number
         }[]
       }
+      attribution_purge_upload_rows: {
+        Args: { _upload_id: string }
+        Returns: number
+      }
       attribution_rebuild_agg_usd: { Args: { _month: string }; Returns: number }
       attribution_registry_matrix: {
         Args: never
