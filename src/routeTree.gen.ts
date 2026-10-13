@@ -9,60 +9,25 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as SettingsRouteImport } from './routes/settings'
-import { Route as MaterialPerformanceRouteImport } from './routes/material-performance'
-import { Route as GmvMaxCreateRouteImport } from './routes/gmv-max-create'
-import { Route as GmvAttributionAdminRouteImport } from './routes/gmv-attribution-admin'
-import { Route as GmvAttributionRouteImport } from './routes/gmv-attribution'
-import { Route as FeishuDataRouteImport } from './routes/feishu-data'
-import { Route as ConnectionStatsRouteImport } from './routes/connection-stats'
-import { Route as CommentsRouteImport } from './routes/comments'
-import { Route as ApiTestRouteImport } from './routes/api-test'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiTestRouteImport } from './routes/api-test'
+import { Route as CommentsRouteImport } from './routes/comments'
+import { Route as ConnectionStatsRouteImport } from './routes/connection-stats'
+import { Route as FeishuDataRouteImport } from './routes/feishu-data'
+import { Route as GmvAttributionRouteImport } from './routes/gmv-attribution'
+import { Route as GmvAttributionAdminRouteImport } from './routes/gmv-attribution-admin'
+import { Route as GmvMaxCreateRouteImport } from './routes/gmv-max-create'
+import { Route as MaterialPerformanceRouteImport } from './routes/material-performance'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as OauthTiktokCallbackRouteImport } from './routes/oauth.tiktok.callback'
-import { Route as ApiPublicHooksGmvMaxCronRouteImport } from './routes/api/public/hooks/gmv-max-cron'
-import { Route as ApiPublicHooksFeishuSyncCronRouteImport } from './routes/api/public/hooks/feishu-sync-cron'
-import { Route as ApiPublicHooksAuthorizeCronRouteImport } from './routes/api/public/hooks/authorize-cron'
 import { Route as ApiPublicHooksAttributionCronRouteImport } from './routes/api/public/hooks/attribution-cron'
+import { Route as ApiPublicHooksAuthorizeCronRouteImport } from './routes/api/public/hooks/authorize-cron'
+import { Route as ApiPublicHooksFeishuSyncCronRouteImport } from './routes/api/public/hooks/feishu-sync-cron'
+import { Route as ApiPublicHooksGmvMaxCronRouteImport } from './routes/api/public/hooks/gmv-max-cron'
 
-const SettingsRoute = SettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MaterialPerformanceRoute = MaterialPerformanceRouteImport.update({
-  id: '/material-performance',
-  path: '/material-performance',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const GmvMaxCreateRoute = GmvMaxCreateRouteImport.update({
-  id: '/gmv-max-create',
-  path: '/gmv-max-create',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const GmvAttributionAdminRoute = GmvAttributionAdminRouteImport.update({
-  id: '/gmv-attribution-admin',
-  path: '/gmv-attribution-admin',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const GmvAttributionRoute = GmvAttributionRouteImport.update({
-  id: '/gmv-attribution',
-  path: '/gmv-attribution',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const FeishuDataRoute = FeishuDataRouteImport.update({
-  id: '/feishu-data',
-  path: '/feishu-data',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ConnectionStatsRoute = ConnectionStatsRouteImport.update({
-  id: '/connection-stats',
-  path: '/connection-stats',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CommentsRoute = CommentsRouteImport.update({
-  id: '/comments',
-  path: '/comments',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiTestRoute = ApiTestRouteImport.update({
@@ -70,9 +35,44 @@ const ApiTestRoute = ApiTestRouteImport.update({
   path: '/api-test',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const CommentsRoute = CommentsRouteImport.update({
+  id: '/comments',
+  path: '/comments',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConnectionStatsRoute = ConnectionStatsRouteImport.update({
+  id: '/connection-stats',
+  path: '/connection-stats',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FeishuDataRoute = FeishuDataRouteImport.update({
+  id: '/feishu-data',
+  path: '/feishu-data',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GmvAttributionRoute = GmvAttributionRouteImport.update({
+  id: '/gmv-attribution',
+  path: '/gmv-attribution',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GmvAttributionAdminRoute = GmvAttributionAdminRouteImport.update({
+  id: '/gmv-attribution-admin',
+  path: '/gmv-attribution-admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GmvMaxCreateRoute = GmvMaxCreateRouteImport.update({
+  id: '/gmv-max-create',
+  path: '/gmv-max-create',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MaterialPerformanceRoute = MaterialPerformanceRouteImport.update({
+  id: '/material-performance',
+  path: '/material-performance',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OauthTiktokCallbackRoute = OauthTiktokCallbackRouteImport.update({
@@ -80,16 +80,10 @@ const OauthTiktokCallbackRoute = OauthTiktokCallbackRouteImport.update({
   path: '/oauth/tiktok/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiPublicHooksGmvMaxCronRoute =
-  ApiPublicHooksGmvMaxCronRouteImport.update({
-    id: '/api/public/hooks/gmv-max-cron',
-    path: '/api/public/hooks/gmv-max-cron',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiPublicHooksFeishuSyncCronRoute =
-  ApiPublicHooksFeishuSyncCronRouteImport.update({
-    id: '/api/public/hooks/feishu-sync-cron',
-    path: '/api/public/hooks/feishu-sync-cron',
+const ApiPublicHooksAttributionCronRoute =
+  ApiPublicHooksAttributionCronRouteImport.update({
+    id: '/api/public/hooks/attribution-cron',
+    path: '/api/public/hooks/attribution-cron',
     getParentRoute: () => rootRouteImport,
   } as any)
 const ApiPublicHooksAuthorizeCronRoute =
@@ -98,10 +92,16 @@ const ApiPublicHooksAuthorizeCronRoute =
     path: '/api/public/hooks/authorize-cron',
     getParentRoute: () => rootRouteImport,
   } as any)
-const ApiPublicHooksAttributionCronRoute =
-  ApiPublicHooksAttributionCronRouteImport.update({
-    id: '/api/public/hooks/attribution-cron',
-    path: '/api/public/hooks/attribution-cron',
+const ApiPublicHooksFeishuSyncCronRoute =
+  ApiPublicHooksFeishuSyncCronRouteImport.update({
+    id: '/api/public/hooks/feishu-sync-cron',
+    path: '/api/public/hooks/feishu-sync-cron',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicHooksGmvMaxCronRoute =
+  ApiPublicHooksGmvMaxCronRouteImport.update({
+    id: '/api/public/hooks/gmv-max-cron',
+    path: '/api/public/hooks/gmv-max-cron',
     getParentRoute: () => rootRouteImport,
   } as any)
 
@@ -231,60 +231,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/settings': {
-      id: '/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof SettingsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/material-performance': {
-      id: '/material-performance'
-      path: '/material-performance'
-      fullPath: '/material-performance'
-      preLoaderRoute: typeof MaterialPerformanceRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/gmv-max-create': {
-      id: '/gmv-max-create'
-      path: '/gmv-max-create'
-      fullPath: '/gmv-max-create'
-      preLoaderRoute: typeof GmvMaxCreateRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/gmv-attribution-admin': {
-      id: '/gmv-attribution-admin'
-      path: '/gmv-attribution-admin'
-      fullPath: '/gmv-attribution-admin'
-      preLoaderRoute: typeof GmvAttributionAdminRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/gmv-attribution': {
-      id: '/gmv-attribution'
-      path: '/gmv-attribution'
-      fullPath: '/gmv-attribution'
-      preLoaderRoute: typeof GmvAttributionRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/feishu-data': {
-      id: '/feishu-data'
-      path: '/feishu-data'
-      fullPath: '/feishu-data'
-      preLoaderRoute: typeof FeishuDataRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/connection-stats': {
-      id: '/connection-stats'
-      path: '/connection-stats'
-      fullPath: '/connection-stats'
-      preLoaderRoute: typeof ConnectionStatsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/comments': {
-      id: '/comments'
-      path: '/comments'
-      fullPath: '/comments'
-      preLoaderRoute: typeof CommentsRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api-test': {
@@ -294,11 +245,60 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiTestRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/comments': {
+      id: '/comments'
+      path: '/comments'
+      fullPath: '/comments'
+      preLoaderRoute: typeof CommentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/connection-stats': {
+      id: '/connection-stats'
+      path: '/connection-stats'
+      fullPath: '/connection-stats'
+      preLoaderRoute: typeof ConnectionStatsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/feishu-data': {
+      id: '/feishu-data'
+      path: '/feishu-data'
+      fullPath: '/feishu-data'
+      preLoaderRoute: typeof FeishuDataRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/gmv-attribution': {
+      id: '/gmv-attribution'
+      path: '/gmv-attribution'
+      fullPath: '/gmv-attribution'
+      preLoaderRoute: typeof GmvAttributionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/gmv-attribution-admin': {
+      id: '/gmv-attribution-admin'
+      path: '/gmv-attribution-admin'
+      fullPath: '/gmv-attribution-admin'
+      preLoaderRoute: typeof GmvAttributionAdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/gmv-max-create': {
+      id: '/gmv-max-create'
+      path: '/gmv-max-create'
+      fullPath: '/gmv-max-create'
+      preLoaderRoute: typeof GmvMaxCreateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/material-performance': {
+      id: '/material-performance'
+      path: '/material-performance'
+      fullPath: '/material-performance'
+      preLoaderRoute: typeof MaterialPerformanceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/oauth/tiktok/callback': {
@@ -308,18 +308,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OauthTiktokCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/public/hooks/gmv-max-cron': {
-      id: '/api/public/hooks/gmv-max-cron'
-      path: '/api/public/hooks/gmv-max-cron'
-      fullPath: '/api/public/hooks/gmv-max-cron'
-      preLoaderRoute: typeof ApiPublicHooksGmvMaxCronRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/public/hooks/feishu-sync-cron': {
-      id: '/api/public/hooks/feishu-sync-cron'
-      path: '/api/public/hooks/feishu-sync-cron'
-      fullPath: '/api/public/hooks/feishu-sync-cron'
-      preLoaderRoute: typeof ApiPublicHooksFeishuSyncCronRouteImport
+    '/api/public/hooks/attribution-cron': {
+      id: '/api/public/hooks/attribution-cron'
+      path: '/api/public/hooks/attribution-cron'
+      fullPath: '/api/public/hooks/attribution-cron'
+      preLoaderRoute: typeof ApiPublicHooksAttributionCronRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/public/hooks/authorize-cron': {
@@ -329,11 +322,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicHooksAuthorizeCronRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/public/hooks/attribution-cron': {
-      id: '/api/public/hooks/attribution-cron'
-      path: '/api/public/hooks/attribution-cron'
-      fullPath: '/api/public/hooks/attribution-cron'
-      preLoaderRoute: typeof ApiPublicHooksAttributionCronRouteImport
+    '/api/public/hooks/feishu-sync-cron': {
+      id: '/api/public/hooks/feishu-sync-cron'
+      path: '/api/public/hooks/feishu-sync-cron'
+      fullPath: '/api/public/hooks/feishu-sync-cron'
+      preLoaderRoute: typeof ApiPublicHooksFeishuSyncCronRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/hooks/gmv-max-cron': {
+      id: '/api/public/hooks/gmv-max-cron'
+      path: '/api/public/hooks/gmv-max-cron'
+      fullPath: '/api/public/hooks/gmv-max-cron'
+      preLoaderRoute: typeof ApiPublicHooksGmvMaxCronRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
