@@ -25,3 +25,4 @@ git show <提交号>:supabase/migrations/<文件名>
 | 2026-09-18 | `20260918140000_attribution_lookup.sql` | `42dfa98` | 归因查询 RPC `attribution_lookup`（VID／昵称 → 每月归给谁），返回单 JSON 规避 PostgREST 1000 行截断 |
 | 2026-09-18 | `20260918160000_protection_no_date_rows.sql` | `6c520d1` | A4：无日期的登记行不参与归属判定，SQL 侧与 TS 的 `resolveOwnership` 对齐 |
 | 2026-09-18 | `20260918170000_feishu_sheet_config.sql` | `fa8b620` | 新表 `feishu_sheet_config`（飞书表名配置，8 行初始数据），去掉 sheet 别名兜底 |
+| 2026-10-13 | `20261012130000_purge_gmv_max_storage.sql` | `953a41a` | 停 GMV Max pg_cron（unschedule 3 个 job）+ TRUNCATE `gmv_max_vid_daily`/`gmv_max_vid_meta`（之后被手动同步又写入 537 行，由 20261013090000 再清） |

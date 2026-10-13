@@ -897,6 +897,17 @@ Deno.serve(async (req) => {
         );
       };
 
+      // 归并完成后不再在线保存原始行（容量治理，2026-10-13）；归并层与快照层保留，原始 Excel 由上传人本地留存。
+      // 清理失败不影响本次归并结果，只记日志、原始行留着下次再清。
+      const purgeRaw = async (): Promise<number> => {
+        const { data, error } = await db.rpc("attribution_purge_upload_rows", { _upload_id: uploadId });
+        if (error) {
+          console.error(`finalize ${uploadId}: 清理原始行失败`, error);
+          return 0;
+        }
+        return Number(data ?? 0);
+      };
+
       // ---- 分片模式：大批次单次请求做不完，由客户端按片驱动 ----
       // stage=part 归并一片；stage=mark 收尾。每一片都是独立事务，超时也只丢那一片。
       const stage = str(body.stage);
@@ -920,8 +931,9 @@ Deno.serve(async (req) => {
         rejectMissingRates(info?.missing_currencies);
         const rawRows = Number(info?.raw_rows ?? 0);
         if (!rawRows) throw new Error("该批次没有数据行");
-        console.log(`finalize ${uploadId}: 收尾完成，${rawRows} 原始行 → ${info?.agg_rows ?? 0} 归并行`);
-        return json({ row_count: rawRows, agg_rows: Number(info?.agg_rows ?? 0) });
+        const purged = await purgeRaw();
+        console.log(`finalize ${uploadId}: 收尾完成，${rawRows} 原始行 → ${info?.agg_rows ?? 0} 归并行，已清理原始行 ${purged}`);
+        return json({ row_count: rawRows, agg_rows: Number(info?.agg_rows ?? 0), raw_purged: purged });
       }
 
       // ---- 起始调用：行数超过阈值就改走分片，并告诉客户端要分几片 ----
@@ -930,8 +942,12 @@ Deno.serve(async (req) => {
         .select("id", { count: "exact", head: true })
         .eq("upload_id", uploadId);
       if (cntErr) throw new Error(`读取行数失败：${cntErr.message}`);
-      const rawRows0 = Number(rawCount ?? upload.row_count ?? 0);
-      if (!rawRows0) throw new Error("该批次没有数据行");
+      const rawRows0 = Number(rawCount ?? 0);
+      if (!rawRows0) {
+        throw new Error(upload.status === "READY"
+          ? "该批次已归并完成，原始行已按容量策略清理（归并结果和报表不受影响）；如需按新口径重新归并，请删除该批次后重新上传原文件"
+          : "该批次没有数据行");
+      }
 
       if (rawRows0 > FINALIZE_CHUNK_THRESHOLD) {
         const parts = Math.min(FINALIZE_MAX_PARTS, Math.ceil(rawRows0 / FINALIZE_ROWS_PER_PART));
@@ -948,8 +964,9 @@ Deno.serve(async (req) => {
       if (!rawRows) throw new Error("该批次没有数据行");
       console.log(`finalize ${uploadId}: ${rawRows} 原始行 → ${info?.agg_rows ?? 0} 归并行，耗时 ${Date.now() - t0}ms`);
       rejectMissingRates(info?.missing_currencies);
+      const purged = await purgeRaw();
 
-      return json({ row_count: rawRows, agg_rows: Number(info?.agg_rows ?? 0) });
+      return json({ row_count: rawRows, agg_rows: Number(info?.agg_rows ?? 0), raw_purged: purged });
     }
 
     if (action === "list") {

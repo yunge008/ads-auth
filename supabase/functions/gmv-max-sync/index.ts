@@ -16,6 +16,8 @@ import { ttGet, type TimeBudgetChecker } from "../_shared/tiktok.ts";
 import { fetchCampaigns, fetchReport, type CampaignInfo } from "../_shared/gmv-max-report.ts";
 export { ttGet } from "../_shared/tiktok.ts";
 
+const GMV_MAX_SYNC_PAUSED = true;
+
 class TimeBudgetExceeded extends Error {
   constructor(stage: string) {
     super(`time budget exceeded at ${stage}`);
@@ -79,6 +81,14 @@ Deno.serve(async (req) => {
       if (ok === true) cronAuthed = true;
     }
     if (!cronAuthed) await checkAdminPasscode(req, "material-performance");
+    // GMV Max 官方 API 同步尚未上线，明细表曾把数据库写到容量上限（2026-10-12/13）。
+    // 定时任务已停，这里再挡住设置页 / 已获取数据查阅页的手动同步。恢复时把 GMV_MAX_SYNC_PAUSED 改回 false。
+    if (GMV_MAX_SYNC_PAUSED) {
+      return new Response(JSON.stringify({ error: "GMV Max 同步已暂停（数据库容量治理），暂不写入数据" }), {
+        status: 423,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     const body = (await req.json().catch(() => ({}))) as {
       start_date?: string;
       end_date?: string;

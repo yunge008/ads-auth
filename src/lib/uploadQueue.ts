@@ -265,7 +265,7 @@ export const uploadQueue = {
 
           completedMonths.add(item.month);
           patchItem(item.id, { status: "done", phase: "完成", finishedAt: Date.now() });
-          cb.onSuccess(`${item.fileName}：${fin.row_count} 行已归并${fin.agg_rows ? `为 ${fin.agg_rows} 组` : ""}`);
+          cb.onSuccess(`${item.fileName}：${fin.row_count} 行已归并${fin.agg_rows ? `为 ${fin.agg_rows} 组` : ""}；系统不保留原始行，请在本地保存该 Excel 原文件`);
         } catch (e) {
           const msg = (e as Error).message;
           patchItem(item.id, { status: "failed", phase: "失败", error: msg, finishedAt: Date.now() });
