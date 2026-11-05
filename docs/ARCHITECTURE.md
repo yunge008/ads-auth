@@ -151,3 +151,13 @@
   这才是阶段 3.1 之后真正会进 PENDING 的部分；
 - 因此阶段 3.1 的「`posted_at` 改必填」指的是**表头必须有这一列**，不是每行都必须有值 —— 直播/商品卡行为空是正常的。
 
+## 联盟达人外联（TikTok Shop Open API，2026-11-05 起，P0 阶段）
+
+与上面所有 TikTok **Business API** 线路（授权 / GMV Max / 归因）是不同 API、不同凭据，代码完全隔离：
+- 客户端 `_shared/tts.ts`：Host `open-api.tiktokglobalshop.com`，`app_key`+`timestamp`+HMAC-SHA256 `sign`（app_secret 包裹 path+排序参数+body），header `x-tts-access-token`，query `shop_cipher`；≈3 QPS 串行限速，429/`36009002` 退避；写操作超时不重试。token 走 `auth.tiktok-shops.com/api/v2/token/{get,refresh}`（access 7 天）。
+  **本线路不使用 `gmv-max-sync` 的 `ttGet`**（AGENTS.md 那条约定针对 Business API；交接文档明确要求独立实现）。
+- 表 `tts_shops`：店铺授权（shop_cipher / token / 到期 / scope / 联系方式），RLS 开、无 policy，仅 service role 读写。
+- Edge Function `tts-p0-probe`（管理员）：P0 实测工具，`exchange/shops/refresh/read/write/raw`。
+- Secrets：`TTS_APP_KEY`、`TTS_APP_SECRET`。
+- 规划与业务规则：`docs/OUTREACH_HANDOFF.md`；P0 进度：`docs/OUTREACH_P0.md`。
+
