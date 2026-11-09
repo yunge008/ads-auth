@@ -12,6 +12,14 @@
 //   页面「可用余额」= totalBalance − frozenBalance（ECO 前端就是这么算的）。
 //
 // 凭据：Supabase secrets ECO_USERNAME / ECO_PASSWORD。token 不落库，每次调用现登录（一天几次，量很小）。
+//
+// 二次验证（2026-11-09 从 ECO 登录页代码确认）：
+//   1. login 返回 code=402，data.twoFactorAuth = {availableMethods, defaultMethod, userPhone, userEmail}；method 1=短信 2=邮箱
+//   2. POST /api/common/send-verify-code {account, accountType:"phone"|"email", phoneAreaCode:"+86"|"", scene:5, userName, passWord}
+//   3. 再 login，body 加 twoFactorAuth:{method, code, rememberDevice:true} → 200，data.deviceId
+//   4. 之后 login 带请求头 X-Device-Id=<deviceId> 即视为已信任设备，不再要求验证。
+//   deviceId 存 balance_alert_settings.eco_device_id（service role only）。
+import { admin } from "./auth.ts";
 
 const ECO_BASE = "https://business.ecoglobal.vip";
 const DOMAIN = "business.ecoglobal.vip";
@@ -49,7 +57,7 @@ async function ecoFetch(path: string, init: RequestInit = {}): Promise<Record<st
     const text = await r.text();
     let j: Record<string, unknown> = {};
     try { j = JSON.parse(text); } catch { /* 非 JSON */ }
-    if (!r.ok) throw new Error(`ECO ${path} HTTP ${r.status}: ${String(j.message ?? text).slice(0, 200)}`);
+    if (!r.ok && j.code === undefined) throw new Error(`ECO ${path} HTTP ${r.status}: ${String(j.message ?? text).slice(0, 200)}`);
     return j;
   } catch (e) {
     if ((e as Error).name === "AbortError") throw new Error(`ECO ${path} 超时`);
@@ -63,22 +71,106 @@ export function ecoConfigured(): boolean {
   return !!(Deno.env.get("ECO_USERNAME") && Deno.env.get("ECO_PASSWORD"));
 }
 
-export async function ecoLogin(): Promise<string> {
+function creds() {
   const userName = Deno.env.get("ECO_USERNAME");
   const passWord = Deno.env.get("ECO_PASSWORD");
   if (!userName || !passWord) throw new Error("未配置 ECO_USERNAME / ECO_PASSWORD");
+  return { userName, passWord };
+}
+
+export async function getDeviceId(): Promise<{ id: string | null; at: string | null }> {
+  const { data } = await admin().from("balance_alert_settings").select("eco_device_id,eco_device_at").eq("id", 1).maybeSingle();
+  return { id: (data?.eco_device_id as string) ?? null, at: (data?.eco_device_at as string) ?? null };
+}
+
+async function saveDeviceId(id: string) {
+  await admin().from("balance_alert_settings")
+    .update({ eco_device_id: id, eco_device_at: new Date().toISOString() }).eq("id", 1);
+}
+
+export const ECO_2FA_REQUIRED = "ECO_2FA_REQUIRED";
+
+type LoginResult =
+  | { ok: true; token: string }
+  | { ok: false; needs2fa: true; methods: number[]; defaultMethod: number; phone: string; email: string }
+  | { ok: false; needs2fa: false; message: string };
+
+async function rawLogin(twoFactorAuth?: { method: number; code: string; rememberDevice: boolean }): Promise<LoginResult> {
+  const { userName, passWord } = creds();
+  const dev = await getDeviceId();
   const j = await ecoFetch("/api/auth/login", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userName, passWord }),
+    headers: { "Content-Type": "application/json", ...(dev.id ? { "X-Device-Id": dev.id } : {}) },
+    body: JSON.stringify({ userName, passWord, ...(twoFactorAuth ? { twoFactorAuth } : {}) }),
   });
   const data = (j.data ?? {}) as Record<string, unknown>;
-  if (j.code !== 200 || !data.token) {
-    // twoFactorAuth 非空 = 需要验证码，自动登录走不通
-    const tfa = data.twoFactorAuth ? "（ECO 要求二次验证，自动登录不可用）" : "";
-    throw new Error(`ECO 登录失败 code=${j.code}: ${String(j.message ?? "")}${tfa}`);
+  if (j.code === 200 && data.token) {
+    if (data.deviceId && data.deviceId !== dev.id) await saveDeviceId(String(data.deviceId));
+    return { ok: true, token: String(data.token) };
   }
-  return String(data.token);
+  if (j.code === 402) {
+    const t = (data.twoFactorAuth ?? {}) as Record<string, unknown>;
+    return {
+      ok: false, needs2fa: true,
+      methods: (Array.isArray(t.availableMethods) ? t.availableMethods : [1, 2]).map(Number),
+      defaultMethod: Number(t.defaultMethod ?? 1),
+      phone: String(t.userPhone ?? ""),
+      email: String(t.userEmail ?? ""),
+    };
+  }
+  return { ok: false, needs2fa: false, message: `ECO 登录失败 code=${j.code}: ${String(j.message ?? "")}` };
+}
+
+/** 自动登录（cron/刷新用）。需要二次验证时抛出 ECO_2FA_REQUIRED 开头的错误，由页面引导人工验证。 */
+export async function ecoLogin(): Promise<string> {
+  const r = await rawLogin();
+  if (r.ok) return r.token;
+  if (r.needs2fa) throw new Error(`${ECO_2FA_REQUIRED}：ECO 要求二次验证，请到「设置 → 账户余额预警」点「ECO 验证」完成一次`);
+  throw new Error(r.message);
+}
+
+const maskPhone = (p: string) => (p.length <= 7 ? p : `${p.slice(0, 3)}****${p.slice(-4)}`);
+const maskEmail = (e: string) => {
+  const [a, d] = e.split("@");
+  return !d || a.length <= 2 ? e : `${a.slice(0, 2)}****@${d}`;
+};
+
+/** 人工验证第 1 步：检查是否需要验证；需要则按 method 发验证码。返回脱敏后的接收方。 */
+export async function eco2faSend(method?: number) {
+  const r = await rawLogin();
+  if (r.ok) return { needs2fa: false as const };
+  if (!r.needs2fa) throw new Error(r.message);
+  const m = method && r.methods.includes(method) ? method : r.defaultMethod;
+  const { userName, passWord } = creds();
+  const isSms = m === 1;
+  const account = isSms ? r.phone : r.email;
+  if (!account) throw new Error(`ECO 未返回${isSms ? "手机号" : "邮箱"}，换另一种方式试试`);
+  const j = await ecoFetch("/api/common/send-verify-code", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      account, accountType: isSms ? "phone" : "email", phoneAreaCode: isSms ? "+86" : "",
+      scene: 5, userName, passWord,
+    }),
+  });
+  if (j.code !== 200) throw new Error(`发送验证码失败 code=${j.code}: ${String(j.message ?? "")}`);
+  return {
+    needs2fa: true as const,
+    method: m,
+    methods: r.methods,
+    recipient: isSms ? maskPhone(r.phone) : maskEmail(r.email),
+  };
+}
+
+/** 人工验证第 2 步：提交验证码，成功后保存 deviceId（勾选记住设备），之后自动登录免验证。 */
+export async function eco2faVerify(method: number, code: string) {
+  const r = await rawLogin({ method, code: code.trim(), rememberDevice: true });
+  if (r.ok) {
+    const dev = await getDeviceId();
+    return { ok: true, device_saved: !!dev.id };
+  }
+  if (r.needs2fa) throw new Error("验证码不正确或已过期，请重新获取");
+  throw new Error(r.message);
 }
 
 /** 拉 ECO 全部广告户（分页）；startDate/endDate 只影响 consumption 列，余额与日期无关 */

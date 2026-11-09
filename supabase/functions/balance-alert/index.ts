@@ -11,16 +11,17 @@
 //   mark_alerted {advertiser_ids}  → 发送成功后记 last_alerted_at
 //   debug_balance {advertiser_id}  → 两个余额接口对该户的原始返回（API测试页诊断用）
 //   debug_eco                      → 登录 ECO 后台并返回其广告户余额列表（不含 token）
+//   eco_status / eco_2fa_send {method} / eco_2fa_verify {method, code} → ECO 二次验证（仅管理员）
 // 余额优先级：ECO 后台可用余额（_shared/eco.ts）> TikTok 接口（pickAvailableBalance）
 //
 // 鉴权：口令 + settings tab；cron（x-cron-key）只放行 refresh / build_message / mark_alerted。
 // TikTok 调用一律走 _shared/tiktok.ts 的 ttGet（限速 + 退避）。
 import { corsHeaders } from "../_shared/feishu.ts";
-import { admin, checkAdminPasscode, type ConnRow } from "../_shared/auth.ts";
+import { admin, checkAdminPasscode, requireAdmin, type ConnRow } from "../_shared/auth.ts";
 import { cronAuthed } from "../_shared/cron.ts";
 import { ttGet } from "../_shared/tiktok.ts";
 import { fetchReport } from "../_shared/gmv-max-report.ts";
-import { ecoListAccounts, ecoLogin, fetchEcoBalances } from "../_shared/eco.ts";
+import { eco2faSend, eco2faVerify, ecoConfigured, ecoListAccounts, ecoLogin, fetchEcoBalances, getDeviceId } from "../_shared/eco.ts";
 import {
   computeSpendStats,
   DEFAULT_ABNORMAL_RATIO,
@@ -495,6 +496,20 @@ Deno.serve(async (req) => {
       }
       case "refresh":
         return json(await actionRefresh(body));
+      case "eco_status": {
+        const dev = await getDeviceId();
+        return json({ configured: ecoConfigured(), device_saved: !!dev.id, device_at: dev.at });
+      }
+      case "eco_2fa_send": {
+        await requireAdmin(req);
+        return json(await eco2faSend(body.method ? Number(body.method) : undefined));
+      }
+      case "eco_2fa_verify": {
+        await requireAdmin(req);
+        const code = String(body.code ?? "").trim();
+        if (!code) throw new Error("请输入验证码");
+        return json(await eco2faVerify(Number(body.method ?? 1), code));
+      }
       case "debug_eco": {
         // 只读诊断：登录 ECO 并返回前 50 个户的余额字段（不含 token）
         const win = spendWindow();

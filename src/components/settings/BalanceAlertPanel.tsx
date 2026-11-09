@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { getAdminName, getPasscode, invokeFn } from "@/lib/api";
+import { EcoVerifyButton } from "@/components/settings/EcoVerifyButton";
 
 type Daily = {
   date: string;
@@ -246,6 +247,7 @@ export function BalanceAlertPanel() {
                 </Button>
               </div>
             </div>
+            <EcoVerifyButton />
             <div className="flex gap-2 ml-auto">
               <Input
                 placeholder="搜索账户/ID/国家"
