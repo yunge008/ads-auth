@@ -10,6 +10,8 @@
 //                                    （与每日自动授权通知同一个群）完成，因为该 webhook 只配在服务端环境变量里
 //   mark_alerted {advertiser_ids}  → 发送成功后记 last_alerted_at
 //   debug_balance {advertiser_id}  → 两个余额接口对该户的原始返回（API测试页诊断用）
+//   debug_eco                      → 登录 ECO 后台并返回其广告户余额列表（不含 token）
+// 余额优先级：ECO 后台可用余额（_shared/eco.ts）> TikTok 接口（pickAvailableBalance）
 //
 // 鉴权：口令 + settings tab；cron（x-cron-key）只放行 refresh / build_message / mark_alerted。
 // TikTok 调用一律走 _shared/tiktok.ts 的 ttGet（限速 + 退避）。
@@ -18,6 +20,7 @@ import { admin, checkAdminPasscode, type ConnRow } from "../_shared/auth.ts";
 import { cronAuthed } from "../_shared/cron.ts";
 import { ttGet } from "../_shared/tiktok.ts";
 import { fetchReport } from "../_shared/gmv-max-report.ts";
+import { ecoListAccounts, ecoLogin, fetchEcoBalances } from "../_shared/eco.ts";
 import {
   computeSpendStats,
   DEFAULT_ABNORMAL_RATIO,
@@ -318,8 +321,29 @@ async function actionRefresh(body: Record<string, unknown>) {
   const shopOf = new Map((ctry ?? []).map((c: Record<string, unknown>) => [String(c.advertiser_id), String(c.shop_id ?? "").trim()]));
   const nameOf = new Map((ctry ?? []).map((c: Record<string, unknown>) => [String(c.advertiser_id), (c.advertiser_name as string) ?? null]));
 
-  const { map: balances, errors: balanceErrors } = await fetchBalances(conns, wanted);
   const win = spendWindow();
+  const { map: tkBalances, errors: balanceErrors } = await fetchBalances(conns, wanted);
+  // ECO 后台优先：ECO 列表里有的户用 ECO 可用余额（totalBalance − frozenBalance），其余户走 TikTok 接口
+  const { map: ecoMap, error: ecoError } = await fetchEcoBalances(win.start, win.end);
+  if (ecoError) balanceErrors.push(`ECO: ${ecoError}`);
+  const balances = new Map<string, BalanceInfo>();
+  for (const id of ids) {
+    const eco = ecoMap.get(id);
+    const tk = tkBalances.get(id);
+    if (eco && eco.available != null) {
+      balances.set(id, {
+        balance: eco.available,
+        currency: eco.currency ?? tk?.currency ?? null,
+        name: tk?.name ?? eco.name,
+        source: `采用 ECO 后台可用余额｜ECO totalBalance=${eco.total} frozenBalance=${eco.frozen} consumption(${win.start}~${win.end})=${eco.consumption}｜TikTok：${tk?.source ?? "无"}`,
+      });
+    } else if (tk) {
+      balances.set(id, {
+        ...tk,
+        source: tk.balance == null && ecoError ? `ECO 登录/拉取失败：${ecoError}｜${tk.source}` : tk.source,
+      });
+    }
+  }
 
   const done: string[] = [];
   const failed: Array<{ advertiser_id: string; error: string }> = [];
@@ -471,6 +495,13 @@ Deno.serve(async (req) => {
       }
       case "refresh":
         return json(await actionRefresh(body));
+      case "debug_eco": {
+        // 只读诊断：登录 ECO 并返回前 50 个户的余额字段（不含 token）
+        const win = spendWindow();
+        const token = await ecoLogin();
+        const list = await ecoListAccounts(token, win.start, win.end);
+        return json({ ok: true, window: win, count: list.length, accounts: list });
+      }
       case "debug_balance": {
         const id = String(body.advertiser_id ?? "");
         if (!id) throw new Error("缺少 advertiser_id");
