@@ -1015,6 +1015,8 @@ export type Database = {
       balance_alert_settings: {
         Row: {
           abnormal_ratio: number
+          eco_device_at: string | null
+          eco_device_id: string | null
           feishu_chat_id: string | null
           feishu_chat_name: string | null
           id: number
@@ -1025,6 +1027,8 @@ export type Database = {
         }
         Insert: {
           abnormal_ratio?: number
+          eco_device_at?: string | null
+          eco_device_id?: string | null
           feishu_chat_id?: string | null
           feishu_chat_name?: string | null
           id?: number
@@ -1035,6 +1039,8 @@ export type Database = {
         }
         Update: {
           abnormal_ratio?: number
+          eco_device_at?: string | null
+          eco_device_id?: string | null
           feishu_chat_id?: string | null
           feishu_chat_name?: string | null
           id?: number
