@@ -1,5 +1,6 @@
 // 设置 → 账户余额预警：全局预警天数 X + 每户开关；显示可用余额 / 近10天正常日均 / 可用天数。
-// 计算与飞书发送都在 Edge Function `balance-alert`，这里只做展示与触发。
+// 计算在 Edge Function `balance-alert`；飞书发送走服务端路由 /api/public/hooks/balance-alert-cron
+// （FEISHU_BOT_WEBHOOK，与每日自动授权通知同一个群）。这里只做展示与触发。
 import * as React from "react";
 import { Bell, RotateCw, Save, Send } from "lucide-react";
 import { toast } from "sonner";
@@ -16,15 +17,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { invokeFn } from "@/lib/api";
+import { getAdminName, getPasscode, invokeFn } from "@/lib/api";
 
 type Daily = {
   date: string;
@@ -73,7 +67,6 @@ export function BalanceAlertPanel() {
   const [sending, setSending] = React.useState(false);
   const [xInput, setXInput] = React.useState("");
   const [ratioInput, setRatioInput] = React.useState("");
-  const [chats, setChats] = React.useState<Array<{ chat_id: string; name: string }> | null>(null);
   const [filter, setFilter] = React.useState("");
 
   const reload = React.useCallback(async () => {
@@ -146,29 +139,26 @@ export function BalanceAlertPanel() {
   const notify = async () => {
     setSending(true);
     try {
-      const r = await invokeFn<{ sent: boolean; alerts: number }>("balance-alert", {
-        action: "notify",
-        force: true,
+      const res = await fetch("/api/public/hooks/balance-alert-cron", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-passcode": getPasscode(),
+          "x-admin-name": encodeURIComponent(getAdminName()),
+        },
+        body: JSON.stringify({ manual: true }),
       });
-      toast.success(r.sent ? `已发送飞书（预警 ${r.alerts} 个）` : "无需发送");
+      const r = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        alerts?: number;
+      };
+      if (!res.ok || !r.ok) throw new Error(r.error ?? `HTTP ${res.status}`);
+      toast.success(`已发送到飞书授权通知群（预警 ${r.alerts ?? 0} 个）`);
     } catch (e) {
-      toast.error((e as Error).message);
+      toast.error(`发送失败：${(e as Error).message}`);
     } finally {
       setSending(false);
-    }
-  };
-
-  const loadChats = async () => {
-    try {
-      const r = await invokeFn<{ chats: Array<{ chat_id: string; name: string }> }>(
-        "balance-alert",
-        { action: "list_chats" },
-      );
-      setChats(r.chats ?? []);
-      if (!r.chats?.length)
-        toast.info("机器人还没被拉进任何群：先在飞书群设置 → 群机器人 → 添加该应用机器人");
-    } catch (e) {
-      toast.error((e as Error).message);
     }
   };
 
@@ -216,7 +206,8 @@ export function BalanceAlertPanel() {
             可用天数 = 可用余额 ÷ 近 10 个完整自然日（北京日期，不含今天）的<b>正常日均</b>。日耗为
             0、或低于这 10 天正日耗中位数 × {Math.round((settings?.abnormal_ratio ?? 0.3) * 100)}%
             的天 视为没开 / 学习期，不计入日均。每天北京 10:00 自动刷新并把「开关开 且 可用天数 &lt;
-            X」的账户发到飞书群。
+            X」的账户发到飞书授权通知群（与每日自动授权通知同一个群）。近 10 天日耗全为 0
+            的账户即使余额 ≤0 也不预警。
           </p>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -255,38 +246,6 @@ export function BalanceAlertPanel() {
                 </Button>
               </div>
             </div>
-            <div className="flex flex-col gap-1">
-              <span className="text-xs text-muted-foreground">飞书群</span>
-              <div className="flex gap-1 items-center">
-                {chats ? (
-                  <Select
-                    value={settings?.feishu_chat_id ?? ""}
-                    onValueChange={(v) => {
-                      const c = chats.find((x) => x.chat_id === v);
-                      saveSettings({ feishu_chat_id: v, feishu_chat_name: c?.name ?? "" });
-                    }}
-                  >
-                    <SelectTrigger className="h-8 w-56">
-                      <SelectValue placeholder="选择群" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {chats.map((c) => (
-                        <SelectItem key={c.chat_id} value={c.chat_id}>
-                          {c.name || c.chat_id}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <span className="text-sm min-w-32">
-                    {settings?.feishu_chat_name || settings?.feishu_chat_id || "未设置"}
-                  </span>
-                )}
-                <Button size="sm" variant="outline" onClick={loadChats}>
-                  选择群
-                </Button>
-              </div>
-            </div>
             <div className="flex gap-2 ml-auto">
               <Input
                 placeholder="搜索账户/ID/国家"
@@ -298,7 +257,7 @@ export function BalanceAlertPanel() {
                 <RotateCw className={`h-4 w-4 mr-1.5 ${refreshing ? "animate-spin" : ""}`} />
                 {refreshing ?? "立即刷新"}
               </Button>
-              <Button size="sm" onClick={notify} disabled={sending || !settings?.feishu_chat_id}>
+              <Button size="sm" onClick={notify} disabled={sending}>
                 <Send className="h-4 w-4 mr-1.5" />
                 发送到飞书
               </Button>

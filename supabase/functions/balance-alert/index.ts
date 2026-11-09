@@ -5,12 +5,14 @@
 //   save_settings {threshold_days?, abnormal_ratio?, feishu_chat_id?, feishu_chat_name?}
 //   toggle {advertiser_id, enabled}
 //   refresh {advertiser_ids?}      → 现拉余额 + 近 10 天日耗，写快照；超时间预算返回 remaining 让调用方续跑
-//   notify {force?}                → 把「开关开 且 可用天数 < X」的户发到飞书群（force=true 时无预警也发一条，用于测试）
-//   list_chats                     → 机器人所在的飞书群（供选择 chat_id）
+//   build_message {force?}         → 组装预警消息 {send,title,lines,alert_ids}，**不发送**；
+//                                    发送由服务端路由 /api/public/hooks/balance-alert-cron 用 FEISHU_BOT_WEBHOOK
+//                                    （与每日自动授权通知同一个群）完成，因为该 webhook 只配在服务端环境变量里
+//   mark_alerted {advertiser_ids}  → 发送成功后记 last_alerted_at
 //
-// 鉴权：口令 + settings tab；cron（x-cron-key）只放行 refresh / notify。
+// 鉴权：口令 + settings tab；cron（x-cron-key）只放行 refresh / build_message / mark_alerted。
 // TikTok 调用一律走 _shared/tiktok.ts 的 ttGet（限速 + 退避）。
-import { corsHeaders, getTenantAccessToken } from "../_shared/feishu.ts";
+import { corsHeaders } from "../_shared/feishu.ts";
 import { admin, checkAdminPasscode, type ConnRow } from "../_shared/auth.ts";
 import { cronAuthed } from "../_shared/cron.ts";
 import { ttGet } from "../_shared/tiktok.ts";
@@ -24,7 +26,6 @@ import {
   spendWindow,
 } from "../_shared/balance-alert.ts";
 
-const FEISHU_BASE = "https://open.feishu.cn/open-apis";
 const TIME_BUDGET_MS = 100_000;
 
 type Settings = {
@@ -175,42 +176,6 @@ async function fetchGmvMaxSpend(token: string, advertiserId: string, shopId: str
   return out;
 }
 
-// ---------- 飞书 ----------
-async function sendFeishu(chatId: string, title: string, lines: string[]) {
-  const token = await getTenantAccessToken();
-  const r = await fetch(`${FEISHU_BASE}/im/v1/messages?receive_id_type=chat_id`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({
-      receive_id: chatId,
-      msg_type: "post",
-      content: JSON.stringify({ zh_cn: { title, content: lines.map((t) => [{ tag: "text", text: t }]) } }),
-    }),
-  });
-  const j = await r.json().catch(() => ({}));
-  if (j.code !== 0) throw new Error(`飞书发送失败 code=${j.code}: ${j.msg ?? r.status}`);
-}
-
-async function listChats() {
-  const token = await getTenantAccessToken();
-  const chats: Array<{ chat_id: string; name: string }> = [];
-  let pageToken = "";
-  for (let i = 0; i < 20; i++) {
-    const u = new URL(`${FEISHU_BASE}/im/v1/chats`);
-    u.searchParams.set("page_size", "100");
-    if (pageToken) u.searchParams.set("page_token", pageToken);
-    const r = await fetch(u, { headers: { Authorization: `Bearer ${token}` } });
-    const j = await r.json().catch(() => ({}));
-    if (j.code !== 0) throw new Error(`读取飞书群列表失败 code=${j.code}: ${j.msg ?? r.status}`);
-    for (const it of (j.data?.items ?? []) as Array<Record<string, unknown>>) {
-      chats.push({ chat_id: String(it.chat_id), name: String(it.name ?? "") });
-    }
-    if (!j.data?.has_more) break;
-    pageToken = String(j.data?.page_token ?? "");
-  }
-  return chats;
-}
-
 const fmt = (n: number | null | undefined, d = 2) =>
   n == null ? "—" : Number(n).toLocaleString("en-US", { maximumFractionDigits: d, minimumFractionDigits: d });
 
@@ -341,15 +306,17 @@ async function actionRefresh(body: Record<string, unknown>) {
   return { done: done.length, remaining, failed, balance_errors: balanceErrors, window: { start: win.start, end: win.end } };
 }
 
-async function actionNotify(body: Record<string, unknown>) {
+async function actionBuildMessage(body: Record<string, unknown>) {
   const { settings, accounts } = await actionList();
-  if (!settings.feishu_chat_id) throw new Error("未设置飞书群（chat_id），请先在「账户余额预警」里选择群");
   const X = settings.threshold_days;
   const hits = accounts
     .filter((a) => shouldAlert(a.enabled, a.days_left, X))
     .sort((a, b) => (a.days_left ?? 0) - (b.days_left ?? 0));
-  const broken = accounts.filter((a) => a.enabled && (a.days_left == null) && a.error);
-  if (!hits.length && !broken.length && !body.force) return { sent: false, alerts: 0 };
+  // 算不出可用天数且有报错的户单独提示；但近 10 天日耗全 0 的户（没在跑）不提示——没消耗就不会空户。
+  const idle = (a: (typeof accounts)[number]) =>
+    Array.isArray(a.daily) && (a.daily as Array<{ spend: number }>).every((d) => !(d.spend > 0));
+  const broken = accounts.filter((a) => a.enabled && a.days_left == null && a.error && !idle(a));
+  if (!hits.length && !broken.length && !body.force) return { send: false, alerts: 0, broken: 0 };
 
   const lines: string[] = [];
   lines.push(`规则：可用余额 ÷ 近10天正常日均 < ${X} 天（已剔除日耗为 0 / 低于中位数 ${Math.round(settings.abnormal_ratio * 100)}% 的异常日）`);
@@ -372,13 +339,14 @@ async function actionNotify(body: Record<string, unknown>) {
   const checked = accounts.map((a) => a.checked_at).filter(Boolean).sort().pop();
   if (checked) lines.push("", `数据时间：${new Date(String(checked)).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })}`);
 
-  await sendFeishu(settings.feishu_chat_id, hits.length ? `账户余额预警：${hits.length} 个账户不足 ${X} 天` : "账户余额预警", lines);
-  if (hits.length) {
-    await admin().from("balance_alert_accounts")
-      .update({ last_alerted_at: new Date().toISOString() })
-      .in("advertiser_id", hits.map((a) => a.advertiser_id));
-  }
-  return { sent: true, alerts: hits.length, broken: broken.length };
+  return {
+    send: true,
+    title: hits.length ? `账户余额预警：${hits.length} 个账户不足 ${X} 天` : "账户余额预警",
+    lines,
+    alert_ids: hits.map((a) => a.advertiser_id),
+    alerts: hits.length,
+    broken: broken.length,
+  };
 }
 
 Deno.serve(async (req) => {
@@ -387,7 +355,7 @@ Deno.serve(async (req) => {
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     const action = String(body.action ?? "list");
     const isCron = await cronAuthed(req);
-    if (!(isCron && (action === "refresh" || action === "notify"))) {
+    if (!(isCron && ["refresh", "build_message", "mark_alerted"].includes(action))) {
       await checkAdminPasscode(req, "settings");
     }
     const db = admin();
@@ -422,10 +390,17 @@ Deno.serve(async (req) => {
       }
       case "refresh":
         return json(await actionRefresh(body));
-      case "notify":
-        return json(await actionNotify(body));
-      case "list_chats":
-        return json({ chats: await listChats() });
+      case "build_message":
+        return json(await actionBuildMessage(body));
+      case "mark_alerted": {
+        const ids = Array.isArray(body.advertiser_ids) ? (body.advertiser_ids as unknown[]).map(String) : [];
+        if (ids.length) {
+          const { error } = await db.from("balance_alert_accounts")
+            .update({ last_alerted_at: new Date().toISOString() }).in("advertiser_id", ids);
+          if (error) throw new Error(error.message);
+        }
+        return json({ ok: true });
+      }
       default:
         throw new Error(`未知 action: ${action}`);
     }

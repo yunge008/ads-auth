@@ -66,3 +66,16 @@ Deno.test("merge takes max per day (avoid double count)", () => {
   const out = mergeDailySpend(new Map([["a", 10], ["b", 0]]), new Map([["a", 8], ["b", 30], ["c", 1]]));
   eq([...out.entries()], [["a", 10], ["b", 30], ["c", 1]]);
 });
+
+Deno.test("balance <= 0 but no spend in 10 days -> no alert", () => {
+  const s = computeSpendStats(dates, new Map());
+  eq(daysLeft(-20, s.avg_daily_spend), null);
+  eq(daysLeft(0, s.avg_daily_spend), null);
+  eq(shouldAlert(true, daysLeft(-20, s.avg_daily_spend), 3), false);
+});
+
+Deno.test("balance <= 0 with normal spend -> alert (0 days)", () => {
+  const s = computeSpendStats(dates, m([100, 100, 100, 100, 100, 100, 100, 100, 100, 100]));
+  eq(daysLeft(0, s.avg_daily_spend), 0);
+  eq(shouldAlert(true, daysLeft(0, s.avg_daily_spend), 3), true);
+});
