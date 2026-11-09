@@ -9,6 +9,7 @@
 //                                    发送由服务端路由 /api/public/hooks/balance-alert-cron 用 FEISHU_BOT_WEBHOOK
 //                                    （与每日自动授权通知同一个群）完成，因为该 webhook 只配在服务端环境变量里
 //   mark_alerted {advertiser_ids}  → 发送成功后记 last_alerted_at
+//   debug_balance {advertiser_id}  → 两个余额接口对该户的原始返回（API测试页诊断用）
 //
 // 鉴权：口令 + settings tab；cron（x-cron-key）只放行 refresh / build_message / mark_alerted。
 // TikTok 调用一律走 _shared/tiktok.ts 的 ttGet（限速 + 退避）。
@@ -74,11 +75,22 @@ function allAdvertiserIds(conns: ConnRow[]): string[] {
 }
 
 // ---------- 余额 ----------
-// 优先 BC 接口 /advertiser/balance/get/ 的 valid_account_balance（可用余额），
-// 拿不到再退回 /advertiser/info/ 的 balance。
+// 两个来源都拉，逐户记录原始值（写进 balance_source 便于核对）：
+//   A. BC 接口 /advertiser/balance/get/（只返回该 BC 有**管理员**权限的户）：valid_account_balance（可用）/ account_balance
+//   B. /advertiser/info/ 的 balance
+// 取值：A 列出该户 → 用 A 的 valid_account_balance（无则 account_balance）；
+//       A 未列出 → B.balance > 0 才采用；B.balance = 0 视为「无权限读余额」不可信 → 余额记 null，不参与预警
+//       （2026-11-09 实测：代理商 BC 管理的 ECO9 户在 ECO 后台有数千美元余额，我们这边却拿到 0.00，
+//        若照单全收会对 10 个正常户误报「可用 0 天」）。
+type BalanceRaw = {
+  bc?: { label: string; valid: number | null; total: number | null; currency: string | null; name: string | null };
+  info?: { label: string; balance: number | null; currency: string | null; name: string | null };
+};
+
 async function fetchBalances(conns: ConnRow[], wanted: Set<string>): Promise<{ map: Map<string, BalanceInfo>; errors: string[] }> {
-  const map = new Map<string, BalanceInfo>();
+  const raw = new Map<string, BalanceRaw>();
   const errors: string[] = [];
+  const get = (id: string) => raw.get(id) ?? (raw.set(id, {}), raw.get(id)!);
   for (const c of conns) {
     if (!c.bc_id) continue;
     try {
@@ -89,15 +101,14 @@ async function fetchBalances(conns: ConnRow[], wanted: Set<string>): Promise<{ m
         const list = (data.advertiser_account_list ?? data.list ?? []) as Array<Record<string, unknown>>;
         for (const it of list) {
           const id = String(it.advertiser_id ?? "");
-          if (!id || !wanted.has(id) || map.has(id)) continue;
-          const valid = numOrNull(it.valid_account_balance);
-          const total = numOrNull(it.account_balance);
-          map.set(id, {
-            balance: valid ?? total,
+          if (!id || !wanted.has(id) || get(id).bc) continue;
+          get(id).bc = {
+            label: c.label,
+            valid: numOrNull(it.valid_account_balance),
+            total: numOrNull(it.account_balance),
             currency: it.currency ? String(it.currency) : null,
             name: it.advertiser_name ? String(it.advertiser_name) : null,
-            source: valid != null ? "bc.valid_account_balance" : total != null ? "bc.account_balance" : "bc(无余额字段)",
-          });
+          };
         }
         const info = (data.page_info ?? {}) as Record<string, unknown>;
         const totalPage = Number(info.total_page ?? 0);
@@ -107,9 +118,8 @@ async function fetchBalances(conns: ConnRow[], wanted: Set<string>): Promise<{ m
       errors.push(`[${c.label}] advertiser/balance/get: ${(e as Error).message}`);
     }
   }
-  // 兜底：advertiser/info balance
   for (const c of conns) {
-    const ids = (c.advertiser_ids ?? []).map(String).filter((id) => wanted.has(id) && !(map.get(id)?.balance != null));
+    const ids = (c.advertiser_ids ?? []).map(String).filter((id) => wanted.has(id) && !raw.get(id)?.info);
     for (let i = 0; i < ids.length; i += 100) {
       const batch = ids.slice(i, i + 100);
       try {
@@ -120,21 +130,80 @@ async function fetchBalances(conns: ConnRow[], wanted: Set<string>): Promise<{ m
         const list = (Array.isArray(data.list) ? data.list : []) as Array<Record<string, unknown>>;
         for (const it of list) {
           const id = String(it.advertiser_id ?? "");
-          const bal = numOrNull(it.balance);
-          if (!id || bal == null) continue;
-          map.set(id, {
-            balance: bal,
-            currency: it.currency ? String(it.currency) : map.get(id)?.currency ?? null,
-            name: it.name ? String(it.name) : map.get(id)?.name ?? null,
-            source: "advertiser/info.balance",
-          });
+          if (!id || get(id).info) continue;
+          get(id).info = {
+            label: c.label,
+            balance: numOrNull(it.balance),
+            currency: it.currency ? String(it.currency) : null,
+            name: it.name ? String(it.name) : null,
+          };
         }
       } catch (e) {
         errors.push(`[${c.label}] advertiser/info: ${(e as Error).message}`);
       }
     }
   }
+  const map = new Map<string, BalanceInfo>();
+  for (const [id, r] of raw) {
+    const bcPart = r.bc
+      ? `BC[${r.bc.label}] valid_account_balance=${r.bc.valid ?? "空"} account_balance=${r.bc.total ?? "空"}`
+      : "BC 余额接口未列出该户（该 BC 无此户管理员权限）";
+    const infoPart = r.info ? `info[${r.info.label}].balance=${r.info.balance ?? "空"}` : "info 未返回";
+    let balance: number | null = null;
+    let verdict: string;
+    if (r.bc && (r.bc.valid != null || r.bc.total != null)) {
+      balance = r.bc.valid ?? r.bc.total;
+      verdict = r.bc.valid != null ? "采用 BC 可用余额" : "采用 BC 总余额";
+    } else if (r.info?.balance != null && r.info.balance > 0) {
+      balance = r.info.balance;
+      verdict = "采用 info.balance";
+    } else {
+      verdict = "未取到可信余额（info.balance 为 0/空 且 BC 未列出，疑似无权限，不参与预警）";
+    }
+    map.set(id, {
+      balance,
+      currency: r.bc?.currency ?? r.info?.currency ?? null,
+      name: r.bc?.name ?? r.info?.name ?? null,
+      source: `${verdict}｜${bcPart}；${infoPart}`,
+    });
+  }
   return { map, errors };
+}
+
+// 诊断：返回某个户在每个连接下两个余额接口的原始返回，用于核对字段/权限。
+async function debugBalance(conns: ConnRow[], advertiserId: string) {
+  const out: Array<Record<string, unknown>> = [];
+  for (const c of conns.filter((x) => (x.advertiser_ids ?? []).map(String).includes(advertiserId))) {
+    const item: Record<string, unknown> = { connection: c.label, bc_id: c.bc_id, bc_name: c.bc_name };
+    if (c.bc_id) {
+      try {
+        let found: unknown = null;
+        let total = 0;
+        for (let page = 1; page <= 50 && !found; page++) {
+          const data = await ttGet(c.access_token, "/advertiser/balance/get/", { bc_id: c.bc_id, page: String(page), page_size: "100" });
+          const list = (data.advertiser_account_list ?? data.list ?? []) as Array<Record<string, unknown>>;
+          total += list.length;
+          found = list.find((it) => String(it.advertiser_id) === advertiserId) ?? null;
+          const pi = (data.page_info ?? {}) as Record<string, unknown>;
+          if (!list.length || page >= Number(pi.total_page ?? 0)) break;
+        }
+        item.bc_balance = found ?? `未列出（该 BC 共返回 ${total} 个户）`;
+      } catch (e) {
+        item.bc_balance_error = (e as Error).message;
+      }
+    }
+    try {
+      const data = await ttGet(c.access_token, "/advertiser/info/", {
+        advertiser_ids: JSON.stringify([advertiserId]),
+        fields: JSON.stringify(["advertiser_id", "name", "balance", "currency", "status", "role", "owner_bc_id", "company"]),
+      });
+      item.advertiser_info = data.list ?? data;
+    } catch (e) {
+      item.advertiser_info_error = (e as Error).message;
+    }
+    out.push(item);
+  }
+  return { advertiser_id: advertiserId, results: out };
 }
 
 // ---------- 日耗 ----------
@@ -267,7 +336,7 @@ async function actionRefresh(body: Record<string, unknown>) {
       ? computeSpendStats(win.dates, mergeDailySpend(basic ?? new Map(), gmv ?? new Map()), settings.abnormal_ratio)
       : null;
     const balance = bal?.balance ?? null;
-    if (balance == null) notes.unshift("未取到余额");
+    if (balance == null) notes.unshift(bal?.source ?? "未取到余额（两个余额接口都没返回该户）");
     const avg = stats?.avg_daily_spend ?? null;
     const row = {
       advertiser_id: id,
@@ -390,6 +459,11 @@ Deno.serve(async (req) => {
       }
       case "refresh":
         return json(await actionRefresh(body));
+      case "debug_balance": {
+        const id = String(body.advertiser_id ?? "");
+        if (!id) throw new Error("缺少 advertiser_id");
+        return json(await debugBalance(await loadConnections(), id));
+      }
       case "build_message":
         return json(await actionBuildMessage(body));
       case "mark_alerted": {
