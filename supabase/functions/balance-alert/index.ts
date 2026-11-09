@@ -23,6 +23,7 @@ import {
   DEFAULT_ABNORMAL_RATIO,
   daysLeft,
   mergeDailySpend,
+  pickAvailableBalance,
   shouldAlert,
   spendWindow,
 } from "../_shared/balance-alert.ts";
@@ -83,7 +84,11 @@ function allAdvertiserIds(conns: ConnRow[]): string[] {
 //       （2026-11-09 实测：代理商 BC 管理的 ECO9 户在 ECO 后台有数千美元余额，我们这边却拿到 0.00，
 //        若照单全收会对 10 个正常户误报「可用 0 天」）。
 type BalanceRaw = {
-  bc?: { label: string; valid: number | null; total: number | null; currency: string | null; name: string | null };
+  bc?: {
+    label: string; valid: number | null; total: number | null; currency: string | null; name: string | null;
+    budgetMode: string | null; budget: number | null; budgetCost: number | null; budgetRemaining: number | null;
+    raw: Record<string, unknown>;
+  };
   info?: { label: string; balance: number | null; currency: string | null; name: string | null };
 };
 
@@ -96,7 +101,7 @@ async function fetchBalances(conns: ConnRow[], wanted: Set<string>): Promise<{ m
     try {
       for (let page = 1; page <= 50; page++) {
         const data = await ttGet(c.access_token, "/advertiser/balance/get/", {
-          bc_id: c.bc_id, page: String(page), page_size: "100",
+          bc_id: c.bc_id, page: String(page), page_size: "50",
         });
         const list = (data.advertiser_account_list ?? data.list ?? []) as Array<Record<string, unknown>>;
         for (const it of list) {
@@ -108,6 +113,11 @@ async function fetchBalances(conns: ConnRow[], wanted: Set<string>): Promise<{ m
             total: numOrNull(it.account_balance),
             currency: it.currency ? String(it.currency) : null,
             name: it.advertiser_name ? String(it.advertiser_name) : null,
+            budgetMode: it.budget_mode ? String(it.budget_mode) : null,
+            budget: numOrNull(it.budget),
+            budgetCost: numOrNull(it.budget_cost),
+            budgetRemaining: numOrNull(it.budget_remaining),
+            raw: it,
           };
         }
         const info = (data.page_info ?? {}) as Record<string, unknown>;
@@ -144,22 +154,24 @@ async function fetchBalances(conns: ConnRow[], wanted: Set<string>): Promise<{ m
     }
   }
   const map = new Map<string, BalanceInfo>();
+  // BC 接口整体失败时，所有户都会落到「BC 未列出」，必须把失败原因带进每户的来源说明，否则会被误读成无权限。
+  const bcFailed = errors.filter((e) => e.includes("advertiser/balance/get")).join("；");
   for (const [id, r] of raw) {
+    const { balance, verdict } = pickAvailableBalance({
+      bcListed: !!r.bc,
+      valid: r.bc?.valid ?? null,
+      total: r.bc?.total ?? null,
+      budgetMode: r.bc?.budgetMode ?? null,
+      budget: r.bc?.budget ?? null,
+      budgetCost: r.bc?.budgetCost ?? null,
+      budgetRemaining: r.bc?.budgetRemaining ?? null,
+      infoBalance: r.info?.balance ?? null,
+    });
+    // 原始字段整条留痕（只留标量），字段名不确定时看这里即可，不必再加诊断部署
     const bcPart = r.bc
-      ? `BC[${r.bc.label}] valid_account_balance=${r.bc.valid ?? "空"} account_balance=${r.bc.total ?? "空"}`
-      : "BC 余额接口未列出该户（该 BC 无此户管理员权限）";
+      ? `BC[${r.bc.label}] ${JSON.stringify(Object.fromEntries(Object.entries(r.bc.raw).filter(([, v]) => v === null || typeof v !== "object")))}`
+      : `BC 余额接口未返回该户${bcFailed ? `（接口报错：${bcFailed}）` : "（该 BC 无此户管理员权限）"}`;
     const infoPart = r.info ? `info[${r.info.label}].balance=${r.info.balance ?? "空"}` : "info 未返回";
-    let balance: number | null = null;
-    let verdict: string;
-    if (r.bc && (r.bc.valid != null || r.bc.total != null)) {
-      balance = r.bc.valid ?? r.bc.total;
-      verdict = r.bc.valid != null ? "采用 BC 可用余额" : "采用 BC 总余额";
-    } else if (r.info?.balance != null && r.info.balance > 0) {
-      balance = r.info.balance;
-      verdict = "采用 info.balance";
-    } else {
-      verdict = "未取到可信余额（info.balance 为 0/空 且 BC 未列出，疑似无权限，不参与预警）";
-    }
     map.set(id, {
       balance,
       currency: r.bc?.currency ?? r.info?.currency ?? null,
@@ -180,7 +192,7 @@ async function debugBalance(conns: ConnRow[], advertiserId: string) {
         let found: unknown = null;
         let total = 0;
         for (let page = 1; page <= 50 && !found; page++) {
-          const data = await ttGet(c.access_token, "/advertiser/balance/get/", { bc_id: c.bc_id, page: String(page), page_size: "100" });
+          const data = await ttGet(c.access_token, "/advertiser/balance/get/", { bc_id: c.bc_id, page: String(page), page_size: "50" });
           const list = (data.advertiser_account_list ?? data.list ?? []) as Array<Record<string, unknown>>;
           total += list.length;
           found = list.find((it) => String(it.advertiser_id) === advertiserId) ?? null;

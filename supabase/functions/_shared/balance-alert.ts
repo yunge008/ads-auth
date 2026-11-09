@@ -92,3 +92,42 @@ export function mergeDailySpend(...sources: Array<Map<string, number>>): Map<str
   }
   return out;
 }
+
+// ---------- 可用余额取值（2026-11-09 第二版） ----------
+// 实测：代理商信用额度户（ROLE_CHILD_ADVERTISER，月结、「可用信用额度：余额充足」）现金余额恒为 0，
+// 真正能花的上限是 BC 给该户设的「预算」剩余（TikTok 后台 付款 → 预算 → 剩余预算，与 ECO 后台「可用余额」一致）。
+// 规则：
+//   预算剩余 = budget_remaining，没有则 budget - budget_cost；预算模式含 DAY（日预算，每天重置）时不用。
+//   现金 = valid_account_balance，没有则 account_balance。
+//   有预算剩余且现金 > 0 → 取两者较小（两者都会卡住投放）；
+//   只有预算剩余 → 预算剩余；
+//   现金 > 0 → 现金；
+//   现金 = 0 且没设预算 → null（分不清是「信用户无上限」还是真没钱，宁可不报，记原因）；
+//   BC 没返回该户 → info.balance > 0 才用，否则 null。
+export type BalanceInputs = {
+  bcListed: boolean;
+  valid: number | null;
+  total: number | null;
+  budgetMode: string | null;
+  budget: number | null;
+  budgetCost: number | null;
+  budgetRemaining: number | null;
+  infoBalance: number | null;
+};
+
+export function pickAvailableBalance(x: BalanceInputs): { balance: number | null; verdict: string } {
+  let budgetRem = x.budgetRemaining ?? (x.budget != null && x.budget > 0 && x.budgetCost != null ? x.budget - x.budgetCost : null);
+  if (budgetRem != null && /DAY/i.test(x.budgetMode ?? "")) budgetRem = null;
+  if (budgetRem != null && x.budget != null && x.budget <= 0 && x.budgetRemaining == null) budgetRem = null;
+  if (x.bcListed) {
+    const cash = x.valid ?? x.total;
+    if (budgetRem != null && cash != null && cash > 0) {
+      return { balance: Math.min(cash, budgetRem), verdict: "预算剩余与现金余额取较小" };
+    }
+    if (budgetRem != null) return { balance: budgetRem, verdict: "采用预算剩余（信用额度户）" };
+    if (cash != null && cash > 0) return { balance: cash, verdict: "采用现金可用余额" };
+    return { balance: null, verdict: "现金余额为 0 且未设预算，无法判断可花额度，不参与预警" };
+  }
+  if (x.infoBalance != null && x.infoBalance > 0) return { balance: x.infoBalance, verdict: "BC 未列出，采用 info.balance" };
+  return { balance: null, verdict: "BC 未列出且 info.balance 为 0/空，未取到可信余额，不参与预警" };
+}

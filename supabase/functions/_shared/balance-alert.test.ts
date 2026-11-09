@@ -3,6 +3,7 @@ import {
   computeSpendStats,
   daysLeft,
   mergeDailySpend,
+  pickAvailableBalance,
   shouldAlert,
   spendWindow,
 } from "./balance-alert.ts";
@@ -78,4 +79,30 @@ Deno.test("balance <= 0 with normal spend -> alert (0 days)", () => {
   const s = computeSpendStats(dates, m([100, 100, 100, 100, 100, 100, 100, 100, 100, 100]));
   eq(daysLeft(0, s.avg_daily_spend), 0);
   eq(shouldAlert(true, daysLeft(0, s.avg_daily_spend), 3), true);
+});
+
+const base = { bcListed: true, valid: 0, total: 0, budgetMode: null, budget: null, budgetCost: null, budgetRemaining: null, infoBalance: 0 };
+
+Deno.test("credit account: cash 0, budget remaining used (JP case)", () => {
+  const r = pickAvailableBalance({ ...base, budget: 12508, budgetCost: 9676.38, budgetRemaining: 2831.62 });
+  near(r.balance, 2831.62);
+});
+Deno.test("budget remaining derived from budget - cost when field missing", () => {
+  const r = pickAvailableBalance({ ...base, budget: 12508, budgetCost: 9676.38 });
+  near(r.balance, 12508 - 9676.38);
+});
+Deno.test("daily budget mode ignored", () => {
+  const r = pickAvailableBalance({ ...base, valid: 500, budgetMode: "BUDGET_MODE_DAY", budget: 100, budgetRemaining: 20 });
+  near(r.balance, 500);
+});
+Deno.test("prepay with budget cap -> min", () => {
+  near(pickAvailableBalance({ ...base, valid: 300, budget: 1000, budgetRemaining: 800 }).balance, 300);
+  near(pickAvailableBalance({ ...base, valid: 3000, budget: 1000, budgetRemaining: 800 }).balance, 800);
+});
+Deno.test("cash 0 and no budget -> null (no false alarm)", () => {
+  eq(pickAvailableBalance(base).balance, null);
+});
+Deno.test("not listed in BC -> info balance only if > 0", () => {
+  near(pickAvailableBalance({ ...base, bcListed: false, infoBalance: 17.94 }).balance, 17.94);
+  eq(pickAvailableBalance({ ...base, bcListed: false, infoBalance: 0 }).balance, null);
 });
