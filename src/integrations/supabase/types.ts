@@ -955,6 +955,96 @@ export type Database = {
         }
         Relationships: []
       }
+      balance_alert_accounts: {
+        Row: {
+          advertiser_id: string
+          advertiser_name: string | null
+          avg_daily_spend: number | null
+          balance: number | null
+          balance_source: string | null
+          checked_at: string | null
+          currency: string | null
+          daily: Json | null
+          days_left: number | null
+          enabled: boolean
+          error: string | null
+          last_alerted_at: string | null
+          updated_at: string
+          valid_days: number | null
+          window_end: string | null
+          window_start: string | null
+        }
+        Insert: {
+          advertiser_id: string
+          advertiser_name?: string | null
+          avg_daily_spend?: number | null
+          balance?: number | null
+          balance_source?: string | null
+          checked_at?: string | null
+          currency?: string | null
+          daily?: Json | null
+          days_left?: number | null
+          enabled?: boolean
+          error?: string | null
+          last_alerted_at?: string | null
+          updated_at?: string
+          valid_days?: number | null
+          window_end?: string | null
+          window_start?: string | null
+        }
+        Update: {
+          advertiser_id?: string
+          advertiser_name?: string | null
+          avg_daily_spend?: number | null
+          balance?: number | null
+          balance_source?: string | null
+          checked_at?: string | null
+          currency?: string | null
+          daily?: Json | null
+          days_left?: number | null
+          enabled?: boolean
+          error?: string | null
+          last_alerted_at?: string | null
+          updated_at?: string
+          valid_days?: number | null
+          window_end?: string | null
+          window_start?: string | null
+        }
+        Relationships: []
+      }
+      balance_alert_settings: {
+        Row: {
+          abnormal_ratio: number
+          feishu_chat_id: string | null
+          feishu_chat_name: string | null
+          id: number
+          last_run_at: string | null
+          last_run_summary: Json | null
+          threshold_days: number
+          updated_at: string
+        }
+        Insert: {
+          abnormal_ratio?: number
+          feishu_chat_id?: string | null
+          feishu_chat_name?: string | null
+          id?: number
+          last_run_at?: string | null
+          last_run_summary?: Json | null
+          threshold_days?: number
+          updated_at?: string
+        }
+        Update: {
+          abnormal_ratio?: number
+          feishu_chat_id?: string | null
+          feishu_chat_name?: string | null
+          id?: number
+          last_run_at?: string | null
+          last_run_summary?: Json | null
+          threshold_days?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       connection_material_registry: {
         Row: {
           auth_code: string | null

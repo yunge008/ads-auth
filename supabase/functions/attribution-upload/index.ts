@@ -46,6 +46,7 @@ import {
   splitIdentityKey,
 } from "../_shared/attribution.ts";
 import {
+  type AttrContextScope,
   type CompactRow,
   type DistinctRow,
   aggregateResults,
