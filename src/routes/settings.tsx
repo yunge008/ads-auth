@@ -6,6 +6,7 @@ import { ExchangeRateCard } from "@/components/settings/ExchangeRateCard";
 import { useCurrentAccount } from "@/lib/account";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FeishuSheetConfigPanel } from "@/components/settings/FeishuSheetConfigPanel";
+import { BalanceAlertPanel } from "@/components/settings/BalanceAlertPanel";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({
@@ -30,6 +31,7 @@ function SettingsPage() {
         <TabsList>
           <TabsTrigger value="auth">授权</TabsTrigger>
           <TabsTrigger value="staff">人员表</TabsTrigger>
+          <TabsTrigger value="balance-alert">账户余额预警</TabsTrigger>
           {account?.isAdmin && <TabsTrigger value="accounts">账号管理</TabsTrigger>}
           {account?.isAdmin && <TabsTrigger value="exchange-rates">GMV 归因汇率</TabsTrigger>}
           {account?.isAdmin && <TabsTrigger value="feishu-sheets">飞书表名称</TabsTrigger>}
@@ -39,6 +41,9 @@ function SettingsPage() {
         </TabsContent>
         <TabsContent value="staff">
           <StaffTable />
+        </TabsContent>
+        <TabsContent value="balance-alert">
+          <BalanceAlertPanel />
         </TabsContent>
         {account?.isAdmin && (
           <TabsContent value="accounts">
