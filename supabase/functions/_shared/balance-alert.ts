@@ -131,3 +131,22 @@ export function pickAvailableBalance(x: BalanceInputs): { balance: number | null
   if (x.infoBalance != null && x.infoBalance > 0) return { balance: x.infoBalance, verdict: "BC 未列出，采用 info.balance" };
   return { balance: null, verdict: "BC 未列出且 info.balance 为 0/空，未取到可信余额，不参与预警" };
 }
+
+// ---------- 颜色分级（2026-11-09） ----------
+// 单户：可用天数 < X → red（已达监控天数）；X ≤ 可用天数 < X+5 → yellow（距离监控天数 5 天内）；其余 green；算不出 → none
+// 整体（飞书卡片头）：有户可用天数 ≤ 0（用光）→ red；有户 < X（预警）→ yellow；否则 green
+export const NEAR_DAYS = 5;
+export type Level = "red" | "yellow" | "green" | "none";
+
+export function dayLevel(days: number | null, X: number): Level {
+  if (days == null) return "none";
+  if (days < X) return "red";
+  if (days < X + NEAR_DAYS) return "yellow";
+  return "green";
+}
+
+export function overallLevel(daysList: Array<number | null>, X: number): "red" | "yellow" | "green" {
+  if (daysList.some((d) => d != null && d <= 0)) return "red";
+  if (daysList.some((d) => d != null && d < X)) return "yellow";
+  return "green";
+}

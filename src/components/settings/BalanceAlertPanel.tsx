@@ -185,7 +185,8 @@ export function BalanceAlertPanel() {
             .includes(q),
         ),
     )
-    .sort((a, b) => (a.days_left ?? Infinity) - (b.days_left ?? Infinity));
+    // 按近10天正常日均倒序（没有日均的排最后）
+    .sort((a, b) => (b.avg_daily_spend ?? -1) - (a.avg_daily_spend ?? -1));
   const alertCount = accounts.filter(
     (a) => a.enabled && a.days_left != null && a.days_left < X,
   ).length;
@@ -206,9 +207,10 @@ export function BalanceAlertPanel() {
           <p className="text-xs text-muted-foreground">
             可用天数 = 可用余额 ÷ 近 10 个完整自然日（北京日期，不含今天）的<b>正常日均</b>。日耗为
             0、或低于这 10 天正日耗中位数 × {Math.round((settings?.abnormal_ratio ?? 0.3) * 100)}%
-            的天 视为没开 / 学习期，不计入日均。每天北京 10:00 自动刷新并把「开关开 且 可用天数 &lt;
-            X」的账户发到飞书授权通知群（与每日自动授权通知同一个群）。近 10 天日耗全为 0
-            的账户即使余额 ≤0 也不预警。
+            的天 视为没开 / 学习期，不计入日均。每天北京 10:00
+            自动刷新，并把所有开了监控的账户列表发到飞书授权通知群（与每日自动授权通知同一个群）。
+            可用天数标红 = 已低于 X 天，标黄 = 距离 X 天不足 5 天。近 10 天日耗全为 0 的账户即使余额
+            ≤0 也不预警。
           </p>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -307,6 +309,8 @@ export function BalanceAlertPanel() {
                 ) : (
                   rows.map((a) => {
                     const low = a.days_left != null && a.days_left < X;
+                    // 红：已达监控天数（< X）；黄：距离监控天数 5 天内（X ~ X+5）
+                    const near = a.days_left != null && !low && a.days_left < X + 5;
                     return (
                       <TableRow
                         key={a.advertiser_id}
@@ -367,9 +371,17 @@ export function BalanceAlertPanel() {
                           {a.valid_days == null ? "—" : `${a.valid_days}/10`}
                         </TableCell>
                         <TableCell
-                          className={`text-right font-medium ${low ? "text-destructive" : ""}`}
+                          className={`text-right font-medium ${low ? "text-destructive" : near ? "text-amber-600" : ""}`}
                         >
-                          {a.days_left == null ? "—" : fmt(a.days_left, 1)}
+                          {a.days_left == null ? (
+                            "—"
+                          ) : (
+                            <span
+                              className={`inline-block rounded px-1.5 py-0.5 ${low ? "bg-red-100 dark:bg-red-950" : near ? "bg-yellow-100 dark:bg-yellow-950" : ""}`}
+                            >
+                              {fmt(a.days_left, 1)}
+                            </span>
+                          )}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           {a.checked_at ? new Date(a.checked_at).toLocaleString() : "未刷新"}

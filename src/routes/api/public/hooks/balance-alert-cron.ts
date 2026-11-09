@@ -5,7 +5,7 @@
 //
 // 两种调用：
 //   ① pg_cron（每天北京 10:00）：`apikey: <SUPABASE_PUBLISHABLE_KEY>` 头 → 下游带 x-cron-key；
-//      先 refresh（分片续跑到 remaining 为空）再 build_message，有预警/有算不出的户才发。
+//      先 refresh（分片续跑到 remaining 为空）再 build_message，每天都发完整列表（交互卡片，绿/黄/红）。
 //   ② 页面「发送到飞书」按钮：带 x-admin-passcode / x-admin-name，原样转给 Edge Function 校验（需 settings 权限）；
 //      body `{ manual: true }`，不刷新，只按库里当前快照组装并强制发送（无预警也发一条，用于确认通道）。
 import { createFileRoute } from "@tanstack/react-router";
@@ -20,18 +20,13 @@ const jsonRes = (body: unknown, status = 200) =>
     headers: { "Content-Type": "application/json" },
   });
 
-async function postFeishuBot(title: string, lines: string[]): Promise<void> {
+async function postFeishu(payload: Record<string, unknown>): Promise<void> {
   const url = process.env.FEISHU_BOT_WEBHOOK;
   if (!url) throw new Error("服务端未配置 FEISHU_BOT_WEBHOOK");
   const r = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      msg_type: "post",
-      content: {
-        post: { zh_cn: { title, content: lines.map((t) => [{ tag: "text", text: t }]) } },
-      },
-    }),
+    body: JSON.stringify(payload),
   });
   const j = (await r.json().catch(() => ({}))) as {
     code?: number;
@@ -40,6 +35,26 @@ async function postFeishuBot(title: string, lines: string[]): Promise<void> {
   };
   const code = j.code ?? j.StatusCode ?? (r.ok ? 0 : r.status);
   if (code !== 0) throw new Error(`飞书机器人发送失败 code=${code}: ${j.msg ?? ""}`);
+}
+
+/** 优先发交互卡片（带颜色）；Edge Function 是旧版没有 card 时退回纯文本 post */
+async function postFeishuBot(msg: Record<string, unknown>): Promise<void> {
+  if (msg.card) {
+    await postFeishu({ msg_type: "interactive", card: msg.card });
+    return;
+  }
+  const lines = (msg.lines as string[]) ?? [];
+  await postFeishu({
+    msg_type: "post",
+    content: {
+      post: {
+        zh_cn: {
+          title: String(msg.title ?? "账户余额预警"),
+          content: lines.map((t) => [{ tag: "text", text: t }]),
+        },
+      },
+    },
+  });
 }
 
 export const Route = createFileRoute("/api/public/hooks/balance-alert-cron")({
@@ -127,7 +142,7 @@ export const Route = createFileRoute("/api/public/hooks/balance-alert-cron")({
           const msg = await callFn({ action: "build_message", force: manual });
           let sent = false;
           if (msg.send) {
-            await postFeishuBot(String(msg.title), (msg.lines as string[]) ?? []);
+            await postFeishuBot(msg);
             sent = true;
             const ids = (msg.alert_ids as string[]) ?? [];
             if (ids.length) await callFn({ action: "mark_alerted", advertiser_ids: ids });

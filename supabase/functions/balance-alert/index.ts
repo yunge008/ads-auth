@@ -26,7 +26,10 @@ import {
   computeSpendStats,
   DEFAULT_ABNORMAL_RATIO,
   daysLeft,
+  dayLevel,
   mergeDailySpend,
+  NEAR_DAYS,
+  overallLevel,
   pickAvailableBalance,
   shouldAlert,
   spendWindow,
@@ -412,43 +415,106 @@ async function actionRefresh(body: Record<string, unknown>) {
   return { done: done.length, remaining, failed, balance_errors: balanceErrors, window: { start: win.start, end: win.end } };
 }
 
-async function actionBuildMessage(body: Record<string, unknown>) {
+// 飞书消息：交互卡片（群机器人 webhook 支持 msg_type=interactive）。
+// 每次都发（无预警也发完整列表）；卡片头颜色：有户用光 → 红，有户 < X → 黄，否则绿。
+// 列表 = 开了监控的户，按正常日均倒序；列：账号 / 余额 / 日耗 / 可用天数（可用天数按 dayLevel 着色）。
+async function actionBuildMessage(_body: Record<string, unknown>) {
   const { settings, accounts } = await actionList();
   const X = settings.threshold_days;
-  const hits = accounts
-    .filter((a) => shouldAlert(a.enabled, a.days_left, X))
-    .sort((a, b) => (a.days_left ?? 0) - (b.days_left ?? 0));
-  // 算不出可用天数且有报错的户单独提示；但近 10 天日耗全 0 的户（没在跑）不提示——没消耗就不会空户。
+  const enabled = accounts
+    .filter((a) => a.enabled)
+    .sort((a, b) => (b.avg_daily_spend ?? -1) - (a.avg_daily_spend ?? -1));
+  if (!enabled.length) return { send: false, alerts: 0, broken: 0 };
+  const hits = enabled.filter((a) => shouldAlert(true, a.days_left, X));
+  const usedUp = enabled.filter((a) => a.days_left != null && a.days_left <= 0);
   const idle = (a: (typeof accounts)[number]) =>
     Array.isArray(a.daily) && (a.daily as Array<{ spend: number }>).every((d) => !(d.spend > 0));
-  const broken = accounts.filter((a) => a.enabled && a.days_left == null && a.error && !idle(a));
-  if (!hits.length && !broken.length && !body.force) return { send: false, alerts: 0, broken: 0 };
+  const broken = enabled.filter((a) => a.days_left == null && a.error && !idle(a));
+  const level = overallLevel(enabled.map((a) => a.days_left), X);
 
-  const lines: string[] = [];
-  lines.push(`规则：可用余额 ÷ 近10天正常日均 < ${X} 天（已剔除日耗为 0 / 低于中位数 ${Math.round(settings.abnormal_ratio * 100)}% 的异常日）`);
-  if (hits.length) {
-    lines.push("");
-    for (const a of hits) {
-      lines.push(
-        `⚠ ${a.advertiser_name ?? a.advertiser_id}${a.country ? `（${a.country}）` : ""}  ID ${a.advertiser_id}`,
-        `   可用余额 ${fmt(a.balance)} ${a.currency ?? ""} ｜ 正常日均 ${fmt(a.avg_daily_spend)}（${a.valid_days}/10 天）｜ 可用 ${fmt(a.days_left, 1)} 天`,
-      );
-    }
-  } else {
-    lines.push("", "当前没有低于阈值的账户。");
-  }
+  const checked = enabled.map((a) => a.checked_at).filter(Boolean).sort().pop();
+  const dataTime = checked ? new Date(String(checked)).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false }) : "—";
+  const title = level === "red"
+    ? `账户余额告警：${usedUp.length} 个账户已用光`
+    : level === "yellow"
+      ? `账户余额预警：${hits.length} 个账户可用不足 ${X} 天`
+      : `账户余额正常：全部可用 ≥ ${X} 天`;
+
+  const dayCell = (d: number | null) => {
+    const lv = dayLevel(d, X);
+    if (lv === "none") return "<font color='grey'>—</font>";
+    const v = `**${fmt(d, 1)}**`;
+    if (lv === "red") return `🔴 <font color='red'>${v}</font>`;
+    if (lv === "yellow") return `🟡 <font color='orange'>${v}</font>`;
+    return `🟢 <font color='green'>${v}</font>`;
+  };
+  const cur = (c: unknown) => (c && c !== "USD" ? ` ${c}` : "");
+  const row = (cells: string[], header = false) => ({
+    tag: "column_set",
+    flex_mode: "none",
+    background_style: header ? "grey" : "default",
+    columns: cells.map((content, i) => ({
+      tag: "column",
+      width: "weighted",
+      weight: i === 0 ? 3 : 2,
+      vertical_align: "center",
+      elements: [{ tag: "markdown", content, text_align: i === 0 ? "left" : "right" }],
+    })),
+  });
+
+  const elements: Array<Record<string, unknown>> = [
+    {
+      tag: "markdown",
+      content: [
+        `**日耗监控天数**：${X}天`,
+        `**当前账户可用天数列表**`,
+        `**数据时间**：${dataTime}`,
+      ].join("\n"),
+    },
+    { tag: "hr" },
+    row(["**账号**", "**余额**", "**日耗**", "**可用天数**"], true),
+    ...enabled.map((a) =>
+      row([
+        a.advertiser_name ?? a.advertiser_id,
+        a.balance == null ? "—" : `${fmt(a.balance)}${cur(a.currency)}`,
+        a.avg_daily_spend == null ? "0.00" : fmt(a.avg_daily_spend),
+        dayCell(a.days_left),
+      ])
+    ),
+  ];
   if (broken.length) {
-    lines.push("", `另有 ${broken.length} 个已开启预警的账户本次未能算出可用天数：`);
-    for (const a of broken.slice(0, 10)) lines.push(`   ${a.advertiser_name ?? a.advertiser_id}：${String(a.error).slice(0, 120)}`);
-    if (broken.length > 10) lines.push(`   ……共 ${broken.length} 个，详见「设置 → 账户余额预警」`);
+    elements.push({ tag: "hr" }, {
+      tag: "markdown",
+      content: `**⚠ ${broken.length} 个账户未能算出可用天数**\n` +
+        broken.slice(0, 8).map((a) => `- ${a.advertiser_name ?? a.advertiser_id}：${String(a.error).slice(0, 80)}`).join("\n"),
+    });
   }
-  const checked = accounts.map((a) => a.checked_at).filter(Boolean).sort().pop();
-  if (checked) lines.push("", `数据时间：${new Date(String(checked)).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })}`);
+  elements.push({
+    tag: "note",
+    elements: [{
+      tag: "plain_text",
+      content: `🔴 可用 < ${X} 天　🟡 ${X}~${X + NEAR_DAYS} 天　🟢 ≥ ${X + NEAR_DAYS} 天｜日耗 = 近10个完整自然日正常日均（剔除日耗 0 / 低于中位数 ${Math.round(settings.abnormal_ratio * 100)}% 的天）`,
+    }],
+  });
+
+  const card = {
+    config: { wide_screen_mode: true },
+    header: { template: level, title: { tag: "plain_text", content: title } },
+    elements,
+  };
+
+  // lines 保留给旧版服务端路由（纯文本兜底）
+  const lines = [
+    `日耗监控天数：${X}天`, "当前账户可用天数列表", `数据时间：${dataTime}`, "",
+    ...enabled.map((a) => `${a.advertiser_name ?? a.advertiser_id}｜余额 ${a.balance == null ? "—" : fmt(a.balance)}｜日耗 ${fmt(a.avg_daily_spend ?? 0)}｜可用 ${a.days_left == null ? "—" : fmt(a.days_left, 1)} 天`),
+  ];
 
   return {
     send: true,
-    title: hits.length ? `账户余额预警：${hits.length} 个账户不足 ${X} 天` : "账户余额预警",
+    title,
     lines,
+    card,
+    level,
     alert_ids: hits.map((a) => a.advertiser_id),
     alerts: hits.length,
     broken: broken.length,

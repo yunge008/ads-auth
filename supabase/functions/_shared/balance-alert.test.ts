@@ -1,8 +1,10 @@
 // 跑法：deno test supabase/functions/_shared/balance-alert.test.ts（bun test 也能跑）
 import {
   computeSpendStats,
+  dayLevel,
   daysLeft,
   mergeDailySpend,
+  overallLevel,
   pickAvailableBalance,
   shouldAlert,
   spendWindow,
@@ -105,4 +107,13 @@ Deno.test("cash 0 and no budget -> null (no false alarm)", () => {
 Deno.test("not listed in BC -> info balance only if > 0", () => {
   near(pickAvailableBalance({ ...base, bcListed: false, infoBalance: 17.94 }).balance, 17.94);
   eq(pickAvailableBalance({ ...base, bcListed: false, infoBalance: 0 }).balance, null);
+});
+
+Deno.test("day level: red < X, yellow < X+5, green otherwise", () => {
+  eq([dayLevel(9.9, 10), dayLevel(10, 10), dayLevel(14.9, 10), dayLevel(15, 10), dayLevel(null, 10)], ["red", "yellow", "yellow", "green", "none"]);
+});
+Deno.test("overall level: used up red > any < X yellow > green", () => {
+  eq(overallLevel([30, 0, 5], 10), "red");
+  eq(overallLevel([30, 9, null], 10), "yellow");
+  eq(overallLevel([30, 12, null], 10), "green");
 });
