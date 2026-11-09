@@ -734,7 +734,7 @@ Deno.serve(async (req) => {
           continue;
         }
         const role = roleRaw.includes("剪") || roleRaw.toUpperCase().includes("EDITOR") ? "EDITOR" : "BD";
-        payload.push({ month, staff_name: name, role, target_usd: target, note: cellText(r[4]) || null });
+        payload.push({ month, staff_name: name, role, target_usd: target, material_target: 0, sites: [], target_group_id: "", note: cellText(r[4]) || null });
       }
       // 同键去重（末条胜出）
       const dedup = new Map(payload.map((p) => [`${p.month}|${p.staff_name}|${p.role}|${p.target_group_id}`, p]));

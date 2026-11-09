@@ -213,12 +213,12 @@ Deno.serve(async (req) => {
 
     /** 处理完一个 sheet 就把它那一段登记行先删后插：中断也不会留下半张表 */
     const rewriteSheet = async (sheetName: string, rows: RegRow[]) => {
-      await withRetry(`删除 ${sheetName} 旧登记行失败`, () =>
-        db.from("creator_registry").delete().eq("source_sheet", sheetName),
+      await withRetry(`删除 ${sheetName} 旧登记行失败`, async () =>
+        await db.from("creator_registry").delete().eq("source_sheet", sheetName),
       );
       for (let i = 0; i < rows.length; i += 500) {
         const chunk = rows.slice(i, i + 500);
-        await withRetry(`写入 ${sheetName} 登记行失败`, () => db.from("creator_registry").insert(chunk));
+        await withRetry(`写入 ${sheetName} 登记行失败`, async () => await db.from("creator_registry").insert(chunk));
       }
     };
 

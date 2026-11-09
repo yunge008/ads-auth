@@ -15,6 +15,7 @@ import { admin, checkAdminPasscode, type ConnRow } from "../_shared/auth.ts";
 import { ttGet, type TimeBudgetChecker } from "../_shared/tiktok.ts";
 import { fetchCampaigns, fetchReport, type CampaignInfo } from "../_shared/gmv-max-report.ts";
 export { ttGet } from "../_shared/tiktok.ts";
+export { fetchCampaigns, fetchReport } from "../_shared/gmv-max-report.ts";
 
 const GMV_MAX_SYNC_PAUSED = true;
 
