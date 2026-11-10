@@ -1017,6 +1017,8 @@ export type Database = {
           abnormal_ratio: number
           eco_device_at: string | null
           eco_device_id: string | null
+          eco_token: string | null
+          eco_token_exp: string | null
           feishu_chat_id: string | null
           feishu_chat_name: string | null
           id: number
@@ -1029,6 +1031,8 @@ export type Database = {
           abnormal_ratio?: number
           eco_device_at?: string | null
           eco_device_id?: string | null
+          eco_token?: string | null
+          eco_token_exp?: string | null
           feishu_chat_id?: string | null
           feishu_chat_name?: string | null
           id?: number
@@ -1041,6 +1045,8 @@ export type Database = {
           abnormal_ratio?: number
           eco_device_at?: string | null
           eco_device_id?: string | null
+          eco_token?: string | null
+          eco_token_exp?: string | null
           feishu_chat_id?: string | null
           feishu_chat_name?: string | null
           id?: number
