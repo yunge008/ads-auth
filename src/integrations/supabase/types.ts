@@ -2104,6 +2104,78 @@ export type Database = {
         }
         Relationships: []
       }
+      tts_shops: {
+        Row: {
+          access_expires_at: string | null
+          access_token: string
+          authorized_by: string | null
+          authorizer_open_id: string | null
+          contact_info: Json | null
+          created_at: string
+          id: string
+          refresh_expires_at: string | null
+          refresh_token: string
+          region: string | null
+          scopes: string[]
+          seller_base_region: string | null
+          seller_name: string | null
+          seller_type: string | null
+          shop_cipher: string
+          shop_code: string | null
+          shop_id: string
+          shop_name: string | null
+          status: string
+          updated_at: string
+          user_type: number | null
+        }
+        Insert: {
+          access_expires_at?: string | null
+          access_token: string
+          authorized_by?: string | null
+          authorizer_open_id?: string | null
+          contact_info?: Json | null
+          created_at?: string
+          id?: string
+          refresh_expires_at?: string | null
+          refresh_token: string
+          region?: string | null
+          scopes?: string[]
+          seller_base_region?: string | null
+          seller_name?: string | null
+          seller_type?: string | null
+          shop_cipher: string
+          shop_code?: string | null
+          shop_id: string
+          shop_name?: string | null
+          status?: string
+          updated_at?: string
+          user_type?: number | null
+        }
+        Update: {
+          access_expires_at?: string | null
+          access_token?: string
+          authorized_by?: string | null
+          authorizer_open_id?: string | null
+          contact_info?: Json | null
+          created_at?: string
+          id?: string
+          refresh_expires_at?: string | null
+          refresh_token?: string
+          region?: string | null
+          scopes?: string[]
+          seller_base_region?: string | null
+          seller_name?: string | null
+          seller_type?: string | null
+          shop_cipher?: string
+          shop_code?: string | null
+          shop_id?: string
+          shop_name?: string | null
+          status?: string
+          updated_at?: string
+          user_type?: number | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       attribution_creator_audit: {
