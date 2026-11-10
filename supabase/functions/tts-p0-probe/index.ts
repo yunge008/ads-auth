@@ -267,7 +267,8 @@ async function actionWrite(shop: Shop, b: Record<string, unknown>, operator: str
   ));
 
   const ymd = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  const name = `P0-${shop.region ?? ""}-${productIds[0]}-${ymd}-${operator}`.slice(0, 80);
+  const customName = String(b.tc_name ?? "").trim();
+  const name = customName || `P0-${shop.region ?? ""}-${ymd}-${operator}`;
   const endTime = Math.floor(Date.now() / 1000) + 60 * 24 * 3600; // 默认约 2 个月（R10）
   const products = productIds.map((id) => {
     const p: Record<string, unknown> = { id, target_commission_rate: pctToRate(pct) };
@@ -283,13 +284,34 @@ async function actionWrite(shop: Shop, b: Record<string, unknown>, operator: str
     free_sample_rule: { has_free_sample: true, is_sample_approval_exempt: false }, // 允许申样、人工审核（R10）
   };
   if (tcMessage) createBody.message = tcMessage;
-  const created = await ttsCall<{
+  type CreateResp = {
     target_collaboration?: { id?: string };
     target_collaboration_conflicts?: unknown[];
     invalid_open_id_list?: string[];
     invalid_product_id_list?: string[];
-  }>({ ...T, method: "POST", path: "/affiliate_seller/202508/target_collaborations", body: createBody, write: true });
-  steps.push({ ...step("create_target_collaboration", created), request_body: createBody });
+  };
+  const tryCreate = async (label: string, body: Record<string, unknown>) => {
+    const r = await ttsCall<CreateResp>({
+      ...T,
+      method: "POST",
+      path: "/affiliate_seller/202508/target_collaborations",
+      body,
+      write: true,
+    });
+    steps.push({ ...step(`create_target_collaboration${label}`, r), request_body: body });
+    return r;
+  };
+  // 98001004 = 参数校验不通过（平台已拒绝、未创建），可以安全地换参数再试，用来定位是 name 还是 message 不合规。
+  let created = await tryCreate("", createBody);
+  if (created.code === 98001004 && createBody.message) {
+    const { message: _m, ...noMsg } = createBody;
+    created = await tryCreate("_retry_without_message", noMsg);
+    if (created.code === 98001004) {
+      created = await tryCreate("_retry_short_name_without_message", { ...noMsg, name: `P0-${shop.region ?? ""}-${ymd.slice(4)}` });
+    }
+  } else if (created.code === 98001004) {
+    created = await tryCreate("_retry_short_name", { ...createBody, name: `P0-${shop.region ?? ""}-${ymd.slice(4)}` });
+  }
   const tcId = created.data?.target_collaboration?.id;
   if (created.code !== 0 || !tcId) return { stopped_at: "create_target_collaboration", steps };
 
