@@ -1017,6 +1017,10 @@ export type Database = {
           abnormal_ratio: number
           eco_device_at: string | null
           eco_device_id: string | null
+          eco_sync_at: string | null
+          eco_sync_count: number | null
+          eco_sync_error: string | null
+          eco_sync_error_at: string | null
           eco_token: string | null
           eco_token_exp: string | null
           feishu_chat_id: string | null
@@ -1031,6 +1035,10 @@ export type Database = {
           abnormal_ratio?: number
           eco_device_at?: string | null
           eco_device_id?: string | null
+          eco_sync_at?: string | null
+          eco_sync_count?: number | null
+          eco_sync_error?: string | null
+          eco_sync_error_at?: string | null
           eco_token?: string | null
           eco_token_exp?: string | null
           feishu_chat_id?: string | null
@@ -1045,6 +1053,10 @@ export type Database = {
           abnormal_ratio?: number
           eco_device_at?: string | null
           eco_device_id?: string | null
+          eco_sync_at?: string | null
+          eco_sync_count?: number | null
+          eco_sync_error?: string | null
+          eco_sync_error_at?: string | null
           eco_token?: string | null
           eco_token_exp?: string | null
           feishu_chat_id?: string | null
@@ -1471,6 +1483,39 @@ export type Database = {
           staff_name?: string
           updated_at?: string
           vid?: string
+        }
+        Relationships: []
+      }
+      eco_balances: {
+        Row: {
+          advertiser_id: string
+          available: number | null
+          consumption: number | null
+          currency: string | null
+          fetched_at: string
+          frozen: number | null
+          name: string | null
+          total: number | null
+        }
+        Insert: {
+          advertiser_id: string
+          available?: number | null
+          consumption?: number | null
+          currency?: string | null
+          fetched_at?: string
+          frozen?: number | null
+          name?: string | null
+          total?: number | null
+        }
+        Update: {
+          advertiser_id?: string
+          available?: number | null
+          consumption?: number | null
+          currency?: string | null
+          fetched_at?: string
+          frozen?: number | null
+          name?: string | null
+          total?: number | null
         }
         Relationships: []
       }
