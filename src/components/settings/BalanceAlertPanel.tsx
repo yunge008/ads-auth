@@ -20,6 +20,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { getAdminName, getPasscode, invokeFn } from "@/lib/api";
 import { EcoVerifyButton } from "@/components/settings/EcoVerifyButton";
+import { parseTargetDays, planRow, summarize, type PlanRow } from "@/lib/rechargePlan";
 
 type Daily = {
   date: string;
@@ -69,6 +70,9 @@ export function BalanceAlertPanel() {
   const [xInput, setXInput] = React.useState("");
   const [ratioInput, setRatioInput] = React.useState("");
   const [filter, setFilter] = React.useState("");
+  // 充值计划（只在页面算）：目标可用天数 + 逐户改写的充值金额
+  const [planDaysInput, setPlanDaysInput] = React.useState("");
+  const [overrides, setOverrides] = React.useState<Record<string, string>>({});
 
   const reload = React.useCallback(async () => {
     setLoading(true);
@@ -187,6 +191,22 @@ export function BalanceAlertPanel() {
     )
     // 按近10天正常日均倒序（没有日均的排最后）
     .sort((a, b) => (b.avg_daily_spend ?? -1) - (a.avg_daily_spend ?? -1));
+  const T = parseTargetDays(planDaysInput);
+  const planInputs = rows.map((a) => ({
+    id: a.advertiser_id,
+    enabled: a.enabled,
+    balance: a.balance,
+    avg: a.avg_daily_spend,
+    daysLeft: a.days_left,
+  }));
+  const plan = new Map<string, PlanRow>(
+    planInputs.map((p) => {
+      const o = overrides[p.id];
+      const ov = o != null && o.trim() !== "" && Number.isFinite(Number(o)) ? Number(o) : null;
+      return [p.id, planRow(p, T, ov)];
+    }),
+  );
+  const summary = summarize(planInputs, plan);
   const alertCount = accounts.filter(
     (a) => a.enabled && a.days_left != null && a.days_left < X,
   ).length;
@@ -250,6 +270,26 @@ export function BalanceAlertPanel() {
               </div>
             </div>
             <EcoVerifyButton />
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">充值可用天数（页面试算）</span>
+              <div className="flex items-center gap-2">
+                <Input
+                  value={planDaysInput}
+                  onChange={(e) => {
+                    setPlanDaysInput(e.target.value);
+                    setOverrides({});
+                  }}
+                  placeholder="如 20"
+                  className="h-8 w-20"
+                />
+                {T != null && (
+                  <span className="text-xs whitespace-nowrap">
+                    {T} 天缺口 <b>{fmt(summary.gap)}</b>，计划充值{" "}
+                    <b className="text-primary">{fmt(summary.recharge, 0)}</b>
+                  </span>
+                )}
+              </div>
+            </div>
             <div className="flex gap-2 ml-auto">
               <Input
                 placeholder="搜索账户/ID/国家"
@@ -281,9 +321,14 @@ export function BalanceAlertPanel() {
                   <TableHead>账户</TableHead>
                   <TableHead>国家</TableHead>
                   <TableHead className="text-right">可用余额</TableHead>
+                  <TableHead className="text-right whitespace-nowrap">
+                    {T != null ? `推荐充值（${T}天）` : "推荐充值"}
+                  </TableHead>
                   <TableHead className="text-right">近10天正常日均</TableHead>
                   <TableHead className="text-right">正常天数</TableHead>
-                  <TableHead className="text-right">可用天数</TableHead>
+                  <TableHead className="text-right whitespace-nowrap">
+                    {T != null ? "充值后可用天数" : "可用天数"}
+                  </TableHead>
                   <TableHead>更新时间</TableHead>
                 </TableRow>
               </TableHeader>
@@ -291,7 +336,7 @@ export function BalanceAlertPanel() {
                 {loading ? (
                   <TableRow>
                     <TableCell
-                      colSpan={8}
+                      colSpan={9}
                       className="h-16 text-center text-sm text-muted-foreground"
                     >
                       加载中…
@@ -300,95 +345,133 @@ export function BalanceAlertPanel() {
                 ) : rows.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={8}
+                      colSpan={9}
                       className="h-16 text-center text-sm text-muted-foreground"
                     >
                       暂无已授权账户
                     </TableCell>
                   </TableRow>
                 ) : (
-                  rows.map((a) => {
-                    const low = a.days_left != null && a.days_left < X;
-                    // 红：已达监控天数（< X）；黄：距离监控天数 5 天内（X ~ X+5）
-                    const near = a.days_left != null && !low && a.days_left < X + 5;
-                    return (
-                      <TableRow
-                        key={a.advertiser_id}
-                        className={low && a.enabled ? "bg-destructive/5" : undefined}
-                      >
-                        <TableCell>
-                          <Switch
-                            checked={a.enabled}
-                            onCheckedChange={(v) => toggle(a.advertiser_id, v)}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <div className="font-medium">{a.advertiser_name ?? a.advertiser_id}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {a.advertiser_id} · {a.connections.join("/")}
-                          </div>
-                          {a.error && (
-                            <div
-                              className="text-xs text-amber-600 max-w-md truncate"
-                              title={a.error}
-                            >
-                              ⚠ {a.error}
-                            </div>
-                          )}
-                        </TableCell>
-                        <TableCell>{a.country ?? "—"}</TableCell>
-                        <TableCell className="text-right">
-                          <span title={a.balance_source ?? ""}>{fmt(a.balance)}</span>
-                          <span className="text-xs text-muted-foreground ml-1">
-                            {a.currency ?? ""}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {a.daily ? (
-                            <Tooltip>
-                              <TooltipTrigger className="underline decoration-dotted">
-                                {fmt(a.avg_daily_spend)}
-                              </TooltipTrigger>
-                              <TooltipContent className="text-xs">
-                                {a.daily.map((d) => (
-                                  <div
-                                    key={d.date}
-                                    className={d.valid ? "" : "opacity-50 line-through"}
-                                  >
-                                    {d.date}：{fmt(d.spend)}
-                                    {d.gmv_max != null
-                                      ? `（BASIC ${fmt(d.basic)} / GMV Max ${fmt(d.gmv_max)}）`
-                                      : ""}
-                                  </div>
-                                ))}
-                              </TooltipContent>
-                            </Tooltip>
-                          ) : (
-                            "—"
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {a.valid_days == null ? "—" : `${a.valid_days}/10`}
-                        </TableCell>
-                        <TableCell
-                          className={`text-right font-medium ${low ? "text-destructive" : near ? "text-amber-600" : ""}`}
+                  [
+                    <TableRow key="__summary" className="bg-muted/60 font-medium">
+                      <TableCell />
+                      <TableCell>汇总（已开预警 {summary.count} 户）</TableCell>
+                      <TableCell />
+                      <TableCell className="text-right">{fmt(summary.balance)}</TableCell>
+                      <TableCell className="text-right text-primary">
+                        {T != null ? fmt(summary.recharge, 0) : "—"}
+                      </TableCell>
+                      <TableCell className="text-right">{fmt(summary.avg)}</TableCell>
+                      <TableCell />
+                      <TableCell className="text-right">
+                        <span
+                          title={`加权：(Σ余额+Σ计划充值)÷Σ日耗；各户简单平均 ${fmt(summary.meanDays, 1)} 天`}
                         >
-                          {a.days_left == null ? (
-                            "—"
-                          ) : (
-                            <span
-                              className={`inline-block rounded px-1.5 py-0.5 ${low ? "bg-red-100 dark:bg-red-950" : near ? "bg-yellow-100 dark:bg-yellow-950" : ""}`}
-                            >
-                              {fmt(a.days_left, 1)}
+                          {fmt(summary.weightedDays, 1)}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        可用天数为加权平均
+                      </TableCell>
+                    </TableRow>,
+                    ...rows.map((a) => {
+                      const pr = plan.get(a.advertiser_id);
+                      const shownDays = pr?.days ?? a.days_left;
+                      const low = shownDays != null && shownDays < X;
+                      // 红：已达监控天数（< X）；黄：距离监控天数 5 天内（X ~ X+5）
+                      const near = shownDays != null && !low && shownDays < X + 5;
+                      return (
+                        <TableRow
+                          key={a.advertiser_id}
+                          className={low && a.enabled ? "bg-destructive/5" : undefined}
+                        >
+                          <TableCell>
+                            <Switch
+                              checked={a.enabled}
+                              onCheckedChange={(v) => toggle(a.advertiser_id, v)}
+                            />
+                          </TableCell>
+                          <TableCell className="max-w-[260px]">
+                            <div className="font-medium truncate">
+                              {a.advertiser_name ?? a.advertiser_id}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {a.advertiser_id} · {a.connections.join("/")}
+                            </div>
+                            {a.error && (
+                              <div className="text-xs text-amber-600 truncate" title={a.error}>
+                                ⚠ {a.error}
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell>{a.country ?? "—"}</TableCell>
+                          <TableCell className="text-right">
+                            <span title={a.balance_source ?? ""}>{fmt(a.balance)}</span>
+                            <span className="text-xs text-muted-foreground ml-1">
+                              {a.currency ?? ""}
                             </span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
-                          {a.checked_at ? new Date(a.checked_at).toLocaleString() : "未刷新"}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {T != null && pr?.eligible ? (
+                              <Input
+                                value={overrides[a.advertiser_id] ?? String(pr.recommended)}
+                                onChange={(e) =>
+                                  setOverrides((o) => ({ ...o, [a.advertiser_id]: e.target.value }))
+                                }
+                                title={`缺口 ${fmt(pr.gap)}，按 100 向上取整推荐 ${fmt(pr.recommended, 0)}`}
+                                className="h-7 w-24 ml-auto text-right"
+                              />
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {a.daily ? (
+                              <Tooltip>
+                                <TooltipTrigger className="underline decoration-dotted">
+                                  {fmt(a.avg_daily_spend)}
+                                </TooltipTrigger>
+                                <TooltipContent className="text-xs">
+                                  {a.daily.map((d) => (
+                                    <div
+                                      key={d.date}
+                                      className={d.valid ? "" : "opacity-50 line-through"}
+                                    >
+                                      {d.date}：{fmt(d.spend)}
+                                      {d.gmv_max != null
+                                        ? `（BASIC ${fmt(d.basic)} / GMV Max ${fmt(d.gmv_max)}）`
+                                        : ""}
+                                    </div>
+                                  ))}
+                                </TooltipContent>
+                              </Tooltip>
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {a.valid_days == null ? "—" : `${a.valid_days}/10`}
+                          </TableCell>
+                          <TableCell
+                            className={`text-right font-medium ${low ? "text-destructive" : near ? "text-amber-600" : ""}`}
+                          >
+                            {shownDays == null ? (
+                              "—"
+                            ) : (
+                              <span
+                                className={`inline-block rounded px-1.5 py-0.5 ${low ? "bg-red-100 dark:bg-red-950" : near ? "bg-yellow-100 dark:bg-yellow-950" : ""}`}
+                              >
+                                {fmt(shownDays, 1)}
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {a.checked_at ? new Date(a.checked_at).toLocaleString() : "未刷新"}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    }),
+                  ]
                 )}
               </TableBody>
             </Table>
