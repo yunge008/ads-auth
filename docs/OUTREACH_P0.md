@@ -56,19 +56,43 @@
 5. token 刷新：`tts-p0-probe {"action":"refresh","shop_id":"店铺ID"}`
 6. 补测单个接口（Claude 会给具体指令）：`{"action":"raw","shop_id":"…","method":"POST","path":"/affiliate_seller/…","body":{…}}`
 
-## 4. 实测结果（待填）
+## 4. 实测结果
+
+### 4.1 只读实测（2026-11-10，两店均已完成）
+
+| 项 | PH（8646920450261288950） | TH（8646920450314045430） |
+|---|---|---|
+| 授权 | ✅ 一次授权带出 PH、TH 两店（CROSS_BORDER），scope 11 个；access 7 天、refresh 到 2125 年 | 同左 |
+| 周名额 | ✅ code=0；`unlimited=true`、`gmv_tier=0`、`quota_sum=-1`、无 `quota_details` 分档 | 同左 |
+| 筛选项 | ✅ code=0，但 `option_list`/`sorters` 均为空 | 同左 |
+| handle 解析（完全相等才算） | 8/10 = 80% | 9/10 = 90% |
+| 未解析 | `sshlyp`：搜索无任何结果；`dayanamarieeefinds`：只搜到 `dayanamarieeeefind`（多一个 e、少 s） | `aaalarnz.e`：只搜到 `aaalarnz.en` |
+| 资格检查 | ✅ code=0，8 人均 `is_creator_follower_count_threshold_met=true`、`is_creator_level_quota_available=true`，`is_batch_quota_consumable=true` | ✅ 同左，9 人 |
+| 外联记录 | ✅ code=0，total=0 | ✅ 同左 |
+| 会话列表 | ✅ code=0，返回 BD 手工建立的历史会话（含未读） | ✅ 同左 |
+| 计划列表（ONGOING） | ✅ code=0，69 个 | ✅ code=0，32 个 |
+
+### 4.2 实测发现（影响后续实现）
+
+| # | 发现 | 处理 |
+|---|---|---|
+| T1 | 两店名额 `unlimited=true`（无上限），当前 R3 名额截断不会触发 | R3 逻辑照做（名额以后可能变成有限）；看板显示「本周名额：不限」 |
+| T2 | 资格检查返回的字段比文档少：没有 `creator_level`、`is_connected`、`is_paired`、`is_blocked`（**未核验**：是值为 false/0 时被省略，还是不限名额时不计算） | R3「已建联不占名额」暂不依赖这些字段；达人等级改从搜索结果 `creator_profile.creator_level` 取（实测有值 0–5） |
+| T3 | 搜达人接口限流明显：19 次搜索中 10 次需要重试（attempts 2–4），≈3 QPS 偏快 | P1 起搜达人单独限速 ≈1 次/秒；handle 解析结果写缓存表 `tts_creators`，同一 handle 不重复搜 |
+| T4 | 3 个未解析的 handle 中 2 个是 Excel 账号写法与真实 username 差一两个字符 | 预检结果里把「最接近的候选账号」列给 BD 确认，**不自动替换**（仍按「完全相等才接受」） |
+| T5 | 会话列表包含 BD 在后台手工聊的全部会话 | R12 回复通知只针对本系统外联过的达人（按 `im_conversations` 里系统建的会话过滤），不打扰手工会话 |
+| T6 | 外联记录在两店都是 0，但店里近期有大量手工定向计划 | 暂不能用外联记录接口核对外联效果，以本系统自己的发送记录为准 |
+| T7 | 两店已有大量 BD 手工建的 ONGOING 计划（PH 69、TH 32，很多是 50 人满额） | R7 冲突检查在实际批次里会频繁命中，提交前预检是必要的 |
+
+### 4.3 写入实测（待做）
 
 | 项 | PH | TH |
 |---|---|---|
-| 授权 / granted_scopes | | |
-| 名额（gmv_tier / 分档 / 已用 / 剩余） | | |
-| 10 个 handle 解析成功率 | | |
-| 资格检查 code=0 | | |
 | 建计划 code=0 / 计划 ID | | |
 | 佣金单位与后台显示一致 | | |
 | 广告佣金字段生效 | | |
 | 邀请链接 | | |
 | 取/建会话 | | |
 | 发 TEXT / 发计划卡片 | | |
-| 1 次外联消耗名额数 | | |
+| 达人端显示效果（截图） | | |
 | token 刷新 | | |
