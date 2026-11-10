@@ -41,8 +41,24 @@ const num = (v: unknown): number | null => {
 };
 
 async function ecoFetch(path: string, init: RequestInit = {}): Promise<Record<string, unknown>> {
+  // ECO 偶发慢响应：超时/网络错误/5xx 自动重试，共 3 次，退避 1s/2s
+  let last: unknown;
+  for (let i = 0; i < 3; i++) {
+    try {
+      return await ecoFetchOnce(path, init);
+    } catch (e) {
+      last = e;
+      const msg = String((e as Error).message ?? e);
+      if (!/超时|fetch failed|ECONNRESET|connection|HTTP 5\d\d/i.test(msg)) throw e;
+      if (i < 2) await new Promise((r) => setTimeout(r, 1000 * 2 ** i));
+    }
+  }
+  throw new Error(`${(last as Error).message}（已重试 3 次，ECO 后台暂时无响应，请稍后再试）`);
+}
+
+async function ecoFetchOnce(path: string, init: RequestInit): Promise<Record<string, unknown>> {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 20_000);
+  const timer = setTimeout(() => ctrl.abort(), 15_000);
   try {
     const r = await fetch(`${ECO_BASE}${path}`, {
       ...init,
