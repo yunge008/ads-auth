@@ -23,6 +23,8 @@ import { Route as OauthTiktokCallbackRouteImport } from './routes/oauth.tiktok.c
 import { Route as ApiPublicHooksAttributionCronRouteImport } from './routes/api/public/hooks/attribution-cron'
 import { Route as ApiPublicHooksAuthorizeCronRouteImport } from './routes/api/public/hooks/authorize-cron'
 import { Route as ApiPublicHooksBalanceAlertCronRouteImport } from './routes/api/public/hooks/balance-alert-cron'
+import { Route as ApiPublicHooksEcoRouteImport } from './routes/api/public/hooks/eco'
+import { Route as ApiPublicHooksEcoPingRouteImport } from './routes/api/public/hooks/eco-ping'
 import { Route as ApiPublicHooksFeishuSyncCronRouteImport } from './routes/api/public/hooks/feishu-sync-cron'
 import { Route as ApiPublicHooksGmvMaxCronRouteImport } from './routes/api/public/hooks/gmv-max-cron'
 
@@ -99,6 +101,16 @@ const ApiPublicHooksBalanceAlertCronRoute =
     path: '/api/public/hooks/balance-alert-cron',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicHooksEcoRoute = ApiPublicHooksEcoRouteImport.update({
+  id: '/api/public/hooks/eco',
+  path: '/api/public/hooks/eco',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPublicHooksEcoPingRoute = ApiPublicHooksEcoPingRouteImport.update({
+  id: '/api/public/hooks/eco-ping',
+  path: '/api/public/hooks/eco-ping',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicHooksFeishuSyncCronRoute =
   ApiPublicHooksFeishuSyncCronRouteImport.update({
     id: '/api/public/hooks/feishu-sync-cron',
@@ -127,6 +139,8 @@ export interface FileRoutesByFullPath {
   '/api/public/hooks/attribution-cron': typeof ApiPublicHooksAttributionCronRoute
   '/api/public/hooks/authorize-cron': typeof ApiPublicHooksAuthorizeCronRoute
   '/api/public/hooks/balance-alert-cron': typeof ApiPublicHooksBalanceAlertCronRoute
+  '/api/public/hooks/eco': typeof ApiPublicHooksEcoRoute
+  '/api/public/hooks/eco-ping': typeof ApiPublicHooksEcoPingRoute
   '/api/public/hooks/feishu-sync-cron': typeof ApiPublicHooksFeishuSyncCronRoute
   '/api/public/hooks/gmv-max-cron': typeof ApiPublicHooksGmvMaxCronRoute
 }
@@ -145,6 +159,8 @@ export interface FileRoutesByTo {
   '/api/public/hooks/attribution-cron': typeof ApiPublicHooksAttributionCronRoute
   '/api/public/hooks/authorize-cron': typeof ApiPublicHooksAuthorizeCronRoute
   '/api/public/hooks/balance-alert-cron': typeof ApiPublicHooksBalanceAlertCronRoute
+  '/api/public/hooks/eco': typeof ApiPublicHooksEcoRoute
+  '/api/public/hooks/eco-ping': typeof ApiPublicHooksEcoPingRoute
   '/api/public/hooks/feishu-sync-cron': typeof ApiPublicHooksFeishuSyncCronRoute
   '/api/public/hooks/gmv-max-cron': typeof ApiPublicHooksGmvMaxCronRoute
 }
@@ -164,6 +180,8 @@ export interface FileRoutesById {
   '/api/public/hooks/attribution-cron': typeof ApiPublicHooksAttributionCronRoute
   '/api/public/hooks/authorize-cron': typeof ApiPublicHooksAuthorizeCronRoute
   '/api/public/hooks/balance-alert-cron': typeof ApiPublicHooksBalanceAlertCronRoute
+  '/api/public/hooks/eco': typeof ApiPublicHooksEcoRoute
+  '/api/public/hooks/eco-ping': typeof ApiPublicHooksEcoPingRoute
   '/api/public/hooks/feishu-sync-cron': typeof ApiPublicHooksFeishuSyncCronRoute
   '/api/public/hooks/gmv-max-cron': typeof ApiPublicHooksGmvMaxCronRoute
 }
@@ -184,6 +202,8 @@ export interface FileRouteTypes {
     | '/api/public/hooks/attribution-cron'
     | '/api/public/hooks/authorize-cron'
     | '/api/public/hooks/balance-alert-cron'
+    | '/api/public/hooks/eco'
+    | '/api/public/hooks/eco-ping'
     | '/api/public/hooks/feishu-sync-cron'
     | '/api/public/hooks/gmv-max-cron'
   fileRoutesByTo: FileRoutesByTo
@@ -202,6 +222,8 @@ export interface FileRouteTypes {
     | '/api/public/hooks/attribution-cron'
     | '/api/public/hooks/authorize-cron'
     | '/api/public/hooks/balance-alert-cron'
+    | '/api/public/hooks/eco'
+    | '/api/public/hooks/eco-ping'
     | '/api/public/hooks/feishu-sync-cron'
     | '/api/public/hooks/gmv-max-cron'
   id:
@@ -220,6 +242,8 @@ export interface FileRouteTypes {
     | '/api/public/hooks/attribution-cron'
     | '/api/public/hooks/authorize-cron'
     | '/api/public/hooks/balance-alert-cron'
+    | '/api/public/hooks/eco'
+    | '/api/public/hooks/eco-ping'
     | '/api/public/hooks/feishu-sync-cron'
     | '/api/public/hooks/gmv-max-cron'
   fileRoutesById: FileRoutesById
@@ -239,6 +263,8 @@ export interface RootRouteChildren {
   ApiPublicHooksAttributionCronRoute: typeof ApiPublicHooksAttributionCronRoute
   ApiPublicHooksAuthorizeCronRoute: typeof ApiPublicHooksAuthorizeCronRoute
   ApiPublicHooksBalanceAlertCronRoute: typeof ApiPublicHooksBalanceAlertCronRoute
+  ApiPublicHooksEcoRoute: typeof ApiPublicHooksEcoRoute
+  ApiPublicHooksEcoPingRoute: typeof ApiPublicHooksEcoPingRoute
   ApiPublicHooksFeishuSyncCronRoute: typeof ApiPublicHooksFeishuSyncCronRoute
   ApiPublicHooksGmvMaxCronRoute: typeof ApiPublicHooksGmvMaxCronRoute
 }
@@ -343,6 +369,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicHooksBalanceAlertCronRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/hooks/eco': {
+      id: '/api/public/hooks/eco'
+      path: '/api/public/hooks/eco'
+      fullPath: '/api/public/hooks/eco'
+      preLoaderRoute: typeof ApiPublicHooksEcoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/hooks/eco-ping': {
+      id: '/api/public/hooks/eco-ping'
+      path: '/api/public/hooks/eco-ping'
+      fullPath: '/api/public/hooks/eco-ping'
+      preLoaderRoute: typeof ApiPublicHooksEcoPingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/hooks/feishu-sync-cron': {
       id: '/api/public/hooks/feishu-sync-cron'
       path: '/api/public/hooks/feishu-sync-cron'
@@ -375,6 +415,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicHooksAttributionCronRoute: ApiPublicHooksAttributionCronRoute,
   ApiPublicHooksAuthorizeCronRoute: ApiPublicHooksAuthorizeCronRoute,
   ApiPublicHooksBalanceAlertCronRoute: ApiPublicHooksBalanceAlertCronRoute,
+  ApiPublicHooksEcoRoute: ApiPublicHooksEcoRoute,
+  ApiPublicHooksEcoPingRoute: ApiPublicHooksEcoPingRoute,
   ApiPublicHooksFeishuSyncCronRoute: ApiPublicHooksFeishuSyncCronRoute,
   ApiPublicHooksGmvMaxCronRoute: ApiPublicHooksGmvMaxCronRoute,
 }
