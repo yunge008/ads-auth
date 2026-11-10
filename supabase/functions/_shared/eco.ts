@@ -40,20 +40,22 @@ const num = (v: unknown): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
-async function ecoFetch(path: string, init: RequestInit = {}): Promise<Record<string, unknown>> {
-  // ECO 偶发慢响应：超时/网络错误/5xx 自动重试，共 3 次，退避 1s/2s
+// 重试策略（2026-11-10 改）：只有只读 GET（账户列表、连通性探测）重试；登录、发验证码一律不重试——
+// 重试发验证码会连发多条短信，频繁重试登录正是触发 ECO 风控的原因之一。
+async function ecoFetch(path: string, init: RequestInit = {}, attempts = 1): Promise<Record<string, unknown>> {
   let last: unknown;
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < attempts; i++) {
     try {
       return await ecoFetchOnce(path, init);
     } catch (e) {
       last = e;
       const msg = String((e as Error).message ?? e);
       if (!/超时|fetch failed|ECONNRESET|connection|HTTP 5\d\d/i.test(msg)) throw e;
-      if (i < 2) await new Promise((r) => setTimeout(r, 1000 * 2 ** i));
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, 1000 * 2 ** i));
     }
   }
-  throw new Error(`${(last as Error).message}（已重试 3 次，ECO 后台暂时无响应，请稍后再试）`);
+  const suffix = attempts > 1 ? `（已重试 ${attempts} 次）` : "";
+  throw new Error(`${(last as Error).message}${suffix}：ECO 后台从服务器访问无响应，可能是服务器 IP 被 ECO 风控限流，稍后再试`);
 }
 
 async function ecoFetchOnce(path: string, init: RequestInit): Promise<Record<string, unknown>> {
@@ -64,6 +66,9 @@ async function ecoFetchOnce(path: string, init: RequestInit): Promise<Record<str
       ...init,
       headers: {
         Accept: "application/json, text/plain, */*",
+        "Accept-Language": "zh-CN,zh;q=0.9",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+        Origin: ECO_BASE,
         "X-Page-Domain": DOMAIN,
         Referer: `${ECO_BASE}/ad-account/manage`,
         ...(init.headers ?? {}),
@@ -104,6 +109,21 @@ async function saveDeviceId(id: string) {
     .update({ eco_device_id: id, eco_device_at: new Date().toISOString() }).eq("id", 1);
 }
 
+// 令牌缓存：ECO token 有效 24h，缓存到 balance_alert_settings，提前 10 分钟视为过期
+async function getCachedToken(): Promise<string | null> {
+  const { data } = await admin().from("balance_alert_settings").select("eco_token,eco_token_exp").eq("id", 1).maybeSingle();
+  const tok = (data?.eco_token as string) ?? null;
+  const exp = data?.eco_token_exp ? Date.parse(String(data.eco_token_exp)) : 0;
+  return tok && exp - Date.now() > 10 * 60_000 ? tok : null;
+}
+
+async function saveToken(token: string | null, expiresInSec = 86400) {
+  await admin().from("balance_alert_settings").update({
+    eco_token: token,
+    eco_token_exp: token ? new Date(Date.now() + expiresInSec * 1000).toISOString() : null,
+  }).eq("id", 1);
+}
+
 export const ECO_2FA_REQUIRED = "ECO_2FA_REQUIRED";
 
 type LoginResult =
@@ -122,6 +142,7 @@ async function rawLogin(twoFactorAuth?: { method: number; code: string; remember
   const data = (j.data ?? {}) as Record<string, unknown>;
   if (j.code === 200 && data.token) {
     if (data.deviceId && data.deviceId !== dev.id) await saveDeviceId(String(data.deviceId));
+    await saveToken(String(data.token), Number(data.expiresIn ?? 86400) || 86400);
     return { ok: true, token: String(data.token) };
   }
   if (j.code === 402) {
@@ -199,7 +220,8 @@ export async function ecoListAccounts(token: string, startDate: string, endDate:
     });
     const j = await ecoFetch(`/api/adaccount/list?${q}`, {
       headers: { Authorization: `Bearer ${token}`, Needtoken: "true", Cookie: `token=${token}` },
-    });
+    }, 3);
+    if (j.code === 401) throw new Error("ECO_TOKEN_INVALID");
     if (j.code !== 200) throw new Error(`ECO 账户列表失败 code=${j.code}: ${String(j.message ?? "")}`);
     const data = (j.data ?? {}) as Record<string, unknown>;
     const list = (data.list ?? []) as Array<Record<string, unknown>>;
@@ -224,15 +246,52 @@ export async function ecoListAccounts(token: string, startDate: string, endDate:
   return out;
 }
 
-/** 登录 + 拉列表；失败返回 error 不抛，调用方据此在每户来源里写明原因 */
+/** 拉列表：先用缓存令牌，失效（401）才重新登录一次；失败返回 error 不抛，调用方据此在每户来源里写明原因 */
 export async function fetchEcoBalances(startDate: string, endDate: string): Promise<{ map: Map<string, EcoAccount>; error: string | null }> {
   const map = new Map<string, EcoAccount>();
   if (!ecoConfigured()) return { map, error: null };
   try {
-    const token = await ecoLogin();
-    for (const a of await ecoListAccounts(token, startDate, endDate)) map.set(a.advertiser_id, a);
+    let token = await getCachedToken();
+    let list: EcoAccount[] | null = null;
+    if (token) {
+      try {
+        list = await ecoListAccounts(token, startDate, endDate);
+      } catch (e) {
+        if ((e as Error).message !== "ECO_TOKEN_INVALID") throw e;
+        await saveToken(null);
+      }
+    }
+    if (!list) {
+      token = await ecoLogin();
+      list = await ecoListAccounts(token, startDate, endDate);
+    }
+    for (const a of list) map.set(a.advertiser_id, a);
     return { map, error: null };
   } catch (e) {
-    return { map, error: (e as Error).message };
+    const msg = (e as Error).message === "ECO_TOKEN_INVALID" ? "ECO 新登录的令牌也被拒绝（401）" : (e as Error).message;
+    return { map, error: msg };
   }
+}
+
+/** 连通性诊断：只发不带凭据的请求（不登录、不触发风控），看服务器能否到达 ECO */
+export async function ecoPing() {
+  const probe = async (label: string, path: string, init: RequestInit = {}) => {
+    const t0 = Date.now();
+    try {
+      const j = await ecoFetchOnce(path, init);
+      return { label, ok: true, ms: Date.now() - t0, code: j.code ?? null, message: j.message ?? null };
+    } catch (e) {
+      const msg = (e as Error).message;
+      // 收到 HTTP 状态码（如 405）也说明网络是通的；只有超时/连接失败才算不通
+      return { label, ok: /HTTP \d{3}/.test(msg), ms: Date.now() - t0, error: msg };
+    }
+  };
+  const cached = await getCachedToken();
+  return {
+    token_cached: !!cached,
+    probes: [
+      await probe("账户列表(无令牌，预期 401)", "/api/adaccount/list?currentPage=1&pageSize=1"),
+      await probe("登录接口(GET，预期 405)", "/api/auth/login"),
+    ],
+  };
 }

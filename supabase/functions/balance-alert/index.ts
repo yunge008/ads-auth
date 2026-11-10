@@ -21,7 +21,7 @@ import { admin, checkAdminPasscode, requireAdmin, type ConnRow } from "../_share
 import { cronAuthed } from "../_shared/cron.ts";
 import { ttGet } from "../_shared/tiktok.ts";
 import { fetchReport } from "../_shared/gmv-max-report.ts";
-import { eco2faSend, eco2faVerify, ecoConfigured, ecoListAccounts, ecoLogin, fetchEcoBalances, getDeviceId } from "../_shared/eco.ts";
+import { eco2faSend, eco2faVerify, ecoConfigured, ecoPing, fetchEcoBalances, getDeviceId } from "../_shared/eco.ts";
 import {
   computeSpendStats,
   DEFAULT_ABNORMAL_RATIO,
@@ -576,12 +576,15 @@ Deno.serve(async (req) => {
         if (!code) throw new Error("请输入验证码");
         return json(await eco2faVerify(Number(body.method ?? 1), code));
       }
+      case "debug_eco_ping":
+        // 不登录，只测服务器到 ECO 的连通性（带不带令牌缓存）
+        return json(await ecoPing());
       case "debug_eco": {
-        // 只读诊断：登录 ECO 并返回前 50 个户的余额字段（不含 token）
+        // 只读诊断：取 ECO 广告户余额（优先缓存令牌，失效才登录；不返回 token）
         const win = spendWindow();
-        const token = await ecoLogin();
-        const list = await ecoListAccounts(token, win.start, win.end);
-        return json({ ok: true, window: win, count: list.length, accounts: list });
+        const { map, error } = await fetchEcoBalances(win.start, win.end);
+        if (error) throw new Error(error);
+        return json({ ok: true, window: win, count: map.size, accounts: [...map.values()] });
       }
       case "debug_balance": {
         const id = String(body.advertiser_id ?? "");
