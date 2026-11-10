@@ -10,8 +10,7 @@
 //                                    （与每日自动授权通知同一个群）完成，因为该 webhook 只配在服务端环境变量里
 //   mark_alerted {advertiser_ids}  → 发送成功后记 last_alerted_at
 //   debug_balance {advertiser_id}  → 两个余额接口对该户的原始返回（API测试页诊断用）
-//   debug_eco                      → 登录 ECO 后台并返回其广告户余额列表（不含 token）
-//   eco_status / eco_2fa_send {method} / eco_2fa_verify {method, code} → ECO 二次验证（仅管理员）
+//   auth_check {admin?}            → 口令校验（供服务端路由 /api/public/hooks/eco 用；ECO 登录/二次验证/同步都在那边）
 // 余额优先级：ECO 后台可用余额（_shared/eco.ts）> TikTok 接口（pickAvailableBalance）
 //
 // 鉴权：口令 + settings tab；cron（x-cron-key）只放行 refresh / build_message / mark_alerted。
@@ -21,7 +20,7 @@ import { admin, checkAdminPasscode, requireAdmin, type ConnRow } from "../_share
 import { cronAuthed } from "../_shared/cron.ts";
 import { ttGet } from "../_shared/tiktok.ts";
 import { fetchReport } from "../_shared/gmv-max-report.ts";
-import { eco2faSend, eco2faVerify, ecoConfigured, ecoPing, fetchEcoBalances, getDeviceId } from "../_shared/eco.ts";
+import { ecoPing } from "../_shared/eco.ts";
 import {
   computeSpendStats,
   DEFAULT_ABNORMAL_RATIO,
@@ -311,6 +310,31 @@ async function actionList() {
   return { settings, accounts };
 }
 
+type EcoRow = {
+  advertiser_id: string; name: string | null; total: number | null; frozen: number | null;
+  available: number | null; consumption: number | null; currency: string | null; fetched_at: string;
+};
+const ECO_MAX_AGE_MS = 24 * 3600_000;
+
+async function readEcoBalances(): Promise<{ ecoMap: Map<string, EcoRow>; ecoError: string | null }> {
+  const db = admin();
+  const [{ data: rows }, { data: st }] = await Promise.all([
+    db.from("eco_balances").select("*"),
+    db.from("balance_alert_settings").select("eco_sync_at,eco_sync_error,eco_sync_error_at").eq("id", 1).maybeSingle(),
+  ]);
+  const ecoMap = new Map<string, EcoRow>();
+  for (const r of (rows ?? []) as EcoRow[]) {
+    if (Date.now() - Date.parse(r.fetched_at) > ECO_MAX_AGE_MS) continue;
+    ecoMap.set(String(r.advertiser_id), { ...r, available: numOrNull(r.available), total: numOrNull(r.total), frozen: numOrNull(r.frozen), consumption: numOrNull(r.consumption) });
+  }
+  let ecoError: string | null = null;
+  const s = (st ?? {}) as Record<string, string | null>;
+  const errNewer = s.eco_sync_error && (!s.eco_sync_at || Date.parse(s.eco_sync_error_at ?? "") > Date.parse(s.eco_sync_at));
+  if (errNewer) ecoError = `最近一次 ECO 同步失败：${s.eco_sync_error}`;
+  else if (!ecoMap.size && (rows ?? []).length) ecoError = "ECO 余额超过 24 小时未同步";
+  return { ecoMap, ecoError };
+}
+
 async function actionRefresh(body: Record<string, unknown>) {
   const started = Date.now();
   const db = admin();
@@ -327,8 +351,10 @@ async function actionRefresh(body: Record<string, unknown>) {
 
   const win = spendWindow();
   const { map: tkBalances, errors: balanceErrors } = await fetchBalances(conns, wanted);
-  // ECO 后台优先：ECO 列表里有的户用 ECO 可用余额（totalBalance − frozenBalance），其余户走 TikTok 接口
-  const { map: ecoMap, error: ecoError } = await fetchEcoBalances(win.start, win.end);
+  // ECO 后台优先：ECO 列表里有的户用 ECO 可用余额（totalBalance − frozenBalance），其余户走 TikTok 接口。
+  // ECO 余额由 Lovable 服务端路由（/api/public/hooks/eco，Cloudflare 出口）同步进 eco_balances，这里只读表——
+  // Supabase 出口访问 ECO 全部超时（2026-11-10 起，疑似被 ECO 拦截 IP）。超过 24h 未同步的行不用。
+  const { ecoMap, ecoError } = await readEcoBalances();
   if (ecoError) balanceErrors.push(`ECO: ${ecoError}`);
   const balances = new Map<string, BalanceInfo>();
   for (const id of ids) {
@@ -339,12 +365,12 @@ async function actionRefresh(body: Record<string, unknown>) {
         balance: eco.available,
         currency: eco.currency ?? tk?.currency ?? null,
         name: tk?.name ?? eco.name,
-        source: `采用 ECO 后台可用余额｜ECO totalBalance=${eco.total} frozenBalance=${eco.frozen} consumption(${win.start}~${win.end})=${eco.consumption}｜TikTok：${tk?.source ?? "无"}`,
+        source: `采用 ECO 后台可用余额（同步于 ${new Date(eco.fetched_at).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false })}）｜ECO totalBalance=${eco.total} frozenBalance=${eco.frozen} 近10天consumption=${eco.consumption}｜TikTok：${tk?.source ?? "无"}`,
       });
     } else if (tk) {
       balances.set(id, {
         ...tk,
-        source: tk.balance == null && ecoError ? `ECO 登录/拉取失败：${ecoError}｜${tk.source}` : tk.source,
+        source: tk.balance == null && ecoError ? `ECO 余额未同步：${ecoError}｜${tk.source}` : tk.source,
       });
     }
   }
@@ -562,30 +588,14 @@ Deno.serve(async (req) => {
       }
       case "refresh":
         return json(await actionRefresh(body));
-      case "eco_status": {
-        const dev = await getDeviceId();
-        return json({ configured: ecoConfigured(), device_saved: !!dev.id, device_at: dev.at });
-      }
-      case "eco_2fa_send": {
-        await requireAdmin(req);
-        return json(await eco2faSend(body.method ? Number(body.method) : undefined));
-      }
-      case "eco_2fa_verify": {
-        await requireAdmin(req);
-        const code = String(body.code ?? "").trim();
-        if (!code) throw new Error("请输入验证码");
-        return json(await eco2faVerify(Number(body.method ?? 1), code));
+      case "auth_check": {
+        // 供 Lovable 服务端路由 /api/public/hooks/eco 校验口令（ECO 操作在那边执行）；上面已过 settings 权限校验
+        if (body.admin) await requireAdmin(req);
+        return json({ ok: true });
       }
       case "debug_eco_ping":
         // 不登录，只测服务器到 ECO 的连通性（带不带令牌缓存）
         return json(await ecoPing());
-      case "debug_eco": {
-        // 只读诊断：取 ECO 广告户余额（优先缓存令牌，失效才登录；不返回 token）
-        const win = spendWindow();
-        const { map, error } = await fetchEcoBalances(win.start, win.end);
-        if (error) throw new Error(error);
-        return json({ ok: true, window: win, count: map.size, accounts: [...map.values()] });
-      }
       case "debug_balance": {
         const id = String(body.advertiser_id ?? "");
         if (!id) throw new Error("缺少 advertiser_id");

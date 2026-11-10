@@ -5,11 +5,12 @@
 //
 // 两种调用：
 //   ① pg_cron（每天北京 10:00）：`apikey: <SUPABASE_PUBLISHABLE_KEY>` 头 → 下游带 x-cron-key；
-//      先 refresh（分片续跑到 remaining 为空）再 build_message，每天都发完整列表（交互卡片，绿/黄/红）。
+//      先同步 ECO 余额（src/lib/eco.server.ts）→ refresh（分片续跑到 remaining 为空）→ build_message，每天都发完整列表（交互卡片，绿/黄/红）。
 //   ② 页面「发送到飞书」按钮：带 x-admin-passcode / x-admin-name，原样转给 Edge Function 校验（需 settings 权限）；
 //      body `{ manual: true }`，不刷新，只按库里当前快照组装并强制发送（无预警也发一条，用于确认通道）。
 import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
+import { syncEcoBalances } from "@/lib/eco.server";
 
 const HARD_BUDGET_MS = 8 * 60 * 1000;
 const MAX_ROUNDS = 20;
@@ -122,6 +123,8 @@ export const Route = createFileRoute("/api/public/hooks/balance-alert-cron")({
         let checked = 0;
         let remaining: string[] = [];
         try {
+          // ECO 余额只能从这里（Cloudflare 出口）同步，Supabase 出口被 ECO 拦截；失败不阻断，预警里会注明
+          const eco = manual ? null : await syncEcoBalances();
           if (!manual) {
             let first = true;
             do {
@@ -154,6 +157,7 @@ export const Route = createFileRoute("/api/public/hooks/balance-alert-cron")({
             checked,
             remaining: remaining.length,
             sent,
+            eco,
             alerts: msg.alerts ?? 0,
             broken: msg.broken ?? 0,
             elapsed_ms: Date.now() - started,

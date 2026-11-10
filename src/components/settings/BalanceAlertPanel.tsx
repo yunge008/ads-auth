@@ -18,7 +18,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { getAdminName, getPasscode, invokeFn } from "@/lib/api";
+import { callEcoRoute, getAdminName, getPasscode, invokeFn } from "@/lib/api";
 import { EcoVerifyButton } from "@/components/settings/EcoVerifyButton";
 import { parseTargetDays, planRow, summarize, type PlanRow } from "@/lib/rechargePlan";
 
@@ -112,6 +112,16 @@ export function BalanceAlertPanel() {
     let done = 0;
     const failed: string[] = [];
     try {
+      // 先同步 ECO 余额（只能走服务端路由，Supabase 出口被 ECO 拦截）；失败不阻断，行内会注明
+      setRefreshing("同步 ECO 余额…");
+      try {
+        const eco = await callEcoRoute<{ ok: boolean; count: number; error?: string }>({
+          action: "sync",
+        });
+        if (!eco.ok) toast.error(`ECO 余额同步失败：${eco.error ?? ""}`);
+      } catch (e) {
+        toast.error(`ECO 余额同步失败：${(e as Error).message}`);
+      }
       for (let round = 0; round < 30; round++) {
         setRefreshing(`拉取中…已完成 ${done}`);
         const r = await invokeFn<{

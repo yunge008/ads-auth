@@ -13,9 +13,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { invokeFn } from "@/lib/api";
+import { callEcoRoute } from "@/lib/api";
 
-type Status = { configured: boolean; device_saved: boolean; device_at: string | null };
+type Status = {
+  configured: boolean;
+  device_saved: boolean;
+  device_at: string | null;
+  sync_at: string | null;
+  sync_count: number | null;
+  sync_error: string | null;
+  sync_error_at: string | null;
+};
 type SendResult =
   | { needs2fa: false }
   | { needs2fa: true; method: number; methods: number[]; recipient: string };
@@ -33,7 +41,7 @@ export function EcoVerifyButton({ onVerified }: { onVerified?: () => void }) {
 
   const loadStatus = React.useCallback(async () => {
     try {
-      setStatus(await invokeFn<Status>("balance-alert", { action: "eco_status" }));
+      setStatus(await callEcoRoute<Status>({ action: "status" }));
     } catch {
       setStatus(null);
     }
@@ -45,7 +53,7 @@ export function EcoVerifyButton({ onVerified }: { onVerified?: () => void }) {
   const send = async (m: number) => {
     setBusy(true);
     try {
-      const r = await invokeFn<SendResult>("balance-alert", { action: "eco_2fa_send", method: m });
+      const r = await callEcoRoute<SendResult>({ action: "2fa_send", method: m });
       if (!r.needs2fa) {
         toast.success("ECO 当前无需验证，已可自动登录");
         setOpen(false);
@@ -67,7 +75,7 @@ export function EcoVerifyButton({ onVerified }: { onVerified?: () => void }) {
   const verify = async () => {
     setBusy(true);
     try {
-      await invokeFn("balance-alert", { action: "eco_2fa_verify", method, code });
+      await callEcoRoute({ action: "2fa_verify", method, code });
       toast.success("ECO 验证成功，已记住设备，之后自动登录");
       setOpen(false);
       setCode("");
@@ -81,17 +89,29 @@ export function EcoVerifyButton({ onVerified }: { onVerified?: () => void }) {
     }
   };
 
+  const syncFailed =
+    !!status?.sync_error &&
+    (!status.sync_at || Date.parse(status.sync_error_at ?? "") > Date.parse(status.sync_at));
   const label = !status
     ? "ECO：状态未知"
     : !status.configured
-      ? "ECO：未配置账号"
-      : status.device_saved
-        ? `ECO：已验证设备（${status.device_at ? new Date(status.device_at).toLocaleDateString() : ""}）`
-        : "ECO：未验证";
+      ? "ECO：服务端未配置账号"
+      : syncFailed
+        ? "ECO：最近同步失败"
+        : status.sync_at
+          ? `ECO：已同步 ${status.sync_count ?? 0} 户（${new Date(status.sync_at).toLocaleString()}）`
+          : status.device_saved
+            ? "ECO：已验证设备，未同步"
+            : "ECO：未验证";
 
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-xs text-muted-foreground">{label}</span>
+      <span
+        className={`text-xs ${syncFailed ? "text-destructive" : "text-muted-foreground"}`}
+        title={syncFailed ? (status?.sync_error ?? "") : ""}
+      >
+        {label}
+      </span>
       <Button
         size="sm"
         variant="outline"

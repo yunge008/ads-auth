@@ -51,7 +51,9 @@ export async function invokeFn<T = unknown>(
         if (j?.error) msg = j.error;
         status = err.context.status;
         payload = j;
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
     if (status === 401) {
       // Clear bad passcode so the gate re-prompts
@@ -65,4 +67,20 @@ export async function invokeFn<T = unknown>(
     throw outErr;
   }
   return data as T;
+}
+
+/** 调 Lovable 服务端路由 /api/public/hooks/eco（ECO 代理商后台操作；Supabase 出口被 ECO 拦截，只能走这里） */
+export async function callEcoRoute<T = unknown>(body: Record<string, unknown>): Promise<T> {
+  const res = await fetch("/api/public/hooks/eco", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-admin-passcode": getPasscode(),
+      "x-admin-name": encodeURIComponent(getAdminName()),
+    },
+    body: JSON.stringify(body),
+  });
+  const j = (await res.json().catch(() => ({}))) as T & { error?: string };
+  if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+  return j;
 }

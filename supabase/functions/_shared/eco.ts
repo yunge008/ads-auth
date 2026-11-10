@@ -1,3 +1,6 @@
+// ⚠ 2026-11-10 起 Supabase 出口访问 ECO 全部超时（疑似被 ECO 拦截 IP）：ECO 登录 / 二次验证 / 同步余额已迁到
+//   Lovable 服务端 src/lib/eco.server.ts（路由 /api/public/hooks/eco），结果写 eco_balances 表。
+//   本文件只剩 ecoPing 被 balance-alert 的 debug_eco_ping 使用（测 Supabase 出口是否已解封），其余函数保留备查。
 // ECO 代理商后台（business.ecoglobal.vip）只读客户端：登录 + 广告户列表。
 //
 // 为什么需要：ECO 代理的 TikTok 户归代理商 BC（Saboten Limited 7 / ECO DIGITAL NO.11）所有，
