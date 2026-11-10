@@ -7,8 +7,9 @@
 //   shops                                       列出已授权店铺（不含 token）
 //   refresh  {shop_id}                          用 refresh_token 换新 token（验证自动刷新可行）
 //   read     {shop_id, handles:[...]}           只读实测：名额 / 筛选项 / 逐个 handle 解析 / 资格检查 / 外联记录 / 会话列表 / 计划列表
-//   write    {shop_id, handle, product_id, commission_pct, ad_commission_pct?, message_text, send_card?, confirm:"SEND"}
-//                                               真实写入：建 1 达人 1 商品定向计划 → 查详情 → 生成邀请链接 → 取/建会话 → 发私信（+可选计划卡片）
+//   write    {shop_id, handles:[...], product_ids:[...], commission_pct, ad_commission_pct?, contact, message_text, tc_message?, send_card?, confirm:"SEND"}
+//            （也兼容单个 handle / product_id）
+//                                               真实写入：建 1 个定向计划（多达人×多商品） → 查详情 → 生成邀请链接 → 取/建会话 → 发私信（+可选计划卡片）
 //                                               会消耗 1 个本周外联名额，并真的给达人发消息
 //   raw      {shop_id, method, path, query?, body?}  任意 /affiliate_seller/、/authorization/ 接口单次调用（补测用）
 //
@@ -129,6 +130,7 @@ async function resolveHandle(shop: Shop, handle: string) {
     query: { page_size: 20 },
     body: { keyword: h, data_groups: ["BASIC_CREATOR_INFORMATION"] },
   });
+  await new Promise((r) => setTimeout(r, 700)); // 搜达人接口限流较严（P0 实测 T3），单独再降速到约 1 次/秒
   const creators = r.data?.creators ?? [];
   const exact = creators.filter((c) => normalizeHandle(c.username ?? "") === h);
   const status = r.code !== 0 ? "ERROR" : exact.length === 1 ? "OK" : exact.length > 1 ? "AMBIGUOUS" : "NOT_FOUND";
@@ -217,15 +219,23 @@ async function actionRead(shop: Shop, handles: string[]) {
   return out;
 }
 
+function strList(one: unknown, many: unknown): string[] {
+  const arr = Array.isArray(many) ? many : one !== undefined && one !== null && one !== "" ? [one] : [];
+  return [...new Set(arr.map((x) => String(x ?? "").trim()).filter(Boolean))];
+}
+
 async function actionWrite(shop: Shop, b: Record<string, unknown>, operator: string) {
   if (b.confirm !== "SEND") bad('写入会真实建计划、消耗名额、给达人发消息。确认请在 body 里加 "confirm":"SEND"');
-  const productId = String(b.product_id ?? "").trim();
+  const productIds = strList(b.product_id, b.product_ids);
+  const handles = strList(b.handle, b.handles);
   const pct = Number(b.commission_pct);
   const adPct = b.ad_commission_pct === undefined || b.ad_commission_pct === null || b.ad_commission_pct === ""
     ? null
     : Number(b.ad_commission_pct);
   const text = String(b.message_text ?? "").trim();
-  if (!productId) bad("product_id 必填");
+  const tcMessage = String(b.tc_message ?? "").trim();
+  if (!productIds.length || productIds.length > 100) bad("product_id / product_ids 必填，最多 100 个");
+  if (!handles.length || handles.length > 50) bad("handle / handles 必填，最多 50 个");
   if (!(pct >= 1 && pct <= 80)) bad("commission_pct 需在 1–80 之间（单位：%）");
   if (adPct !== null && !(adPct >= 0 && adPct <= 80)) bad("ad_commission_pct 需在 0–80 之间（单位：%）");
   if (!text) bad("message_text 必填（私信正文，{link} 会被替换成计划邀请链接）");
@@ -236,10 +246,14 @@ async function actionWrite(shop: Shop, b: Record<string, unknown>, operator: str
 
   const T = { accessToken: shop.access_token, shopCipher: shop.shop_cipher };
   const steps: unknown[] = [];
-  const res = await resolveHandle(shop, String(b.handle ?? ""));
-  steps.push(res);
-  if (!res.open_id) return { stopped_at: "resolve_handle", steps };
-  const openId = res.open_id;
+  const creators: Array<{ handle: string; open_id: string }> = [];
+  for (const h of handles) {
+    const res = await resolveHandle(shop, h);
+    steps.push({ ...res, candidates_top5: undefined, matched: undefined });
+    if (res.open_id) creators.push({ handle: res.handle, open_id: res.open_id });
+  }
+  if (!creators.length) return { stopped_at: "resolve_handle", steps };
+  const openIds = creators.map((c) => c.open_id);
 
   steps.push(step("quota_before", await ttsCall({ ...T, method: "GET", path: "/affiliate_seller/202607/creator_outreach/quota" })));
   steps.push(step(
@@ -248,23 +262,27 @@ async function actionWrite(shop: Shop, b: Record<string, unknown>, operator: str
       ...T,
       method: "POST",
       path: "/affiliate_seller/202610/creator_outreach/eligibility/check",
-      body: { creator_infos: [{ creator_open_id: openId }] },
+      body: { creator_infos: openIds.map((id) => ({ creator_open_id: id })) },
     }),
   ));
 
   const ymd = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  const name = `P0-${shop.region ?? ""}-${productId}-${ymd}-${operator}`.slice(0, 80);
+  const name = `P0-${shop.region ?? ""}-${productIds[0]}-${ymd}-${operator}`.slice(0, 80);
   const endTime = Math.floor(Date.now() / 1000) + 60 * 24 * 3600; // 默认约 2 个月（R10）
-  const product: Record<string, unknown> = { id: productId, target_commission_rate: pctToRate(pct) };
-  if (adPct !== null) product.shop_ads_commission_rate = pctToRate(adPct);
-  const createBody = {
+  const products = productIds.map((id) => {
+    const p: Record<string, unknown> = { id, target_commission_rate: pctToRate(pct) };
+    if (adPct !== null) p.shop_ads_commission_rate = pctToRate(adPct);
+    return p;
+  });
+  const createBody: Record<string, unknown> = {
     name,
     end_time: String(endTime),
-    products: [product],
-    creator_user_open_ids: [openId],
+    products,
+    creator_user_open_ids: openIds,
     seller_contact_info: contact,
     free_sample_rule: { has_free_sample: true, is_sample_approval_exempt: false }, // 允许申样、人工审核（R10）
   };
+  if (tcMessage) createBody.message = tcMessage;
   const created = await ttsCall<{
     target_collaboration?: { id?: string };
     target_collaboration_conflicts?: unknown[];
@@ -287,52 +305,57 @@ async function actionWrite(shop: Shop, b: Record<string, unknown>, operator: str
     write: true,
   });
   steps.push(step("generate_link", link));
-
-  const conv = await ttsCall<{ conversation_id?: string; is_new?: boolean }>({
-    ...T,
-    method: "POST",
-    path: "/affiliate_seller/202508/conversations",
-    body: { creator_open_id: openId, only_need_conversation_id: false },
-    write: true,
-  });
-  steps.push(step("get_or_create_conversation", conv));
-  const convId = conv.data?.conversation_id;
-  if (conv.code !== 0 || !convId) return { stopped_at: "get_or_create_conversation", target_collaboration_id: tcId, steps };
-
   const msgText = text.replace("{link}", link.data?.link ?? "");
-  steps.push(step(
-    "send_text",
-    await ttsCall({
+
+  const perCreator: unknown[] = [];
+  for (const c of creators) {
+    const cs: unknown[] = [];
+    const conv = await ttsCall<{ conversation_id?: string; is_new?: boolean }>({
       ...T,
       method: "POST",
-      path: `/affiliate_seller/202412/conversations/${convId}/messages`,
-      body: { msg_type: "TEXT", content: JSON.stringify({ content: msgText }) },
+      path: "/affiliate_seller/202508/conversations",
+      body: { creator_open_id: c.open_id, only_need_conversation_id: false },
       write: true,
-    }),
-  ));
-  if (b.send_card === true) {
-    steps.push(step(
-      "send_target_collaboration_card",
-      await ttsCall({
-        ...T,
-        method: "POST",
-        path: `/affiliate_seller/202412/conversations/${convId}/messages`,
-        body: { msg_type: "TARGET_COLLABORATION_CARD", content: JSON.stringify({ target_collaboration_id: tcId }) },
-        write: true,
-      }),
-    ));
+    });
+    cs.push(step("get_or_create_conversation", conv));
+    const convId = conv.data?.conversation_id;
+    if (conv.code === 0 && convId) {
+      cs.push(step(
+        "send_text",
+        await ttsCall({
+          ...T,
+          method: "POST",
+          path: `/affiliate_seller/202412/conversations/${convId}/messages`,
+          body: { msg_type: "TEXT", content: JSON.stringify({ content: msgText }) },
+          write: true,
+        }),
+      ));
+      if (b.send_card === true) {
+        cs.push(step(
+          "send_target_collaboration_card",
+          await ttsCall({
+            ...T,
+            method: "POST",
+            path: `/affiliate_seller/202412/conversations/${convId}/messages`,
+            body: { msg_type: "TARGET_COLLABORATION_CARD", content: JSON.stringify({ target_collaboration_id: tcId }) },
+            write: true,
+          }),
+        ));
+      }
+      cs.push(step(
+        "conversation_messages",
+        await ttsCall({
+          ...T,
+          method: "GET",
+          path: `/affiliate_seller/202412/conversation/${convId}/messages`,
+          query: { page_size: 5 },
+        }),
+      ));
+    }
+    perCreator.push({ handle: c.handle, conversation_id: convId ?? null, steps: cs });
   }
-  steps.push(step(
-    "conversation_messages",
-    await ttsCall({
-      ...T,
-      method: "GET",
-      path: `/affiliate_seller/202412/conversation/${convId}/messages`,
-      query: { page_size: 10 },
-    }),
-  ));
   steps.push(step("quota_after", await ttsCall({ ...T, method: "GET", path: "/affiliate_seller/202607/creator_outreach/quota" })));
-  return { target_collaboration_id: tcId, conversation_id: convId, invite_link: link.data?.link ?? null, steps };
+  return { target_collaboration_id: tcId, invite_link: link.data?.link ?? null, creators: perCreator, steps };
 }
 
 Deno.serve(async (req) => {
