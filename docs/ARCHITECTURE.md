@@ -28,6 +28,7 @@
 | `/api/public/hooks/attribution-cron` | **服务端路由**：每晚北京 23:30 刷新 GMV 归因结果快照（调 `attribution-upload` 的 `refresh`，默认最近 3 个有批次的月份；**cron 带 `skip_if_unchanged`，该月广告表和达人登记都没变化就直接跳过，不重复计算**；apikey 鉴权） |
 | `/api/public/hooks/feishu-sync-cron` | **服务端路由**：每晚北京 23:00 把四个「读飞书 → 写自己库」的基础同步各跑一次（`feishu-read-connection-stats` 发样及素材统计、`attribution-sync-creators` 达人登记、`attribution-feishu` 的 `sync-targets` / `sync-handovers`）。四步串行且互不影响，任一步失败发飞书机器人通知，运行状态写 `gmv_max_sync_state.id='feishu_nightly_sync'`；body 可传 `{only:["creators",...]}` 只跑其中几步（apikey 鉴权，单步 4 分钟超时） |
 | `/api/public/hooks/balance-alert-cron` | **服务端路由**：每天北京 10:00（pg_cron `balance-alert-daily`，`0 2 * * *`）先同步 ECO 余额（`eco.server.ts`），再调 `balance-alert` refresh（分片续跑）→ notify，开关开且可用天数 < X 的广告户由本路由经 `FEISHU_BOT_WEBHOOK` 发到**与每日自动授权通知同一个群**（消息由 `balance-alert` build_message 组装，Edge Function 自身不发飞书）；每天都发：交互卡片列出所有开了监控的户（按日耗倒序，可用天数红 < X / 黄 X~X+5 / 绿），卡片头 有户用光红、有户 < X 黄、否则绿。apikey 鉴权；页面「发送到飞书」按钮带口令头 + `{manual:true}` 调同一路由，口令转给 Edge Function 校验，不刷新、强制发送 |
+|  | ↳ **失败不静默、不用旧数据（2026-11-10）**：每天必发；ECO 同步失败/超 26h/未配置 → 卡片标题红 + 置顶原因；任务异常 → 单独红色失败卡片；ECO 同步失败即作废 `eco_balances` 全部行（fetched_at=1970），成功则作废本次列表外的户；刷新超时未更新的户清空余额与可用天数并注明 |
 | `/api/public/hooks/authorize-cron` | **服务端路由**：每日 08:00 自动授权入口，循环 feishu-read → authorize-batch → feishu-writeback，结束发飞书机器人通知（apikey 鉴权，10 分钟硬预算 / 最多 4 轮） |
 
 `routeTree.gen.ts` 自动生成，禁止手改。

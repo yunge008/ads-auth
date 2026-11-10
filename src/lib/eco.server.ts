@@ -239,6 +239,16 @@ async function listAccounts(token: string, startDate: string, endDate: string) {
 const bjDate = (offset: number) =>
   new Date(Date.now() + 8 * 3600_000 + offset * 86400_000).toISOString().slice(0, 10);
 
+// 作废 = fetched_at 置为 1970，Edge Function balance-alert 只用 24h 内的行，作废行即视为「无余额」。
+// keepSince 非空：只作废早于该时刻的行（即本次同步没覆盖到的户）；为空：全部作废。
+const EPOCH = "1970-01-01T00:00:00Z";
+async function invalidateEcoBalances(keepSince: string | null) {
+  let q = db().from("eco_balances").update({ fetched_at: EPOCH });
+  q = keepSince ? q.lt("fetched_at", keepSince) : q.gt("fetched_at", EPOCH);
+  const { error } = await q;
+  if (error) throw new Error(`作废旧 ECO 余额失败：${error.message}`);
+}
+
 /** 同步 ECO 余额到 eco_balances；结果（成功/失败）记到 balance_alert_settings.eco_sync_* */
 export async function syncEcoBalances(): Promise<{
   ok: boolean;
@@ -269,10 +279,14 @@ export async function syncEcoBalances(): Promise<{
         );
       if (error) throw new Error(`写 eco_balances 失败：${error.message}`);
     }
+    // 本次 ECO 列表里没有的户：作废旧余额（不允许用旧数据估算）
+    await invalidateEcoBalances(now);
     await patchSettings({ eco_sync_at: now, eco_sync_error: null, eco_sync_count: list.length });
     return { ok: true, count: list.length };
   } catch (e) {
     const msg = (e as Error).message;
+    // 同步失败：作废全部已存 ECO 余额，这批户当天显示「算不出」并注明原因，绝不沿用旧余额估算
+    await invalidateEcoBalances(null).catch(() => {});
     await patchSettings({
       eco_sync_error: msg.slice(0, 500),
       eco_sync_error_at: new Date().toISOString(),
