@@ -20,6 +20,7 @@ import { Route as GmvMaxCreateRouteImport } from './routes/gmv-max-create'
 import { Route as MaterialPerformanceRouteImport } from './routes/material-performance'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as OauthTiktokCallbackRouteImport } from './routes/oauth.tiktok.callback'
+import { Route as OauthTtsCallbackRouteImport } from './routes/oauth.tts.callback'
 import { Route as ApiPublicHooksAttributionCronRouteImport } from './routes/api/public/hooks/attribution-cron'
 import { Route as ApiPublicHooksAuthorizeCronRouteImport } from './routes/api/public/hooks/authorize-cron'
 import { Route as ApiPublicHooksBalanceAlertCronRouteImport } from './routes/api/public/hooks/balance-alert-cron'
@@ -83,6 +84,11 @@ const OauthTiktokCallbackRoute = OauthTiktokCallbackRouteImport.update({
   path: '/oauth/tiktok/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OauthTtsCallbackRoute = OauthTtsCallbackRouteImport.update({
+  id: '/oauth/tts/callback',
+  path: '/oauth/tts/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicHooksAttributionCronRoute =
   ApiPublicHooksAttributionCronRouteImport.update({
     id: '/api/public/hooks/attribution-cron',
@@ -136,6 +142,7 @@ export interface FileRoutesByFullPath {
   '/material-performance': typeof MaterialPerformanceRoute
   '/settings': typeof SettingsRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
+  '/oauth/tts/callback': typeof OauthTtsCallbackRoute
   '/api/public/hooks/attribution-cron': typeof ApiPublicHooksAttributionCronRoute
   '/api/public/hooks/authorize-cron': typeof ApiPublicHooksAuthorizeCronRoute
   '/api/public/hooks/balance-alert-cron': typeof ApiPublicHooksBalanceAlertCronRoute
@@ -156,6 +163,7 @@ export interface FileRoutesByTo {
   '/material-performance': typeof MaterialPerformanceRoute
   '/settings': typeof SettingsRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
+  '/oauth/tts/callback': typeof OauthTtsCallbackRoute
   '/api/public/hooks/attribution-cron': typeof ApiPublicHooksAttributionCronRoute
   '/api/public/hooks/authorize-cron': typeof ApiPublicHooksAuthorizeCronRoute
   '/api/public/hooks/balance-alert-cron': typeof ApiPublicHooksBalanceAlertCronRoute
@@ -177,6 +185,7 @@ export interface FileRoutesById {
   '/material-performance': typeof MaterialPerformanceRoute
   '/settings': typeof SettingsRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
+  '/oauth/tts/callback': typeof OauthTtsCallbackRoute
   '/api/public/hooks/attribution-cron': typeof ApiPublicHooksAttributionCronRoute
   '/api/public/hooks/authorize-cron': typeof ApiPublicHooksAuthorizeCronRoute
   '/api/public/hooks/balance-alert-cron': typeof ApiPublicHooksBalanceAlertCronRoute
@@ -199,6 +208,7 @@ export interface FileRouteTypes {
     | '/material-performance'
     | '/settings'
     | '/oauth/tiktok/callback'
+    | '/oauth/tts/callback'
     | '/api/public/hooks/attribution-cron'
     | '/api/public/hooks/authorize-cron'
     | '/api/public/hooks/balance-alert-cron'
@@ -219,6 +229,7 @@ export interface FileRouteTypes {
     | '/material-performance'
     | '/settings'
     | '/oauth/tiktok/callback'
+    | '/oauth/tts/callback'
     | '/api/public/hooks/attribution-cron'
     | '/api/public/hooks/authorize-cron'
     | '/api/public/hooks/balance-alert-cron'
@@ -239,6 +250,7 @@ export interface FileRouteTypes {
     | '/material-performance'
     | '/settings'
     | '/oauth/tiktok/callback'
+    | '/oauth/tts/callback'
     | '/api/public/hooks/attribution-cron'
     | '/api/public/hooks/authorize-cron'
     | '/api/public/hooks/balance-alert-cron'
@@ -260,6 +272,7 @@ export interface RootRouteChildren {
   MaterialPerformanceRoute: typeof MaterialPerformanceRoute
   SettingsRoute: typeof SettingsRoute
   OauthTiktokCallbackRoute: typeof OauthTiktokCallbackRoute
+  OauthTtsCallbackRoute: typeof OauthTtsCallbackRoute
   ApiPublicHooksAttributionCronRoute: typeof ApiPublicHooksAttributionCronRoute
   ApiPublicHooksAuthorizeCronRoute: typeof ApiPublicHooksAuthorizeCronRoute
   ApiPublicHooksBalanceAlertCronRoute: typeof ApiPublicHooksBalanceAlertCronRoute
@@ -348,6 +361,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OauthTiktokCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/oauth/tts/callback': {
+      id: '/oauth/tts/callback'
+      path: '/oauth/tts/callback'
+      fullPath: '/oauth/tts/callback'
+      preLoaderRoute: typeof OauthTtsCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/hooks/attribution-cron': {
       id: '/api/public/hooks/attribution-cron'
       path: '/api/public/hooks/attribution-cron'
@@ -412,6 +432,7 @@ const rootRouteChildren: RootRouteChildren = {
   MaterialPerformanceRoute: MaterialPerformanceRoute,
   SettingsRoute: SettingsRoute,
   OauthTiktokCallbackRoute: OauthTiktokCallbackRoute,
+  OauthTtsCallbackRoute: OauthTtsCallbackRoute,
   ApiPublicHooksAttributionCronRoute: ApiPublicHooksAttributionCronRoute,
   ApiPublicHooksAuthorizeCronRoute: ApiPublicHooksAuthorizeCronRoute,
   ApiPublicHooksBalanceAlertCronRoute: ApiPublicHooksBalanceAlertCronRoute,

@@ -2,6 +2,7 @@
 //   {"function":"tts-p0-probe","body":{"action":"shops"}}
 //
 // action：
+//   auth_url                                    返回店铺授权链接（需 secret TTS_SERVICE_ID = Partner Center 应用页的 Service ID）
 //   exchange {auth_code}                        auth_code → token → Get Authorized Shops → 写 tts_shops（返回不含 token）
 //   shops                                       列出已授权店铺（不含 token）
 //   refresh  {shop_id}                          用 refresh_token 换新 token（验证自动刷新可行）
@@ -341,6 +342,11 @@ Deno.serve(async (req) => {
     const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     const action = String(b.action ?? "");
 
+    if (action === "auth_url") {
+      const sid = (Deno.env.get("TTS_SERVICE_ID") ?? "").trim();
+      if (!sid) bad("缺少 Supabase secret：TTS_SERVICE_ID（Partner Center → 应用详情页的 Service ID）。也可以直接用 Partner Center 里「复制授权链接」");
+      return json({ url: `https://services.tiktokshop.com/open/authorize?service_id=${encodeURIComponent(sid)}` });
+    }
     if (action === "exchange") {
       const code = String(b.auth_code ?? b.code ?? "").trim();
       if (!code) bad("auth_code 必填（授权后跳转地址里 code= 后面那串，30 分钟内有效、只能用一次）");
@@ -379,7 +385,7 @@ Deno.serve(async (req) => {
       });
       return json(step("raw", r));
     }
-    bad("action 只能是 exchange / shops / refresh / read / write / raw");
+    bad("action 只能是 auth_url / exchange / shops / refresh / read / write / raw");
   } catch (error) {
     const status = (error as Error & { status?: number }).status ?? 400;
     return json({ error: (error as Error).message }, status);

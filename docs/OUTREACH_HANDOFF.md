@@ -31,8 +31,8 @@ BD 上传达人名单（Excel），选商品和佣金，系统通过 TikTok Shop
 |---|---|
 | R1 | **达人归属规则不变**：系统发出的邀请/私信**不算认领**；达人回复并由 BD 在飞书登记建联才有效。系统**不写** `creator_registry` / `creator_ownership` / 飞书建联表，只提醒 BD 去登记。 |
 | R2 | **佣金审批**：任一商品自然佣金 > 20% 或广告佣金 > 6% → 不能提交，需输入审批密码。所有店铺共用一个密码，管理页可修改；只存哈希；每次放行写审批日志（批次、商品、自然/广告佣金、提交人、时间）。**服务端强制校验**，前端只做提示。 |
-| R3 | **名额不足**：按 Excel 顺序发到本周名额用完；剩余标「名额不足未发」，下周可一键重发。已建联达人（回过消息/接过邀请/挂过商品）不占名额，照常发送。 |
-| R4 | **私信条数**：达人回复前系统最多发 2 条（首发 1 + 跟进 1；平台上限 5）。 |
+| R3 | **名额不足**：按 Excel 顺序发到本周名额用完；剩余标「名额不足未发」，下周可一键重发。已建联达人（回过消息/接过邀请/挂过商品）不占名额，照常发送。**〔2026-11-10 负责人补充〕平台名额按达人等级分档：某达人所在等级名额已用完 → 只跳过该达人（标「名额不足未发」），继续发后面其他等级仍有名额的达人，各等级各自用到完。** |
+| R4 | **私信条数**：〔2026-11-10 负责人变更，原为最多 2 条〕首发 = 文字 + 计划卡片，算作 1 次首发；达人回复前系统最多发 **3 条平台消息**（首发文字 1 + 首发卡片 1 + 跟进 1；平台上限 5）。 |
 | R5 | **自动跟进**：首发 3 天后仍未回复 → 自动发 1 次跟进；跟进模板在群发时与首发模板一起设置。达人已回复则取消跟进。 |
 | R6 | **防重复外联**：同一店铺同一达人 15 天内已被**其他 BD** 通过本系统外联过 → 拦截不发（结果表注明「X 月 X 日已被 某BD 外联」）；超过 15 天且该达人未回复 → 允许。只防重复骚扰，与归属无关。 |
 | R7 | **计划冲突**：达人的某商品已在其他有效定向计划里 → 保留旧计划，该达人跳过该商品；批次完成后给 BD 一份汇总报告（达人、商品、所在计划、发起人、佣金）。 |
@@ -42,7 +42,7 @@ BD 上传达人名单（Excel），选商品和佣金，系统通过 TikTok Shop
 | R11 | **发送身份**：私信在达人端显示为店铺，不区分 BD；系统内记录操作人账号。 |
 | R12 | **回复通知**：约每 30 分钟检查新回复 → 飞书应用机器人私聊对应 BD（「TH 达人 xxx 已回复：…… 请跟进并登记建联」）；同一达人 30 分钟内多条合并。私聊失败（无权限/不在应用可用范围）→ 回退到指定群 @ 该 BD，并在管理页标出私聊失败的同事。 |
 | R13 | **计划拆分**：一个定向计划最多 50 个达人、100 个商品，超出自动拆分；命名 `{站点}-{首个商品SKU或ID}-{YYYYMMDD}-{BD}-{序号}`，如 `TH-AR141-20261105-林丽洪-01`。 |
-| R14 | **外联方式**：只发定向计划 / 只发私信 / 两者都发（默认两者都发）。两者都发时，私信内含该计划的邀请链接（Generate Target Collaboration Link）；P0 若确认 API 支持直接发计划卡片，则改用卡片。 |
+| R14 | **外联方式**：只发定向计划 / 只发私信 / 两者都发（默认两者都发）。两者都发时，私信内含该计划的邀请链接（Generate Target Collaboration Link）；P0 若确认 API 支持直接发计划卡片，则改用卡片。〔2026-11-10：官方文档已确认支持 `TARGET_COLLABORATION_CARD`；负责人定为首发「文字 + 卡片」，见 R4；达人端显示效果待 P0 写入实测确认〕 |
 
 ---
 
@@ -62,7 +62,7 @@ BD 上传达人名单（Excel），选商品和佣金，系统通过 TikTok Shop
 
 ### 4.2 APP 现状（负责人截图，2026-11-05）
 - Partner Center → 应用「内部开发」（自定义，TikTok Shop 商家类），状态开启；目标卖家：马来西亚、菲律宾、新加坡、泰国、越南（本地商家；跨境商家（中国））。
-- 重定向链接当前为 `https://tiktok-token-grabber.lovable.app`（另一个项目）。**需负责人决定**：能否添加 ads-auth 的回调地址；若只能填一个，是改地址还是沿用 token-grabber 拿到的授权。先在 Partner Center 查证是否支持多个回调地址，再带着具体选项问负责人。
+- 重定向链接**已于 2026-11-10 由负责人改为 `https://ads-auth.lovable.app/oauth/tts/callback`**（原 token-grabber 地址弃用，该 APP 未在别处使用）。授权入口：设置 → TikTok Shop 授权。
 - App Key/Secret 由负责人通过 Supabase secrets 设置（`TTS_APP_KEY`、`TTS_APP_SECRET`），不得写入代码或提交到仓库。
 
 ### 4.3 接口清单（Affiliate Seller API）
@@ -131,7 +131,7 @@ BD 上传达人名单（Excel），选商品和佣金，系统通过 TikTok Shop
 | `im_messages` | msg_id, conversation_id, direction(OUT/IN), msg_type, content, template_id, template_version, sent_by, error_code, created_at |
 | `outreach_events` | shop_id, open_id, batch_id, event(INVITED/REPLIED/ACCEPTED/SAMPLE_REQ/SHIPPED/POSTED/ORDERED), ts, ref_id |
 | `commission_approvals` | batch_id, product_id, natural_rate, ad_rate, submitted_by, approved_at |
-| `outreach_settings` | approval_pass_hash, followup_days(3), dedupe_days(15), max_msgs_before_reply(2), default_end_months(2), natural_cap(20), ad_cap(6), fallback_feishu_chat_id |
+| `outreach_settings` | approval_pass_hash, followup_days(3), dedupe_days(15), max_msgs_before_reply(3), default_end_months(2), natural_cap(20), ad_cap(6), fallback_feishu_chat_id |
 | 账号扩展 | 在现有账号上增加：feishu_email/mobile、allowed_shops、disabled_at、deleted_at（如现有表不便扩展，新建 `outreach_users` 关联） |
 
 审批密码哈希也可放 `outreach_settings`（负责人要求后台可改密码，所以存表而非 secret）。

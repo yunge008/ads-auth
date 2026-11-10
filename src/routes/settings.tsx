@@ -7,6 +7,7 @@ import { useCurrentAccount } from "@/lib/account";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FeishuSheetConfigPanel } from "@/components/settings/FeishuSheetConfigPanel";
 import { BalanceAlertPanel } from "@/components/settings/BalanceAlertPanel";
+import { TtsShopsPanel } from "@/components/settings/TtsShopsPanel";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({
@@ -35,6 +36,7 @@ function SettingsPage() {
           {account?.isAdmin && <TabsTrigger value="accounts">账号管理</TabsTrigger>}
           {account?.isAdmin && <TabsTrigger value="exchange-rates">GMV 归因汇率</TabsTrigger>}
           {account?.isAdmin && <TabsTrigger value="feishu-sheets">飞书表名称</TabsTrigger>}
+          {account?.isAdmin && <TabsTrigger value="tts-shops">TikTok Shop 授权</TabsTrigger>}
         </TabsList>
         <TabsContent value="auth">
           <AccountsTable />
@@ -58,6 +60,11 @@ function SettingsPage() {
         {account?.isAdmin && (
           <TabsContent value="feishu-sheets">
             <FeishuSheetConfigPanel />
+          </TabsContent>
+        )}
+        {account?.isAdmin && (
+          <TabsContent value="tts-shops">
+            <TtsShopsPanel />
           </TabsContent>
         )}
       </Tabs>
