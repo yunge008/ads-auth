@@ -30,7 +30,14 @@ type SendResult =
 
 const METHOD_LABEL: Record<number, string> = { 1: "短信", 2: "邮箱" };
 
-export function EcoVerifyButton({ onVerified }: { onVerified?: () => void }) {
+export function EcoVerifyButton({
+  onVerified,
+  reloadKey,
+}: {
+  onVerified?: () => void;
+  /** 变化时重新读同步状态（父组件刷新完成后递增） */
+  reloadKey?: number;
+}) {
   const [status, setStatus] = React.useState<Status | null>(null);
   const [open, setOpen] = React.useState(false);
   const [method, setMethod] = React.useState(1);
@@ -48,7 +55,7 @@ export function EcoVerifyButton({ onVerified }: { onVerified?: () => void }) {
   }, []);
   React.useEffect(() => {
     loadStatus();
-  }, [loadStatus]);
+  }, [loadStatus, reloadKey]);
 
   const send = async (m: number) => {
     setBusy(true);

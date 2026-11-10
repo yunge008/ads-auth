@@ -70,6 +70,7 @@ export function BalanceAlertPanel() {
   const [xInput, setXInput] = React.useState("");
   const [ratioInput, setRatioInput] = React.useState("");
   const [filter, setFilter] = React.useState("");
+  const [ecoReloadKey, setEcoReloadKey] = React.useState(0);
   // 充值计划（只在页面算）：目标可用天数 + 逐户改写的充值金额
   const [planDaysInput, setPlanDaysInput] = React.useState("");
   const [overrides, setOverrides] = React.useState<Record<string, string>>({});
@@ -147,6 +148,7 @@ export function BalanceAlertPanel() {
       toast.error(`刷新失败：${(e as Error).message}`);
     } finally {
       setRefreshing(null);
+      setEcoReloadKey((k) => k + 1);
       reload();
     }
   };
@@ -279,7 +281,7 @@ export function BalanceAlertPanel() {
                 </Button>
               </div>
             </div>
-            <EcoVerifyButton />
+            <EcoVerifyButton reloadKey={ecoReloadKey} onVerified={reload} />
             <div className="flex flex-col gap-1">
               <span className="text-xs text-muted-foreground">充值可用天数（页面试算）</span>
               <div className="flex items-center gap-2">
