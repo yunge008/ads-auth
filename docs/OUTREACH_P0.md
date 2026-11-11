@@ -89,13 +89,31 @@
 - 2026-11-10 PH 第 1 次：建计划失败 `98001004 invalid name or message`（未创建任何计划、未发消息）。当时 name=`P0-PH-1731250718136961014-20261110-yunge008`（43 字符）、message 约 160 字符英文。文档未写 name/message 的长度或字符限制。
   处理：write 默认名改短为 `P0-{站点}-{YYYYMMDD}-{操作人}`，支持 `tc_name` 自定义；遇 98001004（平台已拒绝、未创建，可安全重试）自动依次重试「去掉 message」「短名 + 去掉 message」，从结果判断是哪个字段不合规。
 
+- 2026-11-11 PH 第 3 次（新版函数已部署）：**全部成功**。计划名改为 `P0-PH-20261111-yunge008`（23 字符）、message 原样保留（约 160 字符）→ 一次通过、未触发重试。**结论：上次失败原因是计划名过长**（43 字符失败、23 字符通过；确切上限未核验，中文字符如何计数未核验）。
+
 | 项 | PH | TH |
 |---|---|---|
-| 建计划 code=0 / 计划 ID | | |
-| 佣金单位与后台显示一致 | | |
-| 广告佣金字段生效 | | |
-| 邀请链接 | | |
-| 取/建会话 | | |
-| 发 TEXT / 发计划卡片 | | |
-| 达人端显示效果（截图） | | |
-| token 刷新 | | |
+| 建计划 code=0 / 计划 ID | ✅ `7706908301757384455`，2 达人 × 2 商品，`target_collaboration_conflicts=[]` | 待跑 |
+| 佣金单位 | ✅ 详情回读 `rate=2000`、`shop_ads_commission_rate=500`；平台按此算出佣金金额 PHP 37.6–127.8（与 20% 对得上）。待后台截图对照显示值 | |
+| 广告佣金字段生效 | ✅ `shop_ads_commission_rate` 被接受并回读 | |
+| 佣金生效时间 | ✅ 新建计划立即生效（`effective_time`=创建时刻，`EFFECTIVE_ALL`）；5 天延迟只针对修改 | |
+| 邀请链接 | ✅ `https://affiliate.tiktok.com/api/v1/oec/affiliate/seller/invitation_group/share/long_url/…` | |
+| 取/建会话 | ✅ 两人均返回 `is_new=false`（BD 之前手工聊过，复用旧会话） | |
+| 发 TEXT / 发计划卡片 | ✅ 各 2 条均 code=0；读回：文字含链接，卡片为 `{"invitation_group_id":"…"}` | |
+| 名额消耗 | 不限名额店铺 `quota_use` 前后都是 0，无法验证消耗口径 | |
+| 达人端显示效果 | 待截图 | |
+| token 刷新 | 待测 | |
+
+写入实测新增发现：
+- W1 **计划名长度有限制**（43 字符被拒 `98001004 invalid name or message`）。R13 命名 `{站点}-{首个商品SKU或ID}-{YYYYMMDD}-{BD}-{序号}` 若用 19 位商品 ID 会到 38+ 字符，有被拒风险 → 实现时优先用 SKU 简码；超长时截短；上限需再测（见 §5 待补测）。
+- W2 已有会话会被复用，且能读到 BD 在后台手工发过的历史消息和达人的历史回复（如 kjrpresent 之前回过 "Yes sir!!!"）→ 可用于判断「已建联（回过消息）」（R3），也能看到手工外联记录（R6 目前只查本系统发送记录，是否扩展到手工记录待定）。
+- W3 消息方向判断：店铺发出的消息 `sender_id` 固定（PH 店为 `7311058934513091593`），达人发的 `sender_id` = 会话里的 `creator_im_id` → im-sync 用这个区分 IN/OUT。
+- W4 计划卡片读回类型 `TARGET_COLLABORATION_CARD`，内容字段名是 `invitation_group_id`（发送时用 `target_collaboration_id`）。
+
+## 5. 待补测
+
+- TH 写入（同 PH 指令）。
+- 后台计划佣金显示截图、达人端消息/卡片截图。
+- token 刷新：`tts-p0-probe {"action":"refresh","shop_id":"8646920450261288950"}`（PH、TH 共用一套 token，测一次即可）。
+- 计划名长度上限（N1/R13 需要）：用 raw 建计划时逐档试 30 / 40 字符及中文名。
+- N1 预研：Update Target Collaboration 是否全量覆盖达人列表（漏传旧达人是否被移除）——用本次 PH 测试计划补测。
