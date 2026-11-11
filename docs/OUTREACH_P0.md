@@ -94,15 +94,15 @@
 | 项 | PH | TH |
 |---|---|---|
 | 建计划 code=0 / 计划 ID | ✅ `7706908301757384455`，2 达人 × 2 商品，`target_collaboration_conflicts=[]` | 待跑 |
-| 佣金单位 | ✅ 详情回读 `rate=2000`、`shop_ads_commission_rate=500`；平台按此算出佣金金额 PHP 37.6–127.8（与 20% 对得上）。待后台截图对照显示值 | |
+| 佣金单位 | ✅ 详情回读 `rate=2000`、`shop_ads_commission_rate=500`；**后台显示「标准 20%、店铺广告 5.00%」，单位确认 = 万分比**；有效期至 2027/1/10（=创建+60 天）；免费样品「手动审核申请」 | |
 | 广告佣金字段生效 | ✅ `shop_ads_commission_rate` 被接受并回读 | |
 | 佣金生效时间 | ✅ 新建计划立即生效（`effective_time`=创建时刻，`EFFECTIVE_ALL`）；5 天延迟只针对修改 | |
 | 邀请链接 | ✅ `https://affiliate.tiktok.com/api/v1/oec/affiliate/seller/invitation_group/share/long_url/…` | |
 | 取/建会话 | ✅ 两人均返回 `is_new=false`（BD 之前手工聊过，复用旧会话） | |
 | 发 TEXT / 发计划卡片 | ✅ 各 2 条均 code=0；读回：文字含链接，卡片为 `{"invitation_group_id":"…"}` | |
 | 名额消耗 | 不限名额店铺 `quota_use` 前后都是 0，无法验证消耗口径 | |
-| 达人端显示效果 | 待截图 | |
-| token 刷新 | 待测 | |
+| 店铺端会话显示 | ✅ 文字原样显示（链接是一长串原始 URL，不美观）；计划卡片显示为「免费样品」卡：计划名、计划 ID、商品图与每件佣金金额 | |
+| token 刷新 | ✅ 2026-11-11 refresh 成功，PH/TH 两店一起更新，access 到期顺延到 2026-11-18；scope 11 个 | （同 PH，共用一套 token） |
 
 写入实测新增发现：
 - W1 **计划名长度有限制**（43 字符被拒 `98001004 invalid name or message`）。R13 命名 `{站点}-{首个商品SKU或ID}-{YYYYMMDD}-{BD}-{序号}` 若用 19 位商品 ID 会到 38+ 字符，有被拒风险 → 实现时优先用 SKU 简码；超长时截短；上限需再测（见 §5 待补测）。
@@ -112,8 +112,11 @@
 
 ## 5. 待补测
 
-- TH 写入（同 PH 指令）。
-- 后台计划佣金显示截图、达人端消息/卡片截图。
-- token 刷新：`tts-p0-probe {"action":"refresh","shop_id":"8646920450261288950"}`（PH、TH 共用一套 token，测一次即可）。
+- TH 写入（负责人：下一轮再发）。
+- 文案优化（负责人反馈：不够结构化、不够活泼）：R8 模板库阶段处理；发卡片时文字里可不再放原始链接（卡片已含计划与商品）。
 - 计划名长度上限（N1/R13 需要）：用 raw 建计划时逐档试 30 / 40 字符及中文名。
-- N1 预研：Update Target Collaboration 是否全量覆盖达人列表（漏传旧达人是否被移除）——用本次 PH 测试计划补测。
+- N1 预研（负责人要求：PH 把其他达人、商品加进 `7706908301757384455`）：已做 `add_to_tc` action。文档核对结论：
+  - Update 是**全量覆盖**：响应含 `update_failed.remove_creator_open_ids / remove_product_ids`，漏传 = 移除 → 必须先读详情再合并提交；详情计数与列表数对不上时中止。
+  - Update 字段名与 Create 不同：`commission_rate` / `target_ad_commission_rate`；`seller_contact_info.email` 在 Update 里必填；Update 不能改 message。
+  - 提高佣金立即生效，降低佣金延迟生效（文档原文截断，延迟天数以「5 天」为准，待核验）。
+  - 成功响应也可能部分失败：要检查 `update_failed` 与 `target_collaboration_conflicts`。

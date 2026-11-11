@@ -11,6 +11,8 @@
 //            （也兼容单个 handle / product_id）
 //                                               真实写入：建 1 个定向计划（多达人×多商品） → 查详情 → 生成邀请链接 → 取/建会话 → 发私信（+可选计划卡片）
 //                                               会消耗 1 个本周外联名额，并真的给达人发消息
+//   add_to_tc {shop_id, tc_id, handles?, product_ids?, commission_pct?, ad_commission_pct?, message_text?, send_card?, confirm:"SEND"}
+//                                               已有定向计划增发达人/商品：读详情 → 合并 → 全量 PUT → 回读校验老达人未丢 → 只给新达人发消息
 //   raw      {shop_id, method, path, query?, body?}  任意 /affiliate_seller/、/authorization/ 接口单次调用（补测用）
 //
 // 与 `_shared/tiktok.ts`（Business API）完全独立；只读写 tts_shops 一张表。
@@ -380,6 +382,163 @@ async function actionWrite(shop: Shop, b: Record<string, unknown>, operator: str
   return { target_collaboration_id: tcId, invite_link: link.data?.link ?? null, creators: perCreator, steps };
 }
 
+type TcDetail = {
+  name?: string;
+  end_time?: number;
+  creator_invited_count?: number;
+  product_count?: number;
+  seller_contact_info?: Record<string, string>;
+  free_sample_rule?: { has_free_sample?: boolean; is_sample_approval_exempt?: boolean };
+  creators?: Array<{ creator_open_id?: string; username?: string }>;
+  products?: Array<{ id?: string; commission?: { rate?: number; shop_ads_commission_rate?: number } }>;
+};
+
+/**
+ * 已有定向计划增发达人 / 商品（N1 预研）。
+ * Update 接口是「全量覆盖」：creator_user_open_ids / products 漏传 = 移除（响应里有 remove_* 字段）。
+ * 所以必须先读详情、合并后整体提交；详情里的达人/商品数与计数字段对不上时直接中止，宁可不改也不误删。
+ * 字段名与 Create 不同：commission_rate / target_ad_commission_rate（Create 是 target_commission_rate / shop_ads_commission_rate）。
+ */
+async function actionAddToTc(shop: Shop, b: Record<string, unknown>) {
+  if (b.confirm !== "SEND") bad('会真实修改定向计划（并给新达人发消息）。确认请在 body 里加 "confirm":"SEND"');
+  const tcId = String(b.tc_id ?? "").trim();
+  if (!tcId) bad("tc_id 必填");
+  const handles = strList(b.handle, b.handles);
+  const productIds = strList(b.product_id, b.product_ids);
+  if (!handles.length && !productIds.length) bad("handles / product_ids 至少给一个");
+  const pct = Number(b.commission_pct);
+  const adPct = b.ad_commission_pct === undefined || b.ad_commission_pct === null || b.ad_commission_pct === ""
+    ? null
+    : Number(b.ad_commission_pct);
+  if (productIds.length && !(pct >= 1 && pct <= 80)) bad("新增商品时 commission_pct 必填，1–80（%）");
+  const text = String(b.message_text ?? "").trim();
+
+  const T = { accessToken: shop.access_token, shopCipher: shop.shop_cipher };
+  const steps: unknown[] = [];
+  const getDetail = async (label: string) => {
+    const r = await ttsCall<{ target_collaboration?: TcDetail }>({
+      ...T,
+      method: "GET",
+      path: `/affiliate_seller/202508/target_collaborations/${tcId}`,
+    });
+    steps.push(step(label, r, {
+      creators: (r.data?.target_collaboration?.creators ?? []).map((c) => c.username),
+      products: (r.data?.target_collaboration?.products ?? []).map((p) => ({ id: p.id, commission: p.commission })),
+      creator_invited_count: r.data?.target_collaboration?.creator_invited_count,
+      product_count: r.data?.target_collaboration?.product_count,
+      end_time: r.data?.target_collaboration?.end_time,
+    }));
+    return r;
+  };
+  const before = await getDetail("detail_before");
+  const d = before.data?.target_collaboration;
+  if (before.code !== 0 || !d) return { stopped_at: "detail_before", steps };
+  const oldCreators = (d.creators ?? []).map((c) => c.creator_open_id).filter((x): x is string => !!x);
+  const oldProducts = d.products ?? [];
+  if (d.creator_invited_count !== undefined && d.creator_invited_count !== oldCreators.length) {
+    return { stopped_at: "safety_check", reason: `详情只返回 ${oldCreators.length} 个达人，计数是 ${d.creator_invited_count}，为防误删中止`, steps };
+  }
+  if (d.product_count !== undefined && d.product_count !== oldProducts.length) {
+    return { stopped_at: "safety_check", reason: `详情只返回 ${oldProducts.length} 个商品，计数是 ${d.product_count}，为防误删中止`, steps };
+  }
+
+  const newCreators: Array<{ handle: string; open_id: string }> = [];
+  for (const h of handles) {
+    const res = await resolveHandle(shop, h);
+    steps.push({ ...res, candidates_top5: undefined, matched: undefined });
+    if (res.open_id && !oldCreators.includes(res.open_id)) newCreators.push({ handle: res.handle, open_id: res.open_id });
+  }
+  const allCreators = [...oldCreators, ...newCreators.map((c) => c.open_id)];
+  if (allCreators.length > 50) bad(`合并后 ${allCreators.length} 个达人，超过单计划 50 人上限`);
+
+  const products: Array<Record<string, unknown>> = oldProducts.map((p) => {
+    const o: Record<string, unknown> = { id: p.id, commission_rate: p.commission?.rate };
+    if (p.commission?.shop_ads_commission_rate !== undefined) o.target_ad_commission_rate = p.commission.shop_ads_commission_rate;
+    return o;
+  });
+  for (const id of productIds) {
+    if (products.some((p) => p.id === id)) continue;
+    const o: Record<string, unknown> = { id, commission_rate: pctToRate(pct) };
+    if (adPct !== null) o.target_ad_commission_rate = pctToRate(adPct);
+    products.push(o);
+  }
+  if (products.length > 100) bad(`合并后 ${products.length} 个商品，超过 100 上限`);
+
+  const updateBody = {
+    name: d.name,
+    end_time: String(d.end_time),
+    products,
+    creator_user_open_ids: allCreators,
+    seller_contact_info: d.seller_contact_info ?? {},
+    free_sample_rule: {
+      has_free_sample: d.free_sample_rule?.has_free_sample ?? true,
+      is_sample_approval_exempt: d.free_sample_rule?.is_sample_approval_exempt ?? false,
+    },
+  };
+  const upd = await ttsCall({
+    ...T,
+    method: "PUT",
+    path: `/affiliate_seller/202508/target_collaborations/${tcId}`,
+    body: updateBody,
+    write: true,
+  });
+  steps.push({ ...step("update_target_collaboration", upd), request_body: updateBody });
+  if (upd.code !== 0) return { stopped_at: "update_target_collaboration", steps };
+
+  const after = await getDetail("detail_after");
+  const afterIds = (after.data?.target_collaboration?.creators ?? []).map((c) => c.creator_open_id);
+  const verify = {
+    old_creators_kept: oldCreators.every((id) => afterIds.includes(id)),
+    new_creators_added: newCreators.every((c) => afterIds.includes(c.open_id)),
+    product_count_after: after.data?.target_collaboration?.product_count,
+  };
+
+  const perCreator: unknown[] = [];
+  if (text) {
+    const link = await ttsCall<{ link?: string }>({
+      ...T,
+      method: "POST",
+      path: `/affiliate_seller/202509/target_collaboration/${tcId}/link`,
+      body: {},
+      write: true,
+    });
+    steps.push(step("generate_link", link));
+    const msgText = text.replace("{link}", link.data?.link ?? "");
+    for (const c of newCreators) {
+      const cs: unknown[] = [];
+      const conv = await ttsCall<{ conversation_id?: string }>({
+        ...T,
+        method: "POST",
+        path: "/affiliate_seller/202508/conversations",
+        body: { creator_open_id: c.open_id, only_need_conversation_id: true },
+        write: true,
+      });
+      cs.push(step("get_or_create_conversation", conv));
+      const convId = conv.data?.conversation_id;
+      if (conv.code === 0 && convId) {
+        cs.push(step("send_text", await ttsCall({
+          ...T,
+          method: "POST",
+          path: `/affiliate_seller/202412/conversations/${convId}/messages`,
+          body: { msg_type: "TEXT", content: JSON.stringify({ content: msgText }) },
+          write: true,
+        })));
+        if (b.send_card === true) {
+          cs.push(step("send_target_collaboration_card", await ttsCall({
+            ...T,
+            method: "POST",
+            path: `/affiliate_seller/202412/conversations/${convId}/messages`,
+            body: { msg_type: "TARGET_COLLABORATION_CARD", content: JSON.stringify({ target_collaboration_id: tcId }) },
+            write: true,
+          })));
+        }
+      }
+      perCreator.push({ handle: c.handle, conversation_id: convId ?? null, steps: cs });
+    }
+  }
+  return { tc_id: tcId, added_creators: newCreators.map((c) => c.handle), verify, messages: perCreator, steps };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -413,6 +572,9 @@ Deno.serve(async (req) => {
     if (action === "write") {
       return json(await actionWrite(await loadShop(b.shop_id), b, acc.name));
     }
+    if (action === "add_to_tc") {
+      return json(await actionAddToTc(await loadShop(b.shop_id), b));
+    }
     if (action === "raw") {
       const shop = await loadShop(b.shop_id);
       const path = String(b.path ?? "");
@@ -430,7 +592,7 @@ Deno.serve(async (req) => {
       });
       return json(step("raw", r));
     }
-    bad("action 只能是 auth_url / exchange / shops / refresh / read / write / raw");
+    bad("action 只能是 auth_url / exchange / shops / refresh / read / write / add_to_tc / raw");
   } catch (error) {
     const status = (error as Error & { status?: number }).status ?? 400;
     return json({ error: (error as Error).message }, status);
