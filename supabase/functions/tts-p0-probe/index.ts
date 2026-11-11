@@ -13,6 +13,8 @@
 //                                               会消耗 1 个本周外联名额，并真的给达人发消息
 //   add_to_tc {shop_id, tc_id, handles?, product_ids?, commission_pct?, ad_commission_pct?, message_text?, send_card?, confirm:"SEND"}
 //                                               已有定向计划增发达人/商品：读详情 → 合并 → 全量 PUT → 回读校验老达人未丢 → 只给新达人发消息
+//   name_probe {shop_id, tc_id, names?, confirm:"SEND"}  已有计划逐个改名测名称上限，最后改回原名（不新建、不发消息）
+//   check2   {shop_id, tc_id?, product_ids?}     只读：最新未读/收件箱计数/会话分页/样品申请/联盟订单/计划内推广明细/冲突检查
 //   raw      {shop_id, method, path, query?, body?}  任意 /affiliate_seller/、/authorization/ 接口单次调用（补测用）
 //
 // 与 `_shared/tiktok.ts`（Business API）完全独立；只读写 tts_shops 一张表。
@@ -539,6 +541,144 @@ async function actionAddToTc(shop: Shop, b: Record<string, unknown>) {
   return { tc_id: tcId, added_creators: newCreators.map((c) => c.handle), verify, messages: perCreator, steps };
 }
 
+/** 读计划详情并组装一份「原样不变」的 Update 全量请求体；计数对不上返回 null（防误删）。 */
+async function loadTcForUpdate(shop: Shop, tcId: string) {
+  const r = await ttsCall<{ target_collaboration?: TcDetail }>({
+    accessToken: shop.access_token,
+    shopCipher: shop.shop_cipher,
+    method: "GET",
+    path: `/affiliate_seller/202508/target_collaborations/${tcId}`,
+  });
+  const d = r.data?.target_collaboration;
+  if (r.code !== 0 || !d) return { r, body: null, reason: "读详情失败" };
+  const creators = (d.creators ?? []).map((c) => c.creator_open_id).filter((x): x is string => !!x);
+  const prods = d.products ?? [];
+  if (d.creator_invited_count !== undefined && d.creator_invited_count !== creators.length) {
+    return { r, body: null, reason: `达人列表 ${creators.length} ≠ 计数 ${d.creator_invited_count}` };
+  }
+  if (d.product_count !== undefined && d.product_count !== prods.length) {
+    return { r, body: null, reason: `商品列表 ${prods.length} ≠ 计数 ${d.product_count}` };
+  }
+  const body: Record<string, unknown> = {
+    name: d.name,
+    end_time: String(d.end_time),
+    products: prods.map((p) => {
+      const o: Record<string, unknown> = { id: p.id, commission_rate: p.commission?.rate };
+      if (p.commission?.shop_ads_commission_rate !== undefined) o.target_ad_commission_rate = p.commission.shop_ads_commission_rate;
+      return o;
+    }),
+    creator_user_open_ids: creators,
+    seller_contact_info: d.seller_contact_info ?? {},
+    free_sample_rule: {
+      has_free_sample: d.free_sample_rule?.has_free_sample ?? true,
+      is_sample_approval_exempt: d.free_sample_rule?.is_sample_approval_exempt ?? false,
+    },
+  };
+  return { r, body, reason: "", detail: d };
+}
+
+/**
+ * 计划名长度/字符上限实测：对已有计划逐个改名（不新建计划、不发消息），记录哪些被拒，最后改回原名。
+ * 98001004 = 平台校验拒绝、未修改。
+ */
+async function actionNameProbe(shop: Shop, b: Record<string, unknown>) {
+  if (b.confirm !== "SEND") bad('会临时修改计划名称（最后改回原名）。确认请在 body 里加 "confirm":"SEND"');
+  const tcId = String(b.tc_id ?? "").trim();
+  if (!tcId) bad("tc_id 必填");
+  const base = await loadTcForUpdate(shop, tcId);
+  if (!base.body) return { stopped_at: "load_detail", reason: base.reason, detail: step("detail", base.r, null) };
+  const original = String(base.body.name ?? "");
+  const names = Array.isArray(b.names) && b.names.length
+    ? (b.names as unknown[]).map(String)
+    : [
+      "PH-AR141-20261111-yunge-01", // 26 字符：R13 用 SKU 简码
+      "P0-PH-NAMETEST-30-CHARS-XXXXXX", // 30
+      "P0-PH-NAMETEST-35-CHARS-XXXXXXXXXXX", // 35
+      "P0-PH-NAMETEST-40-CHARS-XXXXXXXXXXXXXXXX", // 40
+      "PH-1731250718136961014-20261111-01", // 34：R13 用 19 位商品 ID
+      "PH-AR141-20261111-林丽洪-01", // 中文 BD 名
+      "PH-1731250718136961014-20261111-林丽洪-01", // 中文 + 长 ID
+    ];
+  const T = { accessToken: shop.access_token, shopCipher: shop.shop_cipher };
+  const results: unknown[] = [];
+  for (const n of names) {
+    const r = await ttsCall({
+      ...T,
+      method: "PUT",
+      path: `/affiliate_seller/202508/target_collaborations/${tcId}`,
+      body: { ...base.body, name: n },
+      write: true,
+    });
+    results.push({ name: n, length: [...n].length, utf8_bytes: new TextEncoder().encode(n).length, ok: r.code === 0, code: r.code, message: r.message });
+  }
+  const restore = await ttsCall({
+    ...T,
+    method: "PUT",
+    path: `/affiliate_seller/202508/target_collaborations/${tcId}`,
+    body: { ...base.body, name: original },
+    write: true,
+  });
+  return { tc_id: tcId, original_name: original, results, restore: step("restore_name", restore, restore.data) };
+}
+
+/**
+ * 后续阶段（P4 回复通知 / P5 漏斗 / R7 冲突）要用的接口，一次性只读核验路径与返回结构。
+ * 不调用「标记已读」：它会清掉 BD 在后台看到的未读提示。
+ */
+async function actionCheck2(shop: Shop, b: Record<string, unknown>) {
+  const T = { accessToken: shop.access_token, shopCipher: shop.shop_cipher };
+  const tcId = String(b.tc_id ?? "").trim();
+  const productIds = strList(b.product_id, b.product_ids);
+  const out: Record<string, unknown> = {};
+  out.latest_unread = step("latest_unread", await ttsCall({ ...T, method: "GET", path: "/affiliate_seller/202412/conversations/messages/list/newest" }));
+  out.inbox_counts = step("inbox_counts", await ttsCall({ ...T, method: "GET", path: "/affiliate_seller/202608/conversations/group_counts" }));
+  const p1 = await ttsCall<{ next_page_token?: string; has_more?: boolean }>({
+    ...T, method: "GET", path: "/affiliate_seller/202412/conversations", query: { page_size: 5, only_need_conversation_id: true },
+  });
+  out.conversations_page1 = step("conversations_page1", p1);
+  if (p1.data?.next_page_token) {
+    out.conversations_page2 = step("conversations_page2", await ttsCall({
+      ...T, method: "GET", path: "/affiliate_seller/202412/conversations",
+      query: { page_size: 5, only_need_conversation_id: true, page_token: p1.data.next_page_token },
+    }));
+  }
+  out.sample_applications = step("sample_applications", await ttsCall({
+    ...T, method: "POST", path: "/affiliate_seller/202508/sample_applications/search", query: { page_size: 10 }, body: {},
+  }));
+  if (tcId) {
+    out.sample_applications_by_tc = step("sample_applications_by_tc", await ttsCall({
+      ...T, method: "POST", path: "/affiliate_seller/202508/sample_applications/search", query: { page_size: 10 },
+      body: { target_collabration_id: tcId },
+    }));
+  }
+  const now = Math.floor(Date.now() / 1000);
+  out.affiliate_orders_7d = step("affiliate_orders_7d", await ttsCall({
+    ...T, method: "POST", path: "/affiliate_seller/202410/orders/search", query: { page_size: 5 },
+    body: { create_time_ge: now - 7 * 86400, create_time_lt: now },
+  }));
+  if (tcId) {
+    const det = await ttsCall<{ target_collaboration?: TcDetail }>({
+      ...T, method: "GET", path: `/affiliate_seller/202508/target_collaborations/${tcId}`,
+    });
+    const creators = (det.data?.target_collaboration?.creators ?? []).map((c) => c.creator_open_id).filter((x): x is string => !!x);
+    const tcProducts = (det.data?.target_collaboration?.products ?? []).map((p) => p.id).filter((x): x is string => !!x);
+    const promo: unknown[] = [];
+    for (const id of creators.slice(0, 3)) {
+      promo.push(step("creator_promotion_details", await ttsCall({
+        ...T, method: "POST", path: "/affiliate_seller/202608/target_collaborations/creator_promotion_details/query",
+        body: { creator_user_open_id: id, invitation_group_id: tcId },
+      })));
+    }
+    out.creator_promotion_details = promo;
+    // 冲突检查：本计划达人 × 本计划商品（应报冲突，验证 R7 预检口径）＋ 额外商品（应不冲突）
+    out.conflicts_check = step("conflicts_check", await ttsCall({
+      ...T, method: "POST", path: "/affiliate_seller/202605/target_collaborations/conflicts/check",
+      body: { creator_open_id_list: creators.slice(0, 10), product_id_list: [...new Set([...tcProducts, ...productIds])].slice(0, 20) },
+    }));
+  }
+  return out;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -572,6 +712,12 @@ Deno.serve(async (req) => {
     if (action === "write") {
       return json(await actionWrite(await loadShop(b.shop_id), b, acc.name));
     }
+    if (action === "name_probe") {
+      return json(await actionNameProbe(await loadShop(b.shop_id), b));
+    }
+    if (action === "check2") {
+      return json(await actionCheck2(await loadShop(b.shop_id), b));
+    }
     if (action === "add_to_tc") {
       return json(await actionAddToTc(await loadShop(b.shop_id), b));
     }
@@ -592,7 +738,7 @@ Deno.serve(async (req) => {
       });
       return json(step("raw", r));
     }
-    bad("action 只能是 auth_url / exchange / shops / refresh / read / write / add_to_tc / raw");
+    bad("action 只能是 auth_url / exchange / shops / refresh / read / write / add_to_tc / name_probe / check2 / raw");
   } catch (error) {
     const status = (error as Error & { status?: number }).status ?? 400;
     return json({ error: (error as Error).message }, status);

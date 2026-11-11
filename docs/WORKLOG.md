@@ -237,3 +237,4 @@
 2026-11-11 | lovable | [1111.144] 重新部署 tts-p0-probe（main 871f224，未改代码、未动其他函数、无 migration）。1110.142（多达人×多商品 + 搜达人降速）与 1110.143（98001004 自动重试、tc_name）两项「需 Lovable 重新部署」待人工项已完成。线上已确认可调用（shops 返回 PH/TH 两店）。write 的真实建计划/发消息行为未实测。 | supabase/functions/tts-p0-probe/index.ts |
 2026-11-11 | claude | [1111.145] 外联 P0：PH 写入实测全部成功（建计划 2 达人×2 商品、佣金 2000/500 回读、邀请链接、复用会话、发文字+计划卡片均 code=0）；定位上次失败为计划名过长（43 字符被拒、23 字符通过）；记录 W1–W4 发现与待补测项。 | docs/OUTREACH_P0.md |
 2026-11-11 | claude | [1111.146] 外联 P0：后台确认佣金单位（标准 20%、店铺广告 5%）、token 刷新通过；tts-p0-probe 新增 add_to_tc（已有定向计划增发达人/商品：读详情→合并→全量 PUT→回读校验→只给新达人发消息，N1 预研）。需 Lovable 重新部署 tts-p0-probe。 | supabase/functions/tts-p0-probe/index.ts、docs/OUTREACH_P0.md |
+2026-11-11 | claude | [1111.147] tts-p0-probe 新增 name_probe（已有计划逐个改名测名称上限并改回）、check2（P4/P5/R7 用到的接口一次性只读核验）；与 add_to_tc 合并为一次部署，之后补测用 raw，减少 Lovable 部署次数。 | supabase/functions/tts-p0-probe/index.ts、docs/OUTREACH_P0.md |
