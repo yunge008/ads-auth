@@ -203,3 +203,18 @@ tts-p0-probe {"action":"raw","shop_id":"店铺ID","method":"POST","path":"/promo
 ```
 tts-p0-probe {"action":"raw","shop_id":"店铺ID","method":"GET","path":"/promotion/202309/activities/活动ID"}
 ```
+
+## 9. 实测结果（2026-11-16，PH 店，新增 6 个权限包并重新授权后）
+- 首次调用 Get Activity 报 `105005`（缺权限），约 3 分钟后用同一 token 重试成功：新开权限有短暂生效延迟。
+- 促销：活动共 379 个；日常折扣 `7656714354087446293`（FIXED_PRICE / VARIATION / ONGOING），Get Activity 一次返回全部商品，无分页；价格只在 SKU 级，商品级 `activity_price` 只有币种无金额。
+- **活动价 ≠ 当时成交价**：抽 9 条 11-01 订单行，7 条「原价 − 商家折扣」≈ 当前活动价 × 0.90，1 条相等，1 条 0.9276。原因未核验（叠加商家券/满减，或活动价事后修改；活动 update_time = 11-16）。实际成交价以订单 `sale_price` 为准。
+- 商品 666 个（`sale_price` 为面价）；订单 11-01 起 16,654 单（买家信息已打码）；财务按日结算单，10 张均满足 结算 = 收入 + 费用 + 调整（代码核验）；商品数据 559 个商品，`latest_available_date` = 2026-11-15。
+
+## 10. 只读闸门（2026-11-16 负责人规定）
+- `_shared/tts.ts` 的 `ttsAccessCheck` 在每次 TTS 调用前检查：放行 GET 与路径以 `/search` `/filter` `/query` `/check` 结尾的查询类 POST；写接口只放行「定向计划新建 POST `/affiliate_seller/{v}/target_collaborations`」与「修改 PUT `/affiliate_seller/{v}/target_collaborations/{id}`」。
+- 其余写接口（生成邀请链接、建会话、发私信、标记已读、冲突处理、删除计划、Compass 建导出任务、促销/商品/订单任何写）一律拦截，返回「只读闸门拦截」。新增写接口须负责人逐条明确确认后再加入 `TTS_WRITE_ALLOW`。
+
+## 11. 对账工具 `recon`（只读）
+- `tts-p0-probe {"action":"recon","shop_id":"…","kind":"orders","date":"YYYY-MM-DD"}`：按店铺本地日（PH UTC+8、TH UTC+7）拉当天全部下单订单，自动翻页，每单按 SKU 汇总件数/原价/售价/商家折扣/平台折扣。
+- `tts-p0-probe {"action":"recon","shop_id":"…","kind":"statement","statement_id":"…"}`：按结算单拉逐单结算（结算/收入/运费/费用税/调整）。
+- 输出为「columns + rows」紧凑格式，整段复制给 Claude，用代码与后台导出的订单表、财务表逐单比对。

@@ -15,8 +15,14 @@
 //                                               已有定向计划增发达人/商品：读详情 → 合并 → 全量 PUT → 回读校验老达人未丢 → 只给新达人发消息
 //   name_probe {shop_id, tc_id, names?, confirm:"SEND"}  已有计划逐个改名测名称上限，最后改回原名（不新建、不发消息）
 //   check2   {shop_id, tc_id?, product_ids?}     只读：最新未读/收件箱计数/会话分页/样品申请/联盟订单/计划内推广明细/冲突检查
-//   raw      {shop_id, method, path, query?, body?}  任意 /affiliate_seller/、/authorization/ 接口单次调用（补测用）；
-//            /product/、/analytics/、/order/、/finance/、/promotion/ 只放行 GET 与以 /search 结尾的 POST（只读调研）
+//   recon    {shop_id, kind:"orders", date:"YYYY-MM-DD"} 按店铺本地日拉全部订单（自动翻页，紧凑行）
+//            {shop_id, kind:"statement", statement_id}   按结算单拉逐单结算交易（自动翻页，紧凑行）
+//   raw      {shop_id, method, path, query?, body?}  单接口调用（补测用），path 限 /affiliate_seller/ /authorization/
+//            /product/ /analytics/ /order/ /finance/ /promotion/
+//
+// 读写闸门（_shared/tts.ts ttsAccessCheck，2026-11-16 负责人规定）：所有 TTS 调用默认只读；
+// 写接口目前只放行「定向计划新建 / 修改」。生成邀请链接、建会话、发私信、标记已读、冲突处理等写接口
+// 现已被拦截，需负责人逐条确认后才能加入 TTS_WRITE_ALLOW。write / add_to_tc 中这些步骤会返回拦截信息。
 //
 // 与 `_shared/tiktok.ts`（Business API）完全独立；只读写 tts_shops 一张表。
 import { admin, requireAdmin } from "../_shared/auth.ts";
@@ -680,6 +686,118 @@ async function actionCheck2(shop: Shop, b: Record<string, unknown>) {
   return out;
 }
 
+// ── recon：订单 / 财务对账用的只读批量拉取（2026-11-16）────────────────────────
+// 输出为「列名 + 行数组」的紧凑格式，便于整段复制给 Claude 用代码逐单比对。
+const REGION_UTC_OFFSET: Record<string, number> = { PH: 8, MY: 8, SG: 8, TH: 7, VN: 7, ID: 7, JP: 9, GB: 0, US: -8, MX: -6, BR: -3 };
+const toCents = (v: unknown) => Math.round(Number(v ?? 0) * 100) || 0;
+const fromCents = (c: number) => (c / 100).toFixed(2);
+
+/** date=YYYY-MM-DD（店铺本地时区的一天）→ [from, to) 秒级时间戳 */
+function localDayWindow(shop: Shop, date: string): { from: number; to: number; utc_offset: number } {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) bad("date 格式应为 YYYY-MM-DD（店铺本地时区）");
+  const off = REGION_UTC_OFFSET[(shop.region ?? "").toUpperCase()];
+  if (off === undefined) bad(`未配置 ${shop.region} 的时区，请改用 from/to 时间戳`);
+  const from = Math.floor(Date.parse(`${date}T00:00:00Z`) / 1000) - off * 3600;
+  return { from, to: from + 86400, utc_offset: off };
+}
+
+type ApiOrder = {
+  id: string; status?: string; create_time?: number; cancel_time?: number;
+  payment?: Record<string, string>;
+  line_items?: Array<{ sku_id?: string; original_price?: string; sale_price?: string; seller_discount?: string; platform_discount?: string }>;
+};
+
+async function reconOrders(shop: Shop, b: Record<string, unknown>) {
+  const win = b.date ? localDayWindow(shop, String(b.date)) : { from: Number(b.from), to: Number(b.to), utc_offset: null };
+  if (!Number.isFinite(win.from) || !Number.isFinite(win.to) || win.to <= win.from) bad("需要 date，或 from/to（秒级时间戳，左闭右开）");
+  const maxPages = Math.min(Number(b.max_pages ?? 40), 80);
+  const T = { accessToken: shop.access_token, shopCipher: shop.shop_cipher };
+  const rows: unknown[] = [];
+  let pageToken = "", pages = 0, total: number | null = null, lastErr: unknown = null;
+  do {
+    const r = await ttsCall<{ orders?: ApiOrder[]; next_page_token?: string; total_count?: number }>({
+      ...T, method: "POST", path: "/order/202309/orders/search",
+      query: { page_size: 100, sort_field: "create_time", sort_order: "ASC", page_token: pageToken },
+      body: { create_time_ge: win.from, create_time_lt: win.to },
+    });
+    pages++;
+    if (r.code !== 0) { lastErr = step("orders_search", r); break; }
+    total = r.data?.total_count ?? total;
+    for (const o of r.data?.orders ?? []) {
+      const p = o.payment ?? {};
+      // 一个 line_item = 一件；按 SKU 汇总成 sku:件数:原价合计:售价合计:商家折扣合计:平台折扣合计
+      const agg = new Map<string, number[]>();
+      for (const li of o.line_items ?? []) {
+        const k = li.sku_id ?? "";
+        const a = agg.get(k) ?? [0, 0, 0, 0, 0];
+        a[0] += 1; a[1] += toCents(li.original_price); a[2] += toCents(li.sale_price);
+        a[3] += toCents(li.seller_discount); a[4] += toCents(li.platform_discount);
+        agg.set(k, a);
+      }
+      const skus = [...agg.entries()].map(([k, a]) => [k, a[0], ...a.slice(1).map(fromCents)].join(":")).join(";");
+      rows.push([
+        o.id, o.status ?? "", o.create_time ?? 0, o.cancel_time ?? 0, p.currency ?? "",
+        p.original_total_product_price ?? "", p.sub_total ?? "", p.seller_discount ?? "", p.platform_discount ?? "",
+        p.original_shipping_fee ?? "", p.shipping_fee ?? "", p.shipping_fee_platform_discount ?? "", p.shipping_fee_seller_discount ?? "",
+        p.payment_platform_discount ?? "", p.tax ?? "", p.total_amount ?? "", skus,
+      ]);
+    }
+    pageToken = r.data?.next_page_token ?? "";
+  } while (pageToken && pages < maxPages);
+  return {
+    kind: "orders", shop_id: shop.shop_id, region: shop.region, date: b.date ?? null, utc_offset: win.utc_offset,
+    from: win.from, to: win.to, api_total_count: total, rows_returned: rows.length, pages, truncated: Boolean(pageToken), error: lastErr,
+    columns: ["order_id", "status", "create_time", "cancel_time", "currency", "original_total_product_price", "sub_total", "seller_discount",
+      "platform_discount", "original_shipping_fee", "shipping_fee", "shipping_fee_platform_discount", "shipping_fee_seller_discount",
+      "payment_platform_discount", "tax", "total_amount", "skus(sku:qty:orig:sale:seller_disc:platform_disc;...)"],
+    rows,
+  };
+}
+
+type ApiStmtTx = {
+  id?: string; type?: string; order_id?: string; order_create_time?: number; adjustment_id?: string; adjustment_order_id?: string;
+  settlement_amount?: string; revenue_amount?: string; shipping_cost_amount?: string; fee_tax_amount?: string; adjustment_amount?: string;
+};
+
+async function reconStatement(shop: Shop, b: Record<string, unknown>) {
+  const sid = String(b.statement_id ?? "").trim();
+  if (!/^\d+$/.test(sid)) bad("statement_id 必填（财务表「对账单」页的结算单 ID）");
+  const maxPages = Math.min(Number(b.max_pages ?? 40), 80);
+  const T = { accessToken: shop.access_token, shopCipher: shop.shop_cipher };
+  const rows: unknown[] = [];
+  let pageToken = "", pages = 0, header: Record<string, unknown> | null = null, lastErr: unknown = null;
+  do {
+    const r = await ttsCall<Record<string, unknown> & { transactions?: ApiStmtTx[]; next_page_token?: string }>({
+      ...T, method: "GET", path: `/finance/202501/statements/${sid}/statement_transactions`,
+      query: { page_size: 100, sort_field: "order_create_time", sort_order: "ASC", page_token: pageToken },
+    });
+    pages++;
+    if (r.code !== 0) { lastErr = step("statement_transactions", r); break; }
+    const d = r.data ?? {};
+    if (!header) {
+      header = {
+        id: d.id, create_time: d.create_time, status: d.status, currency: d.currency, payable_amount: d.payable_amount,
+        total_settlement_amount: d.total_settlement_amount, total_reserve_amount: d.total_reserve_amount,
+        total_settlement_breakdown: d.total_settlement_breakdown, total_count: d.total_count,
+      };
+    }
+    for (const t of d.transactions ?? []) {
+      rows.push([
+        t.order_id ?? t.adjustment_order_id ?? "", t.type ?? "", t.id ?? "", t.adjustment_id ?? "", t.order_create_time ?? 0,
+        t.settlement_amount ?? "", t.revenue_amount ?? "", t.shipping_cost_amount ?? "", t.fee_tax_amount ?? "", t.adjustment_amount ?? "",
+      ]);
+    }
+    pageToken = (d.next_page_token as string) ?? "";
+  } while (pageToken && pages < maxPages);
+  return {
+    kind: "statement", shop_id: shop.shop_id, region: shop.region, statement_id: sid, header, rows_returned: rows.length,
+    pages, truncated: Boolean(pageToken), error: lastErr,
+    columns: ["order_id", "type", "transaction_id", "adjustment_id", "order_create_time", "settlement_amount", "revenue_amount",
+      "shipping_cost_amount", "fee_tax_amount", "adjustment_amount"],
+    rows,
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -722,18 +840,22 @@ Deno.serve(async (req) => {
     if (action === "add_to_tc") {
       return json(await actionAddToTc(await loadShop(b.shop_id), b));
     }
+    if (action === "recon") {
+      const shop = await loadShop(b.shop_id);
+      const kind = String(b.kind ?? "");
+      if (kind === "orders") return json(await reconOrders(shop, b));
+      if (kind === "statement") return json(await reconStatement(shop, b));
+      bad("recon 的 kind 只能是 orders（按下单日拉订单）或 statement（按结算单 ID 拉逐单结算）");
+    }
     if (action === "raw") {
       const shop = await loadShop(b.shop_id);
       const path = String(b.path ?? "");
       const method = String(b.method ?? "GET").toUpperCase() as "GET" | "POST" | "PUT" | "DELETE";
       if (!["GET", "POST", "PUT", "DELETE"].includes(method)) bad("method 只能是 GET/POST/PUT/DELETE");
-      if (/^\/(product|analytics|order|finance|promotion)\//.test(path)) {
-        // 商品/数据/订单/财务/促销：只读调研用，只放行 GET 与「…/search」类 POST（查询接口），防止误调写接口
-        const readOnly = method === "GET" || (method === "POST" && /\/search(\/filter)?$/.test(path));
-        if (!readOnly) bad("/product/ /analytics/ /order/ /finance/ /promotion/ 只允许 GET 或以 /search 结尾的 POST（只读）");
-      } else if (!/^\/(affiliate_seller|authorization)\//.test(path)) {
-        bad("raw 只允许 /affiliate_seller/、/authorization/，或只读的 /product/、/analytics/、/order/、/finance/、/promotion/ 开头的 path");
+      if (!/^\/(affiliate_seller|authorization|product|analytics|order|finance|promotion)\//.test(path)) {
+        bad("raw 只允许 /affiliate_seller/ /authorization/ /product/ /analytics/ /order/ /finance/ /promotion/ 开头的 path");
       }
+      // 读写由 _shared/tts.ts 的只读闸门统一判断：写接口（除定向计划新建/修改）一律拦截
       const r = await ttsCall({
         method,
         path,
@@ -745,7 +867,7 @@ Deno.serve(async (req) => {
       });
       return json(step("raw", r));
     }
-    bad("action 只能是 auth_url / exchange / shops / refresh / read / write / add_to_tc / name_probe / check2 / raw");
+    bad("action 只能是 auth_url / exchange / shops / refresh / read / write / add_to_tc / name_probe / check2 / recon / raw");
   } catch (error) {
     const status = (error as Error & { status?: number }).status ?? 400;
     return json({ error: (error as Error).message }, status);

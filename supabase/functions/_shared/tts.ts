@@ -89,7 +89,32 @@ export type TtsCallOpts = {
   timeoutMs?: number;
 };
 
+// ── 读写闸门（2026-11-16 负责人规定）────────────────────────────────────────
+// 所有 TTS 接口默认只读：GET，以及路径以 /search、/filter、/query、/check 结尾的查询类 POST。
+// 写接口只放行下表；新增任何写接口必须先经负责人逐条明确确认，再加到这里。
+const TTS_WRITE_ALLOW: Array<{ method: string; path: RegExp; why: string }> = [
+  { method: "POST", path: /^\/affiliate_seller\/\d+\/target_collaborations$/, why: "新建定向计划" },
+  { method: "PUT", path: /^\/affiliate_seller\/\d+\/target_collaborations\/\d+$/, why: "修改定向计划" },
+];
+const TTS_READ_POST = /\/(search|filter|query|check)$/;
+
+/** 返回 null 表示放行；否则返回拦截原因。 */
+export function ttsAccessCheck(method: string, path: string): string | null {
+  const m = method.toUpperCase();
+  if (m === "GET") return null;
+  if (m === "POST" && TTS_READ_POST.test(path)) return null;
+  if (TTS_WRITE_ALLOW.some((w) => w.method === m && w.path.test(path))) return null;
+  return `只读闸门拦截：${m} ${path} 不在允许清单内（当前只允许读取 + 定向计划新建/修改；其他写接口需负责人确认后加入 _shared/tts.ts 的 TTS_WRITE_ALLOW）`;
+}
+
 export async function ttsCall<T = unknown>(opts: TtsCallOpts): Promise<TtsResult<T>> {
+  const blocked = ttsAccessCheck(opts.method, opts.path);
+  if (blocked) {
+    return {
+      method: opts.method, path: opts.path, http_status: 0, code: null, message: blocked,
+      request_id: "", data: null, ms: 0, attempts: 0,
+    };
+  }
   const { appKey, appSecret } = ttsAppCreds();
   const bodyStr = opts.body === undefined ? "" : JSON.stringify(opts.body);
   const maxAttempts = 5;
