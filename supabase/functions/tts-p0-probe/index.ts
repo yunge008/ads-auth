@@ -16,7 +16,7 @@
 //   name_probe {shop_id, tc_id, names?, confirm:"SEND"}  已有计划逐个改名测名称上限，最后改回原名（不新建、不发消息）
 //   check2   {shop_id, tc_id?, product_ids?}     只读：最新未读/收件箱计数/会话分页/样品申请/联盟订单/计划内推广明细/冲突检查
 //   raw      {shop_id, method, path, query?, body?}  任意 /affiliate_seller/、/authorization/ 接口单次调用（补测用）；
-//            /product/、/analytics/、/order/、/finance/ 只放行 GET 与以 /search 结尾的 POST（只读调研）
+//            /product/、/analytics/、/order/、/finance/、/promotion/ 只放行 GET 与以 /search 结尾的 POST（只读调研）
 //
 // 与 `_shared/tiktok.ts`（Business API）完全独立；只读写 tts_shops 一张表。
 import { admin, requireAdmin } from "../_shared/auth.ts";
@@ -727,12 +727,12 @@ Deno.serve(async (req) => {
       const path = String(b.path ?? "");
       const method = String(b.method ?? "GET").toUpperCase() as "GET" | "POST" | "PUT" | "DELETE";
       if (!["GET", "POST", "PUT", "DELETE"].includes(method)) bad("method 只能是 GET/POST/PUT/DELETE");
-      if (/^\/(product|analytics|order|finance)\//.test(path)) {
-        // 商品/数据/订单/财务：只读调研用，只放行 GET 与「…/search」类 POST（查询接口），防止误调写接口
+      if (/^\/(product|analytics|order|finance|promotion)\//.test(path)) {
+        // 商品/数据/订单/财务/促销：只读调研用，只放行 GET 与「…/search」类 POST（查询接口），防止误调写接口
         const readOnly = method === "GET" || (method === "POST" && /\/search(\/filter)?$/.test(path));
-        if (!readOnly) bad("/product/ /analytics/ /order/ /finance/ 只允许 GET 或以 /search 结尾的 POST（只读）");
+        if (!readOnly) bad("/product/ /analytics/ /order/ /finance/ /promotion/ 只允许 GET 或以 /search 结尾的 POST（只读）");
       } else if (!/^\/(affiliate_seller|authorization)\//.test(path)) {
-        bad("raw 只允许 /affiliate_seller/、/authorization/，或只读的 /product/、/analytics/、/order/、/finance/ 开头的 path");
+        bad("raw 只允许 /affiliate_seller/、/authorization/，或只读的 /product/、/analytics/、/order/、/finance/、/promotion/ 开头的 path");
       }
       const r = await ttsCall({
         method,

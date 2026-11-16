@@ -19,8 +19,9 @@
 | 订单导出 | 能（分页拉，无「导出文件」接口） | Get Order List / Get Order Detail | Order Information |
 | 财务（按订单） | 能 | Get Transactions by Order / by Statement / Unsettled | Finance Information |
 | 商品信息导出 | 能（分页拉） | Search Products + Get Product | Product Basic |
+| 促销活动详情 / 活动价（实际对客价） | 能，按活动 ID 或完整名称（§8） | Search Promotion Activities + Get Activity | Promotion Information |
 
-**需要新增的权限包**：店铺当前授权 scope 是 11 个，具体是哪 11 个**未核验**（先跑 §7 第 1 条看）。外联 P0 已勾的是联盟相关 5 个；本次新增需求还需要：`Product Basic`、`TikTok Shop Analytics`、`Order Information`、`Finance Information`、`Bestsellers`（只看热销榜才要）。在 Partner Center → 应用 → 权限/API scope 里勾上后，**店铺必须重新授权一次**，新 scope 才会出现在 token 里。
+**需要新增的权限包**：店铺当前授权 scope 是 11 个，具体是哪 11 个**未核验**（先跑 §7 第 1 条看）。外联 P0 已勾的是联盟相关 5 个；本次新增需求还需要：`Product Basic`、`TikTok Shop Analytics`、`Order Information`、`Finance Information`、`Promotion Information`、`Bestsellers`（只看热销榜才要）。在 Partner Center → 应用 → 权限/API scope 里勾上后，**店铺必须重新授权一次**，新 scope 才会出现在 token 里。
 
 ## 1. 评价 / 星级 / 图片
 
@@ -166,3 +167,39 @@
     ```
     tts-p0-probe {"action":"raw","shop_id":"店铺ID","method":"GET","path":"/finance/202501/orders/订单号/statement_transactions"}
     ```
+
+## 8. 促销活动详情 / 实际对客价（2026-11-16 增补）
+
+**结论**：能用 API 拿到。只要用户给出活动 ID 或活动全名，就能导出活动里每个商品 / SKU 的活动价，不用程序判断哪个是「日常促销」。需新增权限包 **`Promotion Information`**（只读）。
+
+| 步骤 | 接口 | 说明 |
+|---|---|---|
+| 1. 名称 → ID（用户只给名称时） | Search Promotion Activities `POST /promotion/202309/activities/search` | body：`activity_title`（文档写「No fuzzy matching」，**需填完整名称**，是否大小写/空格敏感待实测）、`status`（NOT_START/ONGOING/EXPIRED/DEACTIVATED）、`activity_type`、`page_size` ≤100、`page_token`。返回 ID、名称、类型、`duration_type`（NORMAL / INDEFINITE 长期）、起止时间、状态、`product_level`。**列表不含商品明细** |
+| 2. ID → 商品与活动价 | Get Activity `GET /promotion/202309/activities/{activity_id}` | 返回 `products[]`；无分页参数，文档没写单个活动的商品上限，全量商品能否一次返回**待实测** |
+
+**活动价怎么取（按 `activity_type` × `product_level`）**
+
+| 类型 | 商品级（PRODUCT） | SKU 级（VARIATION） | 实际价 |
+|---|---|---|---|
+| `FIXED_PRICE` 固定价 | `products[].activity_price{amount,currency}` | `products[].skus[].activity_price` | 直接用 |
+| `FLASHSALE` 秒杀 | 同上 | 同上 | 直接用 |
+| `DIRECT_DISCOUNT` 折扣 | `products[].discount`（`10` = 打 10% off） | `skus[].discount` | **接口不给折后价**，要用 Get Product 的 SKU 原价 × (1 − discount/100) 自己算（需 Product Basic 权限；舍入规则未核验） |
+
+另有 `quantity_limit`、`quantity_per_user`、`used_quantity`、`status`、`begin_time` / `end_time`。
+
+**边界与风险**
+- 结束超过 180 天的 FIXED_PRICE / DIRECT_DISCOUNT / FLASHSALE 活动不返回商品明细。
+- 同一商品不能同时在两个冲突的折扣活动里（加品时报错 `17029079` / `17029103`），所以一个商品在同一时间只有一个商家折扣价。秒杀与日常折扣是否算冲突、谁优先，文档没写，**待核验**。
+- 「活动价」≠ 买家最终实付：还可能叠加优惠券（Search Coupon List / Get Coupon，同一个权限包）、满减（BMSM）、平台补贴。真实成交价只能看订单 `line_items[].sale_price` 和 `payment.*`。
+- 商品表 SKU `price.sale_price` 是面价，跟活动价是两个字段，不会互相覆盖。
+
+**实测指令**（需新增 `Promotion Information` 并重新授权、Lovable 重新部署后才能跑）
+```
+tts-p0-probe {"action":"raw","shop_id":"店铺ID","method":"POST","path":"/promotion/202309/activities/search","body":{"status":"ONGOING","page_size":50}}
+```
+```
+tts-p0-probe {"action":"raw","shop_id":"店铺ID","method":"POST","path":"/promotion/202309/activities/search","body":{"activity_title":"活动完整名称","page_size":20}}
+```
+```
+tts-p0-probe {"action":"raw","shop_id":"店铺ID","method":"GET","path":"/promotion/202309/activities/活动ID"}
+```
