@@ -218,3 +218,19 @@ tts-p0-probe {"action":"raw","shop_id":"店铺ID","method":"GET","path":"/promot
 - `tts-p0-probe {"action":"recon","shop_id":"…","kind":"orders","date":"YYYY-MM-DD"}`：按店铺本地日（PH UTC+8、TH UTC+7）拉当天全部下单订单，自动翻页，每单按 SKU 汇总件数/原价/售价/商家折扣/平台折扣。
 - `tts-p0-probe {"action":"recon","shop_id":"…","kind":"statement","statement_id":"…"}`：按结算单拉逐单结算（结算/收入/运费/费用税/调整）。
 - 输出为「columns + rows」紧凑格式，整段复制给 Claude，用代码与后台导出的订单表、财务表逐单比对。
+
+### 11.1 对账结论（2026-11-16）
+- PH 10-08 订单 765 单、TH 10-08 订单 510 单：订单集合、状态、SKU、件数、原价/商家折扣/折后/实付/运费/税逐单 0 差异。唯一口径差：API 的 SKU `platform_discount` 含「支付平台优惠」，后台导出单列在 `Payment platform discount`（PH 69/69 单成立）。
+- 结算单 PH 7693338028491835157、TH 7694835658300376833、TH 7698540176456419093（含 2 笔平台赔付 + 1 笔物流赔付）：结算/收入/费用逐单 0 差异；后台「总费用」= API `fee_tax_amount + shipping_cost_amount`。调整行：API `adjustment_id` = 后台「订单ID/调整单ID」，API `order_id` = 后台「相关订单 ID」。
+
+## 12. 店铺固定内容导出 `tts-export`（1116.154，只读）
+页面「店铺数据导出」（`/tts-export`），前端分片循环、本地生成文件。
+
+| 导出 | 接口 | 文件 | 已知缺口（留空） |
+|---|---|---|---|
+| 月度订单 | `POST /order/202309/orders/search`（按下单时间、店铺本地月） | 每月一个 CSV，列同后台订单导出（TH 地址列 Zipcode/District 与 PH 不同，已分别处理） | 买家个人信息不导出；`Sku Quantity of return`、`Order Refund Amount`、`Weight(kg)`、`Product Category`、`Warehouse Name`、`Order Channel`、`Creator Handle`、`Checked Status` 接口不提供 |
+| 月度财务结算 | `GET /finance/202309/statements`（按结算单生成时间）+ `GET /finance/202501/statements/{id}/statement_transactions` | 每月一个 xlsx：「订单详情」（一行一笔交易）+「对账单」；末尾附 `api.*` 原始分项 | 订单维度，SKU ID/数量/商品名称留空（按 SKU 需逐单调用，月度量级不可行）；各费用列映射按字段含义对照，**待与后台导出核对一次** |
+| 月度联盟订单 | `POST /affiliate_seller/202410/orders/search` + `GET /order/202309/orders?ids=`（补商品名/付款方式/支付时间/支付金额） | 每月两个 xlsx：达人 / 服务商 | 联盟团长ID/名称、PIT、佣金结算时间、平台 接口不提供；按下单时间归月，后台页签筛选口径未核实；达人/服务商拆分规则 = SKU 有 `campaign_id` 或服务商佣金率 |
+| 最新商品 + 活动价 | `POST /product/202502/products/search`（默认在售）+ `GET /product/202309/products/{id}`（locale=zh-CN）+ `GET /promotion/202309/activities/{id}` | xlsx「Template」，前 5 行表头同后台批量编辑模板，最右列「活动价」 | 属性列按全部商品出现过的属性汇总（后台模板按类目，可能列序不同）；商品状态非「在售」的中文写法未核验 |
+
+未做：GMV MAX 素材维度（Business API，已有 `gmv-max-raw-export` 按天明细；按后台格式需按期汇总，播放率不能按天加总，需改为不带 stat_time_day 的维度查询）；商品评论明细（无接口，用 Chrome 插件）；MCP 连接器。

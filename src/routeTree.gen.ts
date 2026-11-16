@@ -19,6 +19,7 @@ import { Route as GmvAttributionAdminRouteImport } from './routes/gmv-attributio
 import { Route as GmvMaxCreateRouteImport } from './routes/gmv-max-create'
 import { Route as MaterialPerformanceRouteImport } from './routes/material-performance'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as TtsExportRouteImport } from './routes/tts-export'
 import { Route as OauthTiktokCallbackRouteImport } from './routes/oauth.tiktok.callback'
 import { Route as OauthTtsCallbackRouteImport } from './routes/oauth.tts.callback'
 import { Route as ApiPublicHooksAttributionCronRouteImport } from './routes/api/public/hooks/attribution-cron'
@@ -77,6 +78,11 @@ const MaterialPerformanceRoute = MaterialPerformanceRouteImport.update({
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TtsExportRoute = TtsExportRouteImport.update({
+  id: '/tts-export',
+  path: '/tts-export',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OauthTiktokCallbackRoute = OauthTiktokCallbackRouteImport.update({
@@ -141,6 +147,7 @@ export interface FileRoutesByFullPath {
   '/gmv-max-create': typeof GmvMaxCreateRoute
   '/material-performance': typeof MaterialPerformanceRoute
   '/settings': typeof SettingsRoute
+  '/tts-export': typeof TtsExportRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
   '/oauth/tts/callback': typeof OauthTtsCallbackRoute
   '/api/public/hooks/attribution-cron': typeof ApiPublicHooksAttributionCronRoute
@@ -162,6 +169,7 @@ export interface FileRoutesByTo {
   '/gmv-max-create': typeof GmvMaxCreateRoute
   '/material-performance': typeof MaterialPerformanceRoute
   '/settings': typeof SettingsRoute
+  '/tts-export': typeof TtsExportRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
   '/oauth/tts/callback': typeof OauthTtsCallbackRoute
   '/api/public/hooks/attribution-cron': typeof ApiPublicHooksAttributionCronRoute
@@ -184,6 +192,7 @@ export interface FileRoutesById {
   '/gmv-max-create': typeof GmvMaxCreateRoute
   '/material-performance': typeof MaterialPerformanceRoute
   '/settings': typeof SettingsRoute
+  '/tts-export': typeof TtsExportRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
   '/oauth/tts/callback': typeof OauthTtsCallbackRoute
   '/api/public/hooks/attribution-cron': typeof ApiPublicHooksAttributionCronRoute
@@ -207,6 +216,7 @@ export interface FileRouteTypes {
     | '/gmv-max-create'
     | '/material-performance'
     | '/settings'
+    | '/tts-export'
     | '/oauth/tiktok/callback'
     | '/oauth/tts/callback'
     | '/api/public/hooks/attribution-cron'
@@ -228,6 +238,7 @@ export interface FileRouteTypes {
     | '/gmv-max-create'
     | '/material-performance'
     | '/settings'
+    | '/tts-export'
     | '/oauth/tiktok/callback'
     | '/oauth/tts/callback'
     | '/api/public/hooks/attribution-cron'
@@ -249,6 +260,7 @@ export interface FileRouteTypes {
     | '/gmv-max-create'
     | '/material-performance'
     | '/settings'
+    | '/tts-export'
     | '/oauth/tiktok/callback'
     | '/oauth/tts/callback'
     | '/api/public/hooks/attribution-cron'
@@ -271,6 +283,7 @@ export interface RootRouteChildren {
   GmvMaxCreateRoute: typeof GmvMaxCreateRoute
   MaterialPerformanceRoute: typeof MaterialPerformanceRoute
   SettingsRoute: typeof SettingsRoute
+  TtsExportRoute: typeof TtsExportRoute
   OauthTiktokCallbackRoute: typeof OauthTiktokCallbackRoute
   OauthTtsCallbackRoute: typeof OauthTtsCallbackRoute
   ApiPublicHooksAttributionCronRoute: typeof ApiPublicHooksAttributionCronRoute
@@ -354,6 +367,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/tts-export': {
+      id: '/tts-export'
+      path: '/tts-export'
+      fullPath: '/tts-export'
+      preLoaderRoute: typeof TtsExportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/oauth/tiktok/callback': {
       id: '/oauth/tiktok/callback'
       path: '/oauth/tiktok/callback'
@@ -431,6 +451,7 @@ const rootRouteChildren: RootRouteChildren = {
   GmvMaxCreateRoute: GmvMaxCreateRoute,
   MaterialPerformanceRoute: MaterialPerformanceRoute,
   SettingsRoute: SettingsRoute,
+  TtsExportRoute: TtsExportRoute,
   OauthTiktokCallbackRoute: OauthTiktokCallbackRoute,
   OauthTtsCallbackRoute: OauthTtsCallbackRoute,
   ApiPublicHooksAttributionCronRoute: ApiPublicHooksAttributionCronRoute,

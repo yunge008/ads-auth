@@ -162,6 +162,8 @@
   **本线路不使用 `gmv-max-sync` 的 `ttGet`**（AGENTS.md 那条约定针对 Business API；交接文档明确要求独立实现）。
 - 表 `tts_shops`：店铺授权（shop_cipher / token / 到期 / scope / 联系方式），RLS 开、无 policy，仅 service role 读写。
 - Edge Function `tts-p0-probe`（管理员）：P0 实测工具，`exchange/shops/refresh/read/write/raw`。
+- Edge Function `tts-export`（管理员，只读）：店铺固定内容分片导出 `kind=orders|finance|products|affiliate`，前端 `src/lib/ttsExport.ts` 循环 `next_cursor` 并生成与卖家后台同列名的 CSV/xlsx；页面 `/tts-export`。
+- 所有 TTS 调用经 `_shared/tts.ts` 的 `ttsAccessCheck` 只读闸门（写接口仅放行定向计划新建/修改）。
 - Secrets：`TTS_APP_KEY`、`TTS_APP_SECRET`。
 - 规划与业务规则：`docs/OUTREACH_HANDOFF.md`；P0 进度：`docs/OUTREACH_P0.md`。
 
