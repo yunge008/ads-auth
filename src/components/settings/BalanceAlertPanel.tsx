@@ -2,7 +2,7 @@
 // 计算在 Edge Function `balance-alert`；飞书发送走服务端路由 /api/public/hooks/balance-alert-cron
 // （FEISHU_BOT_WEBHOOK，与每日自动授权通知同一个群）。这里只做展示与触发。
 import * as React from "react";
-import { Bell, RotateCw, Save, Send } from "lucide-react";
+import { Bell, RotateCw, Save, Scale, Send } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +20,15 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { callEcoRoute, getAdminName, getPasscode, invokeFn } from "@/lib/api";
 import { EcoVerifyButton } from "@/components/settings/EcoVerifyButton";
-import { parseTargetDays, planRow, summarize, type PlanRow } from "@/lib/rechargePlan";
+import {
+  BALANCE_BUFFER_DAYS,
+  BALANCE_STEP,
+  balanceInternal,
+  parseTargetDays,
+  planRow,
+  summarize,
+  type PlanRow,
+} from "@/lib/rechargePlan";
 
 type Daily = {
   date: string;
@@ -210,6 +218,7 @@ export function BalanceAlertPanel() {
     balance: a.balance,
     avg: a.avg_daily_spend,
     daysLeft: a.days_left,
+    currency: a.currency,
   }));
   const plan = new Map<string, PlanRow>(
     planInputs.map((p) => {
@@ -219,6 +228,37 @@ export function BalanceAlertPanel() {
     }),
   );
   const summary = summarize(planInputs, plan);
+  // 有 T 或有改写值（含内部平衡结果）时，显示输入框与「充值后可用天数」
+  const planActive = T != null || Object.keys(overrides).length > 0;
+  const runBalance = () => {
+    // 用全量账户（不受搜索过滤影响）做平衡
+    const all = accounts.map((a) => ({
+      id: a.advertiser_id,
+      enabled: a.enabled,
+      balance: a.balance,
+      avg: a.avg_daily_spend,
+      daysLeft: a.days_left,
+      currency: a.currency,
+    }));
+    const allPlan = new Map<string, PlanRow>(
+      all.map((p) => {
+        const o = overrides[p.id];
+        const ov = o != null && o.trim() !== "" && Number.isFinite(Number(o)) ? Number(o) : null;
+        return [p.id, planRow(p, T, ov)];
+      }),
+    );
+    const res = balanceInternal(all, allPlan);
+    if (res.size === 0) {
+      toast.error("没有可平衡的账户（同币种至少 2 个已开预警、有日均、余额可读的户）");
+      return;
+    }
+    setOverrides((o) => {
+      const n = { ...o };
+      res.forEach((v, id) => (n[id] = String(v)));
+      return n;
+    });
+    toast.success(`已按 ${BALANCE_STEP} 的倍数平衡 ${res.size} 户（负数=转出）`);
+  };
   const alertCount = accounts.filter(
     (a) => a.enabled && a.days_left != null && a.days_left < X,
   ).length;
@@ -302,6 +342,25 @@ export function BalanceAlertPanel() {
                 )}
               </div>
             </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">内部调拨（页面试算）</span>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={runBalance}
+                  title={`同币种已开预警的户互相调拨，按 ${BALANCE_STEP} 的倍数，使可用天数一致；日耗越小的户多留最多 ${BALANCE_BUFFER_DAYS} 天缓冲。总额不变（已填充值天数时连同计划充值一起重新分配）。`}
+                >
+                  <Scale className="h-4 w-4 mr-1.5" />
+                  内部平衡
+                </Button>
+                {Object.keys(overrides).length > 0 && (
+                  <Button size="sm" variant="ghost" onClick={() => setOverrides({})}>
+                    清除改写
+                  </Button>
+                )}
+              </div>
+            </div>
             <div className="flex gap-2 ml-auto">
               <Input
                 placeholder="搜索账户/ID/国家"
@@ -334,12 +393,12 @@ export function BalanceAlertPanel() {
                   <TableHead>国家</TableHead>
                   <TableHead className="text-right">可用余额</TableHead>
                   <TableHead className="text-right whitespace-nowrap">
-                    {T != null ? `推荐充值（${T}天）` : "推荐充值"}
+                    {T != null ? `推荐充值（${T}天）` : planActive ? "调拨金额" : "推荐充值"}
                   </TableHead>
                   <TableHead className="text-right">近10天正常日均</TableHead>
                   <TableHead className="text-right">正常天数</TableHead>
                   <TableHead className="text-right whitespace-nowrap">
-                    {T != null ? "充值后可用天数" : "可用天数"}
+                    {planActive ? "充值后可用天数" : "可用天数"}
                   </TableHead>
                   <TableHead>更新时间</TableHead>
                 </TableRow>
@@ -371,7 +430,7 @@ export function BalanceAlertPanel() {
                       <TableCell />
                       <TableCell className="text-right">{fmt(summary.balance)}</TableCell>
                       <TableCell className="text-right text-primary">
-                        {T != null ? fmt(summary.recharge, 0) : "—"}
+                        {planActive ? fmt(summary.recharge, 0) : "—"}
                       </TableCell>
                       <TableCell className="text-right">{fmt(summary.avg)}</TableCell>
                       <TableCell />
@@ -424,14 +483,14 @@ export function BalanceAlertPanel() {
                             </span>
                           </TableCell>
                           <TableCell className="text-right">
-                            {T != null && pr?.eligible ? (
+                            {planActive && pr?.eligible ? (
                               <Input
                                 value={overrides[a.advertiser_id] ?? String(pr.recommended)}
                                 onChange={(e) =>
                                   setOverrides((o) => ({ ...o, [a.advertiser_id]: e.target.value }))
                                 }
-                                title={`缺口 ${fmt(pr.gap)}，按 100 向上取整推荐 ${fmt(pr.recommended, 0)}`}
-                                className="h-7 w-24 ml-auto text-right"
+                                title={`缺口 ${fmt(pr.gap)}，按 100 向上取整推荐 ${fmt(pr.recommended, 0)}；负数=转出`}
+                                className={`h-7 w-24 ml-auto text-right ${pr.recharge < 0 ? "text-destructive" : ""}`}
                               />
                             ) : (
                               <span className="text-muted-foreground">—</span>
