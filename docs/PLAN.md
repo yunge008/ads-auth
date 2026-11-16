@@ -15,7 +15,7 @@
 
 | 任务 | 状态 | 认领 | 涉及文件 | 备注 |
 | --- | --- | --- | --- | --- |
-| TikTok Shop Open API 调研：评价 / 联盟达人与计划数据 / 订单 / 财务 / 商品导出 / 促销活动价 | 🔶 权限已开、PH 实测通过；1116.152 加只读闸门 + recon（待 Lovable 部署），PH/TH 订单财务抽样对账进行中 | claude 2026-11-16 | docs/TTS_API_RESEARCH.md、supabase/functions/tts-p0-probe/index.ts、supabase/functions/_shared/tts.ts（只读闸门） | 结论与实测指令见 `docs/TTS_API_RESEARCH.md`；商品评价内容无官方接口 |
+| TikTok Shop Open API 调研：评价 / 联盟达人与计划数据 / 订单 / 财务 / 商品导出 / 促销活动价 | 🔶 权限已开、PH 实测通过；1116.152 只读闸门 + recon 已部署（1116.153，main 5cf96d4），PH/TH 订单财务抽样对账进行中 | claude 2026-11-16 | docs/TTS_API_RESEARCH.md、supabase/functions/tts-p0-probe/index.ts、supabase/functions/_shared/tts.ts（只读闸门） | 结论与实测指令见 `docs/TTS_API_RESEARCH.md`；商品评价内容无官方接口 |
 | 联盟达人外联：已有定向计划增发达人 / 汇总管理导出飞书+到期监控 / 长期计划自动延期（N1–N3） | ⬜ 待办（P0 后排期，Q1–Q4 待负责人确认） | — | 待定 | 见 `docs/OUTREACH_HANDOFF.md` §10，新增范围 |
 | 账户余额预警（设置 → 账户余额预警 + 每日飞书群预警；**新增 secrets `ECO_USERNAME`/`ECO_PASSWORD`**，ECO 户余额取自 ECO 后台） | ✅ 代码完成，函数已部署（1109.129），待人工跑 migration + 选群 | claude 2026-11-09 | supabase/functions/{balance-alert/,_shared/balance-alert.ts,_shared/balance-alert.test.ts}、supabase/migrations/20261109120000_balance_alert.sql、src/routes/api/public/hooks/balance-alert-cron.ts、src/components/settings/BalanceAlertPanel.tsx、src/routes/settings.tsx | 余额接口字段 `valid_account_balance`、BASIC 报表是否含 GMV Max 花费均**未实测**，上线后先对 1~2 个户与 Ads Manager 核对；飞书改走 `FEISHU_BOT_WEBHOOK`（授权通知群），不需要飞书 app 权限 |
 | 余额预警：计划金额支持负数 + 内部平衡按钮（50 倍数、同币种、小日耗户多留最多 3 天） | ✅ 完成（1116.149） | claude 2026-11-16 | src/lib/rechargePlan.ts、src/components/settings/BalanceAlertPanel.tsx | 只在页面试算，不落库、不影响预警与飞书 |
