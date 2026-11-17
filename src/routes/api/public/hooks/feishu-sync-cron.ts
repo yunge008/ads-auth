@@ -1,4 +1,4 @@
-// Cron entrypoint：每晚把「读飞书 → 写自己库」的四个基础同步各跑一次。
+// Cron entrypoint：每晚把「读飞书 → 写自己库」的五个基础同步各跑一次（2026-11-17 加 ⑤ SKU 匹配表）。
 // 等价于人工在页面上依次点：
 //   ① 发样及素材统计 →「同步飞书数据」     （feishu-read-connection-stats）
 //   ② GMV 归因·管理 →「同步达人登记」      （attribution-sync-creators）
@@ -171,6 +171,15 @@ export const Route = createFileRoute("/api/public/hooks/feishu-sync-cron")({
               const r = await callFn("attribution-feishu", { action: "sync-handovers" });
               const skipped = Array.isArray(r.skipped) ? (r.skipped as string[]) : [];
               return `${num(r.synced)} 条` + (skipped.length ? `（跳过 ${skipped.length} 条）` : "");
+            },
+          },
+          {
+            // 2026-11-17 新增：商品 SKU 映射（飞书「SKU匹配表-TK」→ sku_product_map），供申样审核显示商家 SKU
+            key: "sku",
+            label: "同步 SKU 匹配表",
+            run: async () => {
+              const r = await callFn("feishu-read-sku", {});
+              return `${num(r.upserted ?? r.inserted ?? r.count ?? r.rows)} 行`;
             },
           },
         ];

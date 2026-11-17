@@ -1,33 +1,40 @@
 import * as React from "react";
-import { Download, RotateCw } from "lucide-react";
-import { toast } from "sonner";
+import { Download, HelpCircle, RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Progress } from "@/components/ui/progress";
+import { toast } from "sonner";
 import type { TtsShop } from "@/lib/ttsApi";
 import {
-  CACHE_MINUTES, cached, DEFAULT_SAMPLE_TH, downloadSampleXlsx, fetchSamples, groupByCreator, isFresh,
-  type SampleRaw, type SampleThresholds,
+  CACHE_MINUTES, cached, type Cond, DEFAULT_RULES, downloadSampleXlsx, fetchSamples, groupByCreator, isFresh,
+  type Mark, type SampleRaw, type SampleRules,
 } from "@/lib/sampleAdvice";
 
 const ADVICE_STYLE: Record<string, string> = {
-  "推荐批准": "bg-green-100 text-green-800", "待审核": "bg-amber-100 text-amber-800", "不批准": "bg-red-100 text-red-800",
+  "推荐批准": "bg-green-600 text-white", "待审核": "bg-amber-500 text-white", "不批准": "bg-red-600 text-white",
 };
-const fmtNum = (v: number | null) => (v === null || Number.isNaN(v) ? "—" : v.toLocaleString());
-const TH_KEY = "outreach-sample-thresholds";
-function loadTh(): SampleThresholds {
-  try { return { ...DEFAULT_SAMPLE_TH, ...JSON.parse(localStorage.getItem(TH_KEY) ?? "{}") }; } catch { return { ...DEFAULT_SAMPLE_TH }; }
+const MARK_STYLE: Record<Mark, string> = { pass: "bg-green-50 text-green-700 font-medium", fail: "bg-red-50 text-red-700 font-medium", none: "" };
+const fmt = (v: number | null, d = 0) => (v === null || Number.isNaN(v) ? "—" : v.toLocaleString(undefined, { maximumFractionDigits: d }));
+const RULES_KEY = "outreach-sample-rules-v2";
+function loadRules(): SampleRules {
+  try { return { ...DEFAULT_RULES, ...JSON.parse(localStorage.getItem(RULES_KEY) ?? "{}") }; } catch { return { ...DEFAULT_RULES }; }
 }
-const TH_FIELDS: Array<{ k: keyof SampleThresholds; label: string; unit: string }> = [
-  { k: "max_fulfill_reject", label: "履约率低于", unit: "% → 不批准" },
-  { k: "max_unfulfilled_reject", label: "本店发样未履约 ≥", unit: "次 → 不批准" },
-  { k: "min_fulfill_ok", label: "推荐：履约率 ≥", unit: "%" },
-  { k: "min_gmv_ok", label: "且 GMV ≥", unit: "" },
-  { k: "min_followers_ok", label: "或 粉丝 ≥", unit: "" },
-];
 
-/** 待审申样在线浏览：一行一个达人，按站点（店铺）切换；阈值在本页改，改完立即重新分类、不重新读接口 */
+function CondInput({ c, onChange, pre, post, w = "w-16" }: { c: Cond; onChange: (c: Cond) => void; pre: string; post?: string; w?: string }) {
+  return (
+    <label className="flex items-center gap-1 whitespace-nowrap">
+      <Checkbox checked={c.on} onCheckedChange={(v) => onChange({ ...c, on: v === true })} />
+      <span className={c.on ? "" : "text-muted-foreground"}>{pre}</span>
+      <Input type="number" className={`h-7 ${w} px-1.5`} value={c.v} disabled={!c.on} onChange={(e) => onChange({ ...c, v: Number(e.target.value) })} />
+      {post && <span className={c.on ? "" : "text-muted-foreground"}>{post}</span>}
+    </label>
+  );
+}
+
+/** 待审申样：一行一个达人，按店铺切换；条件在本页勾选/修改，立即在浏览器内重新分类，不重新读接口 */
 export function SampleAdvicePanel({ shops }: { shops: TtsShop[] }) {
   const [shopId, setShopId] = React.useState("");
   const [raws, setRaws] = React.useState<SampleRaw[]>([]);
@@ -36,23 +43,23 @@ export function SampleAdvicePanel({ shops }: { shops: TtsShop[] }) {
   const [prog, setProg] = React.useState<{ done: number; total: number | null }>({ done: 0, total: null });
   const [fetchedAt, setFetchedAt] = React.useState<number | null>(null);
   const [filter, setFilter] = React.useState("全部");
-  const [th, setTh] = React.useState<SampleThresholds>(loadTh);
-  const [draft, setDraft] = React.useState<SampleThresholds>(loadTh);
+  const [rules, setRulesState] = React.useState<SampleRules>(loadRules);
   const [, tick] = React.useReducer((x: number) => x + 1, 0);
   React.useEffect(() => { const t = setInterval(tick, 30_000); return () => clearInterval(t); }, []);
   React.useEffect(() => { if (!shopId && shops[0]) setShopId(shops[0].shop_id); }, [shops, shopId]);
 
+  const setRules = (r: SampleRules) => {
+    setRulesState(r);
+    try { localStorage.setItem(RULES_KEY, JSON.stringify(r)); } catch { /* 隐私模式忽略 */ }
+  };
   const showCache = (id: string) => {
     const c = cached(id);
     setRaws(c?.raws ?? []); setErrors(c?.errors ?? []); setFetchedAt(c?.complete ? c.fetchedAt : null);
     setProg(c ? { done: c.raws.length, total: c.raws.length } : { done: 0, total: null });
   };
-  // 切店铺：有缓存就直接显示，没有就读
-  React.useEffect(() => { if (shopId) { showCache(shopId); if (!cached(shopId)) void load(shopId, false); } }, [shopId]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const load = async (id: string, force: boolean) => {
     if (!id || loading) return;
-    if (!force && isFresh(cached(id))) { showCache(id); toast.info(`使用 ${CACHE_MINUTES} 分钟内已读取的数据`); return; }
+    if (!force && isFresh(cached(id))) { showCache(id); return; }
     setLoading(true); setRaws([]); setErrors([]); setProg({ done: 0, total: null }); setFetchedAt(null);
     try {
       const e = await fetchSamples(id, (all, p, errs) => { setRaws([...all]); setErrors([...errs]); setProg(p); });
@@ -62,98 +69,117 @@ export function SampleAdvicePanel({ shops }: { shops: TtsShop[] }) {
       toast.error(`读取申样失败：${(e as Error).message}`);
     } finally { setLoading(false); }
   };
+  React.useEffect(() => { if (shopId) { showCache(shopId); if (!cached(shopId)) void load(shopId, false); } }, [shopId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const apply = () => {
-    const next = { ...draft };
-    for (const k of Object.keys(next) as Array<keyof SampleThresholds>) if (!Number.isFinite(Number(next[k]))) next[k] = DEFAULT_SAMPLE_TH[k];
-    setTh(next);
-    try { localStorage.setItem(TH_KEY, JSON.stringify(next)); } catch { /* 隐私模式忽略 */ }
-  };
-  const rows = React.useMemo(() => groupByCreator(raws, th), [raws, th]);
+  const rows = React.useMemo(() => groupByCreator(raws, rules), [raws, rules]);
   const shown = filter === "全部" ? rows : rows.filter((r) => r.advice === filter);
   const count = (a: string) => rows.filter((r) => r.advice === a).length;
-  const pct = prog.total ? Math.min(100, Math.round((prog.done / prog.total) * 100)) : loading ? 3 : 0;
+  const pct = prog.total ? Math.min(100, Math.round((prog.done / prog.total) * 100)) : loading ? 2 : raws.length ? 100 : 0;
   const ageMin = fetchedAt ? Math.floor((Date.now() - fetchedAt) / 60_000) : null;
   const canRefetch = !fetchedAt || (ageMin ?? 0) >= CACHE_MINUTES;
   const shop = shops.find((s) => s.shop_id === shopId);
+  const set = (k: keyof SampleRules) => (c: Cond) => setRules({ ...rules, [k]: c });
 
   return (
     <Card>
-      <CardHeader><CardTitle className="text-base">待审申样 · 审核意见（只读，不会审样）</CardTitle></CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-2 pt-4">
+        {/* 第 1 行：店铺 / 读取 / 导出 / 说明 */}
         <div className="flex flex-wrap items-center gap-2">
-          <select className="h-9 rounded-md border bg-background px-2 text-sm" value={shopId} disabled={loading} onChange={(e) => setShopId(e.target.value)}>
+          <select className="h-8 rounded-md border bg-background px-2 text-sm" value={shopId} disabled={loading} onChange={(e) => setShopId(e.target.value)}>
             {shops.map((s) => <option key={s.shop_id} value={s.shop_id}>{s.region} · {s.shop_name ?? s.shop_id}</option>)}
           </select>
-          <Button onClick={() => load(shopId, true)} disabled={loading || !shopId || !canRefetch}
+          <Button size="sm" onClick={() => load(shopId, true)} disabled={loading || !shopId || !canRefetch}
             title={canRefetch ? "重新从 TikTok 读取" : `${CACHE_MINUTES} 分钟内不重复读取接口`}>
-            <RotateCw className="h-4 w-4 mr-1" />{loading ? "读取中…" : canRefetch ? "重新读取" : `${CACHE_MINUTES - (ageMin ?? 0)} 分钟后可重新读取`}
+            <RotateCw className={`h-4 w-4 mr-1 ${loading ? "animate-spin" : ""}`} />{loading ? "读取中" : canRefetch ? "重新读取" : `${CACHE_MINUTES - (ageMin ?? 0)} 分钟后可重读`}
           </Button>
-          <Button variant="outline" disabled={loading || !raws.length} onClick={() => downloadSampleXlsx(raws, th, shop?.region ?? shopId)}>
-            <Download className="h-4 w-4 mr-1" />导出 xlsx
+          <Button size="sm" variant="outline" disabled={loading || !raws.length} onClick={() => downloadSampleXlsx(raws, rules, shop?.region ?? shopId)}>
+            <Download className="h-4 w-4 mr-1" />导出
           </Button>
-          {fetchedAt && <span className="text-xs text-muted-foreground">数据读取于 {new Date(fetchedAt).toLocaleTimeString()}（{ageMin} 分钟前）</span>}
-        </div>
-
-        <div className="space-y-1">
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>{loading ? `读取中：已处理 ${prog.done}${prog.total ? ` / ${prog.total}` : ""} 条申样，已显示 ${rows.length} 位达人` : raws.length ? `共 ${raws.length} 条申样、${rows.length} 位达人` : "尚未读取"}</span>
-            <span>{pct}%</span>
-          </div>
-          <Progress value={pct} className="h-3" />
-        </div>
-
-        <div className="rounded-md border p-3 space-y-2">
-          <div className="text-xs font-medium">审核规则阈值（改完点「应用」立即重新分类，不重新读取接口；按顺序判断，命中即停）</div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-            {TH_FIELDS.map((f) => (
-              <label key={f.k} className="flex items-center gap-1">
-                <span className="text-muted-foreground">{f.label}</span>
-                <Input type="number" className="h-8 w-20" value={draft[f.k]} onChange={(e) => setDraft({ ...draft, [f.k]: Number(e.target.value) })} />
-                <span className="text-muted-foreground">{f.unit}</span>
-              </label>
+          {fetchedAt && <span className="text-xs text-muted-foreground">读取于 {new Date(fetchedAt).toLocaleTimeString()}</span>}
+          <Popover>
+            <PopoverTrigger asChild><Button size="sm" variant="ghost" className="h-8 w-8 p-0"><HelpCircle className="h-4 w-4" /></Button></PopoverTrigger>
+            <PopoverContent className="w-96 text-xs space-y-2">
+              <div className="font-medium">判定顺序</div>
+              <div>① 勾选的「不批准」条件任一命中 → <b>不批准</b>；② 否则勾选的「推荐」条件<b>全部满足</b> → <b>推荐批准</b>；③ 其余 → <b>待审核</b>。未勾选的条件不参与。同一达人申请多个商品时取最保守的结论。</div>
+              <div>表格里绿色 = 满足该条件，红色 = 不满足或命中不批准，无色 = 未勾选相关条件。</div>
+              <div className="font-medium">数据来源</div>
+              <div>粉丝、GMV、销量、履约率、带货率：TikTok 接口（GMV 为本币，按「设置 → 汇率设置」折美元；统计窗口以平台为准，未核验是否近 30 天）。</div>
+              <div>发样 / 出素材：飞书建联表（同站点池所有同事，PH/PH2/PHL 合并），每晚同步；发样超过 14 天仍无 VID 算「未出素材」。</div>
+              <div>商家 SKU：飞书「SKU匹配表-TK」，每晚同步。</div>
+              <div>改条件立即重新分类，不重新读接口；同一店铺 {CACHE_MINUTES} 分钟内不重复读取。只给建议，不会审样。</div>
+            </PopoverContent>
+          </Popover>
+          <div className="ml-auto flex flex-wrap gap-1">
+            {["全部", "推荐批准", "待审核", "不批准"].map((f) => (
+              <Button key={f} size="sm" className="h-7 px-2" variant={filter === f ? "default" : "outline"} onClick={() => setFilter(f)}>
+                {f} {f === "全部" ? rows.length : count(f)}
+              </Button>
             ))}
-            <Button size="sm" onClick={apply}>应用</Button>
-            <Button size="sm" variant="ghost" onClick={() => { setDraft({ ...DEFAULT_SAMPLE_TH }); }}>恢复默认</Button>
-          </div>
-          <div className="text-xs text-muted-foreground">
-            顺序：①平台标记不可审批 → 不批准；②本店已发样未履约次数达标 → 不批准；③履约率低于下限 → 不批准；④履约率达推荐线（或无记录）且 GMV 或粉丝达标 → 推荐批准；⑤其余 → 待审核。同一达人多条申样取最保守结论。
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          {["全部", "推荐批准", "待审核", "不批准"].map((f) => (
-            <Button key={f} size="sm" variant={filter === f ? "default" : "outline"} onClick={() => setFilter(f)}>
-              {f} {f === "全部" ? rows.length : count(f)}
-            </Button>
-          ))}
+        {/* 进度条 */}
+        <div className="flex items-center gap-2">
+          <Progress value={pct} className="h-2.5 flex-1" />
+          <span className="text-xs text-muted-foreground whitespace-nowrap">
+            {loading ? `已处理 ${prog.done}${prog.total ? `/${prog.total}` : ""} 条 · ${rows.length} 位达人` : raws.length ? `${raws.length} 条申样 · ${rows.length} 位达人` : "未读取"} · {pct}%
+          </span>
         </div>
-        {errors.length > 0 && <p className="text-xs text-red-600">有 {errors.length} 处读取失败（如部分达人表现数据），首条：{errors[0]}</p>}
-        <p className="text-xs text-muted-foreground">GMV、销量、带货率、播放为 TikTok 达人广场接口口径（统计窗口、币种以平台为准，未核验是否为近 30 天、美元）；「本店」列按本店历史申样计算。</p>
-        <div className="overflow-auto rounded-md border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-xs text-muted-foreground">
-              <tr>{["审核意见", "达人", "粉丝", "GMV", "销量(件)", "履约率", "带货率", "视频平均播放", "本店发样/履约", "申样商品", "理由"].map((h) => <th key={h} className="px-2 py-2 text-left font-medium whitespace-nowrap">{h}</th>)}</tr>
+
+        {/* 条件（勾选才生效） */}
+        <div className="rounded-md border px-3 py-2 space-y-1.5 text-xs">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+            <span className="font-medium text-red-700 w-24">不批准（任一）</span>
+            <label className="flex items-center gap-1 whitespace-nowrap">
+              <Checkbox checked={rules.rejectNotApprovable} onCheckedChange={(v) => setRules({ ...rules, rejectNotApprovable: v === true })} />平台不可审批
+            </label>
+            <CondInput c={rules.rejectFulfillBelow} onChange={set("rejectFulfillBelow")} pre="履约率 <" post="%" />
+            <CondInput c={rules.rejectUnfulfilled} onChange={set("rejectUnfulfilled")} pre="发样未出素材 ≥" post="次" />
+          </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+            <span className="font-medium text-green-700 w-24">推荐（全部满足）</span>
+            <CondInput c={rules.okFulfill} onChange={set("okFulfill")} pre="履约率 ≥" post="%" />
+            <label className="flex items-center gap-1 whitespace-nowrap text-muted-foreground">
+              <Checkbox checked={rules.okNoFulfillPass} disabled={!rules.okFulfill.on} onCheckedChange={(v) => setRules({ ...rules, okNoFulfillPass: v === true })} />无履约记录算满足
+            </label>
+            <CondInput c={rules.okGmvUsd} onChange={set("okGmvUsd")} pre="GMV ≥ $" w="w-20" />
+            <CondInput c={rules.okFollowers} onChange={set("okFollowers")} pre="粉丝 ≥" w="w-20" />
+            <CondInput c={rules.okUnits} onChange={set("okUnits")} pre="销量 ≥" post="件" />
+            <Button size="sm" variant="ghost" className="h-7 px-2 ml-auto" onClick={() => setRules({ ...DEFAULT_RULES })}>恢复默认</Button>
+          </div>
+        </div>
+
+        {errors.length > 0 && <p className="text-xs text-red-600">有 {errors.length} 处读取失败，首条：{errors[0]}</p>}
+
+        <div className="overflow-auto rounded-md border max-h-[70vh]">
+          <table className="w-full text-xs">
+            <thead className="bg-muted/60 text-muted-foreground sticky top-0">
+              <tr>{["意见", "达人", "粉丝", "GMV(USD)", "销量", "履约率", "发样/出素材/未出", "带货率", "视频均播", "申样 SKU", "理由"].map((h) => <th key={h} className="px-2 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>)}</tr>
             </thead>
             <tbody>
               {shown.map((r) => (
-                <tr key={r.appIds[0]} className="border-t align-top">
-                  <td className="px-2 py-2"><span className={`rounded px-2 py-0.5 text-xs whitespace-nowrap ${ADVICE_STYLE[r.advice] ?? ""}`}>{r.advice}</span></td>
-                  <td className="px-2 py-2">
-                    <div className="flex items-center gap-2 min-w-40">
-                      {r.avatar ? <img src={r.avatar} alt="" className="h-8 w-8 rounded-full object-cover" referrerPolicy="no-referrer" /> : <div className="h-8 w-8 rounded-full bg-muted" />}
-                      <div><div className="font-medium">{r.nickname || r.username}</div><div className="text-xs text-muted-foreground">@{r.username}</div></div>
+                <tr key={r.appIds[0]} className="border-t align-top hover:bg-muted/30">
+                  <td className="px-2 py-1.5"><span className={`rounded px-1.5 py-0.5 whitespace-nowrap ${ADVICE_STYLE[r.advice] ?? ""}`}>{r.advice}</span></td>
+                  <td className={`px-2 py-1.5 ${r.marks.approvable === "fail" ? MARK_STYLE.fail : ""}`}>
+                    <div className="flex items-center gap-2 min-w-44">
+                      {r.avatar ? <img src={r.avatar} alt="" className="h-7 w-7 rounded-full object-cover" referrerPolicy="no-referrer" /> : <div className="h-7 w-7 rounded-full bg-muted" />}
+                      <div className="leading-tight">
+                        <div className="font-medium text-foreground">{r.nickname || r.username}</div>
+                        <div className="text-muted-foreground">@{r.username}{r.ttUid ? ` · ID ${r.ttUid}` : ""}</div>
+                      </div>
                     </div>
                   </td>
-                  <td className="px-2 py-2 whitespace-nowrap">{fmtNum(r.followers)}</td>
-                  <td className="px-2 py-2 whitespace-nowrap">{fmtNum(r.gmv)} {r.currency}</td>
-                  <td className="px-2 py-2">{fmtNum(r.units)}</td>
-                  <td className="px-2 py-2">{r.fulfill === null ? "—" : `${r.fulfill}%`}</td>
-                  <td className="px-2 py-2">{fmtNum(r.postRate)}</td>
-                  <td className="px-2 py-2">{fmtNum(r.plays)}</td>
-                  <td className="px-2 py-2 whitespace-nowrap">{r.shopShipped} / {r.shopFulfilled}</td>
-                  <td className="px-2 py-2 min-w-48 text-xs">{r.products.join("；")}</td>
-                  <td className="px-2 py-2 min-w-56 text-xs text-muted-foreground">{r.reasons}</td>
+                  <td className={`px-2 py-1.5 whitespace-nowrap ${MARK_STYLE[r.marks.followers]}`}>{fmt(r.followers)}</td>
+                  <td className={`px-2 py-1.5 whitespace-nowrap ${MARK_STYLE[r.marks.gmv]}`} title={r.gmvLocal !== null ? `${fmt(r.gmvLocal, 2)} ${r.currency}` : ""}>{r.gmvUsd === null ? "—" : `$${fmt(r.gmvUsd)}`}</td>
+                  <td className={`px-2 py-1.5 ${MARK_STYLE[r.marks.units]}`}>{fmt(r.units)}</td>
+                  <td className={`px-2 py-1.5 ${MARK_STYLE[r.marks.fulfill]}`}>{r.fulfill === null ? "无" : `${r.fulfill}%`}</td>
+                  <td className={`px-2 py-1.5 whitespace-nowrap ${MARK_STYLE[r.marks.unfulfilled]}`} title={r.regStaff ? `建联同事：${r.regStaff}；最近发样 ${r.regLast}` : "建联表无记录"}>
+                    {r.regSamples} / {r.regVid} / {r.regOpen}{r.regStaff ? <div className="text-muted-foreground font-normal">{r.regStaff}</div> : null}
+                  </td>
+                  <td className="px-2 py-1.5">{fmt(r.postRate, 2)}</td>
+                  <td className="px-2 py-1.5">{fmt(r.plays)}</td>
+                  <td className="px-2 py-1.5 min-w-32" title={r.apps.map((a) => a.product).join("\n")}>{r.skus.join("、")}</td>
+                  <td className="px-2 py-1.5 min-w-56 text-muted-foreground">{r.reasons}</td>
                 </tr>
               ))}
               {!shown.length && <tr><td colSpan={11} className="px-2 py-6 text-center text-muted-foreground">{loading ? "读取中，第一批读完就会显示…" : "暂无数据"}</td></tr>}

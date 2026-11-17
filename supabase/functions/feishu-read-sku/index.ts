@@ -1,4 +1,4 @@
-// Read "SKU匹配表" feishu sheet -> upsert sku_product_map.
+// Read "SKU匹配表-TK"（旧名 SKU匹配表）feishu sheet -> upsert sku_product_map. 每晚由 feishu-sync-cron 调用一次。
 // Columns (1-indexed): A=国家 B=商品ID C=商品名称 D=SKU ID F=商家SKU
 import {
   corsHeaders,
@@ -8,6 +8,7 @@ import {
   readRange,
 } from "../_shared/feishu.ts";
 import { admin, checkAdminPasscode } from "../_shared/auth.ts";
+import { cronAuthed } from "../_shared/cron.ts";
 
 function cellText(v: unknown): string {
   if (v == null) return "";
@@ -28,16 +29,19 @@ function cellText(v: unknown): string {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    await checkAdminPasscode(req, "material-performance");
-    const { sheet_name = "SKU匹配表" } = (await req.json().catch(() => ({}))) as {
+    // 每晚 feishu-sync-cron 免口令调用（x-cron-key），否则走原口令校验
+    if (!(await cronAuthed(req))) await checkAdminPasscode(req, "material-performance");
+    const { sheet_name } = (await req.json().catch(() => ({}))) as {
       sheet_name?: string;
     };
     const db = admin();
     const token = await getTenantAccessToken();
     const spreadsheetToken = getSpreadsheetToken("FEISHU_SKU_SPREADSHEET_TOKEN");
     const sheets = await listSheets(token, spreadsheetToken);
-    const sid = sheets.find((s) => s.title === sheet_name)?.sheet_id;
-    if (!sid) throw new Error(`未找到 sheet：${sheet_name}`);
+    // 2026-11 飞书里改名为「SKU匹配表-TK」（另有 -SP 为 Shopee）；未指定时先找新名，再兼容旧名
+    const names = sheet_name ? [sheet_name] : ["SKU匹配表-TK", "SKU匹配表"];
+    const sid = names.map((n) => sheets.find((s) => s.title === n)?.sheet_id).find(Boolean);
+    if (!sid) throw new Error(`未找到 sheet：${names.join(" / ")}`);
     const data = await readRange(token, spreadsheetToken, `${sid}!A2:F`);
 
     const rows: Array<{

@@ -34,7 +34,7 @@ function SettingsPage() {
           <TabsTrigger value="staff">人员表</TabsTrigger>
           <TabsTrigger value="balance-alert">账户余额预警</TabsTrigger>
           {account?.isAdmin && <TabsTrigger value="accounts">账号管理</TabsTrigger>}
-          {account?.isAdmin && <TabsTrigger value="exchange-rates">GMV 归因汇率</TabsTrigger>}
+          {account?.isAdmin && <TabsTrigger value="exchange-rates">汇率设置</TabsTrigger>}
           {account?.isAdmin && <TabsTrigger value="feishu-sheets">飞书表名称</TabsTrigger>}
           {account?.isAdmin && <TabsTrigger value="tts-shops">TikTok Shop 授权</TabsTrigger>}
         </TabsList>

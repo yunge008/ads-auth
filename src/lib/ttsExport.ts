@@ -3,7 +3,7 @@
 import * as XLSX from "xlsx";
 import { invokeFn } from "@/lib/api";
 
-export type TtsExportKind = "orders" | "finance" | "products" | "affiliate" | "samples";
+export type TtsExportKind = "orders" | "finance" | "products" | "affiliate";
 type Cell = string | number | null;
 type Chunk = {
   kind: string;
@@ -174,22 +174,6 @@ async function exportAffiliate(shop: { shop_id: string; region: string }, fromMo
   return s;
 }
 
-/** 待审申样 + 审核建议（只读） */
-async function exportSamples(shop: { shop_id: string; region: string }, onProgress?: ExportProgress): Promise<ExportSummary> {
-  const r = await runAll({ kind: "samples", shop_id: shop.shop_id }, onProgress, "申样：");
-  const name = `${shop.region}_申样审核建议_${new Date().toISOString().slice(0, 10)}.xlsx`;
-  const th = r.meta.thresholds as Record<string, number> | undefined;
-  writeXlsx(name, [
-    { name: "审核建议", aoa: [r.columns, ...r.rows.map((row) => row.map((v, i) => xcell(r.columns[i], v)))] },
-    { name: "规则", aoa: [["参数", "值"], ...Object.entries(th ?? {}).map(([k, v]) => [k, v])] },
-  ]);
-  const count = (a: string) => r.rows.filter((x) => x[0] === a).length;
-  return {
-    files: [name], rows: r.rows.length, errors: r.errors,
-    notes: [`推荐批准 ${count("推荐批准")} / 待审核 ${count("待审核")} / 不批准 ${count("不批准")}；只给建议，不会调用审样接口`],
-  };
-}
-
 export async function runTtsExport(
   kind: TtsExportKind,
   shop: { shop_id: string; region: string },
@@ -197,7 +181,6 @@ export async function runTtsExport(
   onProgress?: ExportProgress,
 ): Promise<ExportSummary> {
   const from = opts.fromMonth ?? "", to = opts.toMonth || from;
-  if (kind === "samples") return exportSamples(shop, onProgress);
   if (kind !== "products" && (!/^\d{4}-\d{2}$/.test(from) || !/^\d{4}-\d{2}$/.test(to) || from > to)) throw new Error("请选择有效的起止月份");
   if (kind === "orders") return exportOrders(shop, from, to, onProgress);
   if (kind === "finance") return exportFinance(shop, from, to, onProgress);

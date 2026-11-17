@@ -1,4 +1,5 @@
-// GMV 归因用汇率维护：usd_rate 语义 = 1 美元兑多少本币（如 THB 填 33）。改了直接生效于下次归因计算。
+// 汇率设置（全局）：usd_rate 语义 = 1 美元兑多少本币（如 THB 填 33）。
+// 用于 GMV 归因折美元、申样审核达人 GMV 折美元等所有本币→美元换算；改了直接生效。
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,6 +9,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Plus, RotateCw } from "lucide-react";
 import { toast } from "sonner";
 import { type ExchangeRateRec, exchangeRateApi } from "@/lib/attributionApi";
+
+// 固定站点（负责人 2026-11-17 指定），即使表里还没有也显示一行，填了即创建
+const SITE_CURRENCY: Array<[string, string]> = [
+  ["PH", "PHP"], ["TH", "THB"], ["VN", "VND"], ["MY", "MYR"], ["SG", "SGD"], ["MX", "MXN"], ["JP", "JPY"], ["US", "USD"],
+];
 
 export function ExchangeRateCard() {
   const [rates, setRates] = React.useState<ExchangeRateRec[]>([]);
@@ -55,9 +61,9 @@ export function ExchangeRateCard() {
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-base">GMV 归因汇率</CardTitle>
+        <CardTitle className="text-base">汇率设置</CardTitle>
         <p className="text-xs text-muted-foreground">
-          usd_rate 语义：1 美元 = 多少本币（如泰铢填 33）。归因折美元 = 本币金额 / 该汇率。改了直接生效于下次归因计算，不保留历史版本。
+          1 美元 = 多少本币（如泰铢填 33）。全局使用：GMV 归因、申样审核等所有折美元 = 本币金额 / 该汇率。改了直接生效，不保留历史版本。
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -83,6 +89,7 @@ export function ExchangeRateCard() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead>站点</TableHead>
                 <TableHead>币种</TableHead>
                 <TableHead className="text-right">1 美元 = ? 本币</TableHead>
                 <TableHead>启用</TableHead>
@@ -90,10 +97,14 @@ export function ExchangeRateCard() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rates.length === 0 ? (
-                <TableRow><TableCell colSpan={4} className="h-16 text-center text-sm text-muted-foreground">暂无汇率配置</TableCell></TableRow>
-              ) : rates.map((r) => (
-                <RateRow key={r.currency} rate={r} onSave={save} saving={saving === r.currency} />
+              {[
+                ...SITE_CURRENCY.map(([site, cur]) => ({
+                  site,
+                  rate: rates.find((r) => r.currency === cur) ?? { currency: cur, usd_rate: cur === "USD" ? 1 : 0, enabled: false, updated_at: "", updated_by: null },
+                })),
+                ...rates.filter((r) => !SITE_CURRENCY.some(([, c]) => c === r.currency)).map((r) => ({ site: "—", rate: r })),
+              ].map(({ site, rate }) => (
+                <RateRow key={rate.currency} site={site} rate={rate} onSave={save} saving={saving === rate.currency} />
               ))}
             </TableBody>
           </Table>
@@ -104,17 +115,20 @@ export function ExchangeRateCard() {
 }
 
 function RateRow({
-  rate, onSave, saving,
+  site, rate, onSave, saving,
 }: {
+  site: string;
   rate: ExchangeRateRec;
   onSave: (currency: string, usd_rate: number, enabled: boolean) => Promise<void>;
   saving: boolean;
 }) {
-  const [val, setVal] = React.useState(String(rate.usd_rate));
-  React.useEffect(() => setVal(String(rate.usd_rate)), [rate.usd_rate]);
-  const isUsd = rate.currency === "USD";
+  const isNew = !rate.updated_at; // 表里还没有：填了汇率即创建并启用
+  const [val, setVal] = React.useState(rate.usd_rate ? String(rate.usd_rate) : "");
+  React.useEffect(() => setVal(rate.usd_rate ? String(rate.usd_rate) : ""), [rate.usd_rate]);
+  const isUsd = rate.currency === "USD" && !isNew;
   return (
     <TableRow>
+      <TableCell>{site}</TableCell>
       <TableCell className="font-medium">{rate.currency}</TableCell>
       <TableCell className="text-right">
         <Input
@@ -122,21 +136,22 @@ function RateRow({
           onChange={(e) => setVal(e.target.value)}
           onBlur={() => {
             const n = Number(val);
-            if (isFinite(n) && n > 0 && n !== rate.usd_rate) onSave(rate.currency, n, rate.enabled);
+            if (isFinite(n) && n > 0 && (n !== rate.usd_rate || isNew)) onSave(rate.currency, n, isNew ? true : rate.enabled);
           }}
           disabled={isUsd || saving}
+          placeholder={isNew ? "未设置" : ""}
           className="h-7 w-24 ml-auto text-right"
         />
       </TableCell>
       <TableCell>
         <Switch
           checked={rate.enabled}
-          disabled={isUsd || saving}
+          disabled={isUsd || isNew || saving}
           onCheckedChange={(v) => onSave(rate.currency, rate.usd_rate, v)}
         />
       </TableCell>
       <TableCell className="text-xs text-muted-foreground">
-        {rate.updated_by || "—"} · {new Date(rate.updated_at).toLocaleString()}
+        {isNew ? "未设置" : `${rate.updated_by || "—"} · ${new Date(rate.updated_at).toLocaleString()}`}
       </TableCell>
     </TableRow>
   );

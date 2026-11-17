@@ -655,8 +655,11 @@ async function exportAffiliate(shop: Shop, b: Record<string, unknown>, started: 
   };
 }
 
-// ═══ 5. 申样审核建议（只读，不调审样接口）══════════════════════════════════
-// 规则为初版默认值，可在请求里覆盖；先给负责人看建议与实际审核结果的吻合率，再决定是否放开自动审样。
+// ═══ 5. 申样审核数据（只读，不调审样接口）══════════════════════════════════
+// 只返回原始数据，审核意见由前端按负责人勾选的条件计算（src/lib/sampleAdvice.ts）。
+// - 历史发样：读飞书建联表的每晚缓存 connection_material_registry（与「发样及素材统计」同源），不再逐个调 TikTok 接口
+// - 商家 SKU：sku_product_map（飞书「SKU匹配表-TK」每晚同步）
+// - GMV 折美元：gmv_exchange_rates（设置 → 汇率设置）
 type SampleApp = {
   id?: string; status?: string; commission_rate?: string | number; is_approvable?: boolean; disapprovable_reasons?: string[];
   fulfillment_status?: string; order_id?: string; tracking_number?: string; partner_name?: string; approve_expiration_time?: number;
@@ -665,25 +668,33 @@ type SampleApp = {
   product?: { id?: string; title?: string; sku_id?: string; sku_name?: string };
 };
 export const SAMPLE_COLUMNS = [
-  "审核建议", "建议理由", "申样单 ID", "申请状态", "达人用户名", "达人昵称", "粉丝数", "达人GMV", "GMV币种", "带货内容数", "平台履约率(%)",
-  "电商视频播放", "本店历史申样数", "本店已发样数", "本店已履约数", "本店已发未履约数", "商品 ID", "商品名称", "SKU ID", "SKU 名称",
-  "申请佣金率", "平台可审批", "不可审批原因", "服务商", "审核截止时间", "creator_open_id",
-  "头像", "达人销量(件)", "带货率(post_rate)", "电商视频平均播放", "近30天发视频数(中位)",
+  "申样单 ID", "申请状态", "达人用户名", "达人昵称", "TikTok用户ID", "creator_open_id", "头像", "粉丝数", "达人GMV(本币)", "GMV币种", "达人GMV(USD)",
+  "达人销量(件)", "带货内容数", "平台履约率(%)", "带货率(post_rate)", "电商视频平均播放", "近30天发视频数(中位)",
+  "建联表发样次数", "建联表有VID次数", "建联表未出素材次数", "最近发样日", "建联同事",
+  "商品 ID", "商品名称", "SKU ID", "SKU 名称", "商家SKU", "申请佣金率", "平台可审批", "不可审批原因", "服务商", "审核截止时间",
 ];
-type Perf = { units_sold?: number; post_rate?: number | string; avg_ec_video_play_count?: number; creator_profile?: { video_publish_cnt_30d_med?: number } };
+type Perf = { units_sold?: number; post_rate?: number | string; avg_ec_video_play_count?: number; profile_tt_uri?: string; creator_profile?: { video_publish_cnt_30d_med?: number } };
+const REGION_CURRENCY: Record<string, string> = { PH: "PHP", TH: "THB", VN: "VND", MY: "MYR", SG: "SGD", MX: "MXN", JP: "JPY", US: "USD", ID: "IDR", BR: "BRL" };
+/** 发样超过多少天仍没有 VID 才算「未出素材」（刚发的样还在拍） */
+const UNFULFILLED_AFTER_DAYS = 14;
+
+async function usdRates(): Promise<Map<string, number>> {
+  const { data, error } = await admin().from("gmv_exchange_rates").select("currency,usd_rate,enabled");
+  if (error) throw error;
+  return new Map((data ?? []).filter((r: { enabled: boolean }) => r.enabled).map((r: { currency: string; usd_rate: number }) => [r.currency.toUpperCase(), Number(r.usd_rate)]));
+}
 
 async function exportSamples(shop: Shop, b: Record<string, unknown>, started: number): Promise<Chunk> {
-  const th = {
-    min_fulfill_ok: Number(b.min_fulfill_ok ?? 60), max_fulfill_reject: Number(b.max_fulfill_reject ?? 30),
-    min_followers_ok: Number(b.min_followers_ok ?? 5000), min_gmv_ok: Number(b.min_gmv_ok ?? 100),
-    max_unfulfilled_reject: Number(b.max_unfulfilled_reject ?? 2),
-  };
   const status = String(b.status ?? "PENDING");
   const cur = (b.cursor ?? {}) as { page_token?: string; done?: number };
   let pageToken = cur.page_token ?? "", done = Number(cur.done ?? 0), total: number | null = null;
   const rows: Cell[][] = [];
   const errors: string[] = [];
   const T = { accessToken: shop.access_token, shopCipher: shop.shop_cipher };
+  const region = (shop.region ?? "").toUpperCase();
+  const pool = region.startsWith("PH") ? ["PH", "PH2", "PHL"] : [region];
+  const rates = await usdRates();
+  const cutoff = new Date(Date.now() - UNFULFILLED_AFTER_DAYS * 86400_000).toISOString().slice(0, 10);
   do {
     const r = await ttsCall<{ sample_applications?: SampleApp[]; next_page_token?: string; total_count?: number }>({
       ...T, method: "POST", path: "/affiliate_seller/202508/sample_applications/search",
@@ -692,54 +703,61 @@ async function exportSamples(shop: Shop, b: Record<string, unknown>, started: nu
     if (r.code !== 0) { errors.push(apiErr("sample_applications/search", r)); break; }
     total = r.data?.total_count ?? total;
     const apps = r.data?.sample_applications ?? [];
-    // 本店历史：按达人查全部申样（不限状态），每个达人 1 次
-    const hist = new Map<string, { total: number; shipped: number; fulfilled: number }>();
+    const handles = [...new Set(apps.map((a) => normHandle(a.creator?.username ?? "")).filter(Boolean))];
+    const skuIds = [...new Set(apps.map((a) => a.product?.sku_id ?? "").filter(Boolean))];
+    // 建联表历史（同站点池）：handle 大小写/@ 不敏感
+    const hist = new Map<string, { n: number; vid: number; open: number; last: string; staff: Set<string> }>();
+    if (handles.length) {
+      const { data, error } = await admin().from("connection_material_registry")
+        .select("handle,country,sample_date,vid,staff_name,source_type").eq("source_type", "BD").in("country", pool)
+        // 大小写不敏感精确匹配（ilike 不带通配符），兼容表里带 @ 的写法
+        .or(handles.flatMap((h) => [`handle.ilike."${h}"`, `handle.ilike."@${h}"`]).join(","))
+        .limit(10000);
+      if (error) errors.push(`建联表缓存：${error.message}`);
+      const want = new Set(handles);
+      for (const x of (data ?? []) as Array<{ handle: string; sample_date: string | null; vid: string; staff_name: string }>) {
+        const h = normHandle(x.handle);
+        if (!want.has(h) || !x.sample_date) continue;
+        const a = hist.get(h) ?? { n: 0, vid: 0, open: 0, last: "", staff: new Set<string>() };
+        a.n++;
+        if (x.vid) a.vid++; else if (x.sample_date <= cutoff) a.open++;
+        if (x.sample_date > a.last) a.last = x.sample_date;
+        a.staff.add(x.staff_name);
+        hist.set(h, a);
+      }
+    }
+    const skuMap = new Map<string, string>();
+    if (skuIds.length) {
+      const { data, error } = await admin().from("sku_product_map").select("sku_id,merchant_sku").in("sku_id", skuIds);
+      if (error) errors.push(`SKU 映射：${error.message}`);
+      for (const x of (data ?? []) as Array<{ sku_id: string; merchant_sku: string }>) if (x.merchant_sku) skuMap.set(x.sku_id, x.merchant_sku);
+    }
     const perf = new Map<string, Perf>();
     for (const oid of [...new Set(apps.map((a) => a.creator?.creator_open_id ?? "").filter(Boolean))]) {
-      // 达人广场表现（销量、带货率、播放）；统计窗口以接口口径为准，未核验
+      // 达人广场表现（销量、带货率、播放、TikTok 主页 URI）；统计窗口以接口口径为准，未核验
       const pr = await ttsCall<{ creator?: Perf }>({ ...T, method: "GET", path: `/affiliate_seller/202608/marketplace_creators/${oid}` });
       if (pr.code === 0 && pr.data?.creator) perf.set(oid, pr.data.creator);
       else errors.push(apiErr(`达人表现 ${oid}`, pr));
-      const h = { total: 0, shipped: 0, fulfilled: 0 };
-      const hr = await ttsCall<{ sample_applications?: SampleApp[]; total_count?: number }>({
-        ...T, method: "POST", path: "/affiliate_seller/202508/sample_applications/search",
-        query: { page_size: 50 }, body: { creator_user_oepn_id: oid },
-      });
-      if (hr.code !== 0) { errors.push(apiErr(`达人历史 ${oid}`, hr)); continue; }
-      for (const x of hr.data?.sample_applications ?? []) {
-        h.total++;
-        if (["SHIPPED", "CONTENT_PENDING", "COMPLETED"].includes(String(x.status)) || x.order_id) h.shipped++;
-        if (/COMPLETED|ONGOING/.test(String(x.fulfillment_status ?? ""))) h.fulfilled++;
-      }
-      hist.set(oid, h);
     }
     for (const a of apps) {
       done++;
       const c = a.creator ?? {};
-      const h = hist.get(c.creator_open_id ?? "") ?? { total: 0, shipped: 0, fulfilled: 0 };
-      const unfulfilled = Math.max(0, h.shipped - h.fulfilled - (a.order_id ? 1 : 0));
-      const fp = c.fulfillment_percentage === undefined || c.fulfillment_percentage === "" ? null : Number(c.fulfillment_percentage);
-      const gmv = Number(c.gmv?.amount ?? 0), fol = Number(c.follower_count ?? 0);
-      const reasons: string[] = [];
-      let advice = "待审核";
-      if (a.is_approvable === false) { advice = "不批准"; reasons.push(`平台不可审批：${(a.disapprovable_reasons ?? []).join("/") || "未给原因"}`); }
-      else if (unfulfilled >= th.max_unfulfilled_reject) { advice = "不批准"; reasons.push(`本店已发样未履约 ${unfulfilled} 次（≥${th.max_unfulfilled_reject}）`); }
-      else if (fp !== null && fp < th.max_fulfill_reject) { advice = "不批准"; reasons.push(`平台履约率 ${fp}% < ${th.max_fulfill_reject}%`); }
-      else if ((fp === null || fp >= th.min_fulfill_ok) && (gmv >= th.min_gmv_ok || fol >= th.min_followers_ok)) {
-        advice = "推荐批准";
-        reasons.push(fp === null ? "无履约率记录" : `履约率 ${fp}% ≥ ${th.min_fulfill_ok}%`, gmv >= th.min_gmv_ok ? `GMV ${gmv} ≥ ${th.min_gmv_ok}` : `粉丝 ${fol} ≥ ${th.min_followers_ok}`);
-        if (h.fulfilled > 0) reasons.push(`本店已履约 ${h.fulfilled} 次`);
-      } else {
-        reasons.push(`履约率 ${fp ?? "无"}%，GMV ${gmv}，粉丝 ${fol}，未达推荐线`);
-      }
+      const pf = perf.get(c.creator_open_id ?? "");
+      const h = hist.get(normHandle(c.username ?? ""));
+      const gmv = c.gmv?.amount === undefined || c.gmv?.amount === "" ? null : Number(c.gmv.amount);
+      const cur = (c.gmv?.currency || REGION_CURRENCY[region] || "").toUpperCase();
+      const rate = cur === "USD" ? 1 : rates.get(cur);
+      const ttUid = (pf?.profile_tt_uri ?? "").match(/profile\/(\d+)/)?.[1] ?? "";
       rows.push([
-        advice, reasons.join("；"), a.id ?? "", a.status ?? "", c.username ?? "", c.nickname ?? "", fol, gmv, c.gmv?.currency ?? "",
-        num(c.content_count), fp, num(c.ec_video_view), h.total, h.shipped, h.fulfilled, unfulfilled,
-        a.product?.id ?? "", a.product?.title ?? "", a.product?.sku_id ?? "", a.product?.sku_name ?? "",
+        a.id ?? "", a.status ?? "", c.username ?? "", c.nickname ?? "", ttUid, c.creator_open_id ?? "", c.avatar_url ?? "",
+        num(c.follower_count), gmv, cur, gmv !== null && rate ? Math.round((gmv / rate) * 100) / 100 : null,
+        num(pf?.units_sold), num(c.content_count),
+        c.fulfillment_percentage === undefined || c.fulfillment_percentage === "" ? null : Number(c.fulfillment_percentage),
+        num(pf?.post_rate), num(pf?.avg_ec_video_play_count), num(pf?.creator_profile?.video_publish_cnt_30d_med),
+        h?.n ?? 0, h?.vid ?? 0, h?.open ?? 0, h?.last ?? "", h ? [...h.staff].join("/") : "",
+        a.product?.id ?? "", a.product?.title ?? "", a.product?.sku_id ?? "", a.product?.sku_name ?? "", skuMap.get(a.product?.sku_id ?? "") ?? "",
         a.commission_rate === undefined ? "" : String(a.commission_rate), a.is_approvable === undefined ? "" : a.is_approvable ? "是" : "否",
-        (a.disapprovable_reasons ?? []).join("/"), a.partner_name ?? "", fmtTime(a.approve_expiration_time, shop), c.creator_open_id ?? "",
-        c.avatar_url ?? "", num(perf.get(c.creator_open_id ?? "")?.units_sold), num(perf.get(c.creator_open_id ?? "")?.post_rate),
-        num(perf.get(c.creator_open_id ?? "")?.avg_ec_video_play_count), num(perf.get(c.creator_open_id ?? "")?.creator_profile?.video_publish_cnt_30d_med),
+        (a.disapprovable_reasons ?? []).join("/"), a.partner_name ?? "", fmtTime(a.approve_expiration_time, shop),
       ]);
     }
     pageToken = r.data?.next_page_token ?? "";
@@ -747,9 +765,11 @@ async function exportSamples(shop: Shop, b: Record<string, unknown>, started: nu
   return {
     kind: "samples", columns: SAMPLE_COLUMNS, rows,
     next_cursor: pageToken && !errors.some((e) => e.startsWith("sample_applications")) ? { page_token: pageToken, done } : null,
-    progress: { done, total, unit: "条申样" }, meta: { thresholds: th, status }, errors,
+    progress: { done, total, unit: "条申样" },
+    meta: { status, unfulfilled_after_days: UNFULFILLED_AFTER_DAYS, missing_rate: rates.size ? null : "汇率表为空" }, errors,
   };
 }
+const normHandle = (h: string) => String(h ?? "").trim().replace(/^@+/, "").replace(/\s+/g, "").toLowerCase();
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
