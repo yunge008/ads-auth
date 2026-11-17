@@ -65,16 +65,18 @@ python3 tos_upload.py              # 上传全部压缩图，URL 写 work/images
 与 Seller Center 页面一致：先在 PH 建品，再「同步到其他站点」（平台自动翻译），最后逐站点改本地化标题描述。
 
 ```bash
-# ① PH 建品：用 PH「批量上传」模板
-python3 build_excel.py --site PH --template "<PH batchupload 模板.xlsx>" --specs "work/listings/*.json" -o work/out/PH_create.xlsx
+# ① PH 建品（PH「批量上传」模板已内置 templates/PH_batchupload_template.xlsx）
+python3 build_excel.py --site PH --template templates/PH_batchupload_template.xlsx --specs "work/listings/*.json" -o work/out/PH_create.xlsx
 #    → 用户在 Seller Center 导入；审核通过后进入下一步
-# ② 同步到 MY/TH/VN/SG：用户勾选 PH 商品 → 下载「同步本地商品」模板（已预填源商品/SKU ID）
-python3 fill_sync.py "<sync_local_product_template.xlsx>" -o work/out/sync_filled.xlsx      # 填各站点价格（日常价×2）+ 库存 1000
+# ② 同步到 MY/TH/VN/SG：API 自动找到 PH 新商品（SKU 全属于 spec + 标题一致，多个取最新），取商品/SKU ID 填进内置空壳
+python3 fill_sync.py --specs "work/listings/*.json" -o work/out/sync_filled.xlsx      # 价格 = 日常价×2，库存 1000
 #    → 用户导入；平台按英文自动翻译生成各站点商品
-# ③ 本地化：用户在各站点「批量编辑-全部信息」导出同步出来的商品
-python3 fill_localize.py --site TH "<TH 全部信息导出.xlsx>" --specs "work/listings/*.json" [--product-ids 新商品ID ...]
-#    → 只保留要改的商品行，写入该站点 title/description；变体名在此模板不可改（保留平台翻译）
+# ③ 本地化：API 查 PH 商品同步到各站点的商品 ID → 取详情生成整行 → 写入本地语言标题/描述
+for s in MY TH VN SG; do python3 fill_localize.py --site $s --specs "work/listings/*.json" -o work/out/${s}_localize.xlsx; done
+#    → 用户逐站点用「批量编辑」导入；变体名在此模板不可改（保留平台翻译）
 ```
+②③ 依赖 Edge Function `tts-listing` 的只读动作（find_products / product / replicated）+ 环境变量 `ADS_AUTH_PASSCODE` + 店铺授权 Product Basic。
+API 不可用时的备用：② `fill_sync.py --template <后台下载的同步模板>`；③ `fill_localize.py --site TH --export <后台全部信息导出> --specs ...`。
 每步都产出 `.report.json`（缺价 SKU、跳过的混合链接等），逐条告诉用户。
 JP 等不在同一店铺的站点：直接用该站点「批量上传」模板走 ① 即可。
 
