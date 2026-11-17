@@ -174,39 +174,6 @@ async function exportAffiliate(shop: { shop_id: string; region: string }, fromMo
   return s;
 }
 
-export type SampleCreatorRow = {
-  advice: string; reasons: string; username: string; nickname: string; avatar: string; followers: number | null; gmv: number | null;
-  currency: string; units: number | null; fulfill: number | null; postRate: number | null; plays: number | null;
-  shopShipped: number; shopFulfilled: number; products: string[]; appIds: string[];
-};
-const ADVICE_RANK: Record<string, number> = { "不批准": 0, "待审核": 1, "推荐批准": 2 };
-/** 在线浏览：拉待审申样，按达人合并成一行（同一达人多条申样取最保守的建议） */
-export async function loadSampleAdvice(shopId: string, onProgress?: ExportProgress): Promise<{ rows: SampleCreatorRow[]; errors: string[] }> {
-  const r = await runAll({ kind: "samples", shop_id: shopId }, onProgress, "申样：");
-  const ix = (c: string) => r.columns.indexOf(c);
-  const by = new Map<string, SampleCreatorRow>();
-  const n = (v: Cell) => (v === null || v === "" ? null : Number(v));
-  for (const x of r.rows) {
-    const key = String(x[ix("creator_open_id")] || x[ix("达人用户名")]);
-    const cur = by.get(key);
-    const product = `${x[ix("商品名称")] ?? ""}${x[ix("SKU 名称")] ? `（${x[ix("SKU 名称")]}）` : ""}`;
-    if (cur) {
-      cur.products.push(product); cur.appIds.push(String(x[ix("申样单 ID")]));
-      if ((ADVICE_RANK[String(x[0])] ?? 1) < (ADVICE_RANK[cur.advice] ?? 1)) { cur.advice = String(x[0]); cur.reasons = String(x[1]); }
-      continue;
-    }
-    by.set(key, {
-      advice: String(x[0]), reasons: String(x[1]), username: String(x[ix("达人用户名")] ?? ""), nickname: String(x[ix("达人昵称")] ?? ""),
-      avatar: String(x[ix("头像")] ?? ""), followers: n(x[ix("粉丝数")]), gmv: n(x[ix("达人GMV")]), currency: String(x[ix("GMV币种")] ?? ""),
-      units: n(x[ix("达人销量(件)")]), fulfill: n(x[ix("平台履约率(%)")]), postRate: n(x[ix("带货率(post_rate)")]),
-      plays: n(x[ix("电商视频平均播放")]), shopShipped: Number(x[ix("本店已发样数")] ?? 0), shopFulfilled: Number(x[ix("本店已履约数")] ?? 0),
-      products: [product], appIds: [String(x[ix("申样单 ID")])],
-    });
-  }
-  const rows = [...by.values()].sort((a, b) => (ADVICE_RANK[b.advice] ?? 1) - (ADVICE_RANK[a.advice] ?? 1) || (b.gmv ?? 0) - (a.gmv ?? 0));
-  return { rows, errors: r.errors };
-}
-
 /** 待审申样 + 审核建议（只读） */
 async function exportSamples(shop: { shop_id: string; region: string }, onProgress?: ExportProgress): Promise<ExportSummary> {
   const r = await runAll({ kind: "samples", shop_id: shop.shop_id }, onProgress, "申样：");
