@@ -6,7 +6,8 @@
 //   save_warehouse {code, name?, status?, links?, provider_ref?, note?}
 //   shop_warehouses {shop_id}         只读：店铺在 TikTok 里的仓库列表（绑定仓库用）
 //   import_stock {warehouse_code, rows:[{wh_sku, available, on_hand?, product_name?}], replace?=true}
-//   sync_warehouse {code}             从仓库系统 API 拉库存（千易 / 顶妙：接口文档未提供，暂未实现，明确报错）
+//   sync_warehouse {code}             从仓库系统 API 拉库存整仓覆盖（千易 QUERY_SIMPLE_LIST_INVENTORY_V2 / 顶妙 goods_sku_warehouse/search_page，见 _shared/wh-providers.ts）
+//   provider_warehouses {code}        仓库系统里的仓库列表（绑定 provider_ref 用：千易=仓库名称，顶妙=warehouseId）
 //   sync_shop {shop_id, cursor?}      分片续跑：listings（Search Products）→ orders（近 N 天）→ 写 sea_inv_slots
 //   refresh_map                       用最新 listing 重建映射表，返回新增 / 下架 / SKU 变化
 //   build_plan {source?}              生成调整计划（旧的未执行计划标 SUPERSEDED）
@@ -18,6 +19,7 @@ import { admin, verifyPasscode } from "../_shared/auth.ts";
 import { corsHeaders } from "../_shared/feishu.ts";
 import { cronAuthed } from "../_shared/cron.ts";
 import { ttsCall, type TtsResult } from "../_shared/tts.ts";
+import { dingmiaoInventory, dingmiaoWarehouses, qianyiInventory, qianyiWarehouses } from "../_shared/wh-providers.ts";
 import {
   applySold,
   countSold,
@@ -136,30 +138,37 @@ async function importStock(b: Record<string, unknown>, source = "manual") {
   return { ok: true, rows: list.length, total_available: list.reduce((s, r) => s + r.available, 0), errors };
 }
 
+async function loadWh(code: string) {
+  const { data: w } = await admin().from("sea_inv_warehouses").select("*").eq("code", code).maybeSingle();
+  if (!w) bad(`仓库 ${code} 不存在`);
+  return w as { code: string; name: string; provider: string; provider_ref: string | null };
+}
+
 async function syncWarehouse(code: string) {
   const db = admin();
-  const { data: w } = await db.from("sea_inv_warehouses").select("*").eq("code", code).maybeSingle();
-  if (!w) bad(`仓库 ${code} 不存在`);
-  let err: string;
-  switch (w.provider) {
-    case "qianyi":
-      err = Deno.env.get("QIANYI_ACCESS_ID") && Deno.env.get("QIANYI_SECRET_KEY")
-        ? "千易 openAPI 库存接口尚未对接：需要「查看openAPI文档」里的库存查询接口路径、签名算法与返回字段（凭据已配置）"
-        : "千易 openAPI 未配置：Supabase secrets 缺 QIANYI_ACCESS_ID / QIANYI_SECRET_KEY，且库存接口文档待提供";
-      break;
-    case "dingmiao":
-      err = Deno.env.get("DINGMIAO_APP_KEY") && Deno.env.get("DINGMIAO_APP_SECRET")
-        ? "顶妙WMS 库存接口尚未对接：需要「API接口」页里的库存查询接口路径、签名算法与返回字段（凭据已配置）"
-        : "顶妙WMS 未配置：Supabase secrets 缺 DINGMIAO_APP_KEY / DINGMIAO_APP_SECRET，且库存接口文档待提供";
-      break;
-    case "bigseller":
-    case "manual":
-      return { ok: true, skipped: true, message: `${w.name} 没有 API，用页面「导入库存」` };
-    default:
-      return { ok: true, skipped: true, message: "国内仓不同步实物库存" };
+  const w = await loadWh(code);
+  if (!["qianyi", "dingmiao"].includes(w.provider)) {
+    return { ok: true, skipped: true, message: w.provider === "tiktok" ? "国内仓不同步实物库存" : `${w.name} 没有 API，用页面「导入库存」` };
   }
-  await db.from("sea_inv_warehouses").update({ stock_error: err, updated_at: nowIso() }).eq("code", code);
-  return { ok: false, error: err };
+  try {
+    const r = w.provider === "qianyi" ? await qianyiInventory(w.provider_ref ?? "") : await dingmiaoInventory(w.provider_ref ?? "");
+    const valid = r.rows.filter((x) => x.wh_sku);
+    if (!valid.length) throw new Error("接口返回 0 个 SKU，未覆盖原库存（请确认仓库系统仓库选对了）");
+    const neg = valid.filter((x) => x.available < 0);
+    const res = await importStock({ warehouse_code: code, rows: valid.map((x) => ({ ...x, available: Math.max(0, x.available) })) }, "api");
+    return { ...res, notes: [...r.notes, ...(neg.length ? [`${neg.length} 个 SKU 可用为负数，按 0 计`] : [])] };
+  } catch (e) {
+    const err = (e as Error).message;
+    await db.from("sea_inv_warehouses").update({ stock_error: err, updated_at: nowIso() }).eq("code", code);
+    return { ok: false, error: err };
+  }
+}
+
+async function providerWarehouses(code: string) {
+  const w = await loadWh(code);
+  if (w.provider === "qianyi") return { provider: w.provider, warehouses: await qianyiWarehouses() };
+  if (w.provider === "dingmiao") return { provider: w.provider, warehouses: await dingmiaoWarehouses() };
+  bad(`${w.name} 没有仓库系统 API`);
 }
 
 // ── 店铺 listing + 订单 ─────────────────────────────────────────────────────
@@ -661,6 +670,7 @@ Deno.serve(async (req) => {
       }
       case "import_stock": return json(await importStock(b));
       case "sync_warehouse": return json(await syncWarehouse(String(b.code ?? "")));
+      case "provider_warehouses": return json(await providerWarehouses(String(b.code ?? "")));
       case "sync_shop": return json(await syncShop(b));
       case "refresh_map": return json(await refreshMap());
       case "set_override": {

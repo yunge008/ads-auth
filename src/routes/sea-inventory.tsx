@@ -315,6 +315,8 @@ function WarehouseCard({ w, shops, reload }: { w: SeaWarehouse; shops: SeaShop[]
   const [parsed, setParsed] = React.useState<ParsedStock | null>(null);
   const [paste, setPaste] = React.useState("");
   const [stock, setStock] = React.useState<StockRow[] | null>(null);
+  const [provWhs, setProvWhs] = React.useState<Array<{ ref: string; name: string; code: string | null; country: string | null }> | null>(null);
+  const hasApi = ["qianyi", "dingmiao"].includes(w.provider);
   const shopLabel = (id: string) => { const s = shops.find((x) => x.shop_id === id); return s ? `${s.region ?? ""} ${s.shop_name ?? id}` : id; };
 
   const save = async (p: Partial<SeaWarehouse>) => {
@@ -339,7 +341,13 @@ function WarehouseCard({ w, shops, reload }: { w: SeaWarehouse; shops: SeaShop[]
   };
   const sync = async () => {
     setBusy(true);
-    try { const r = await seaApi.syncWarehouse(w.code); r.ok ? toast.success(r.message ?? "已同步") : toast.error(r.error ?? "失败"); await reload(); }
+    try {
+      const r = await seaApi.syncWarehouse(w.code);
+      if (!r.ok) toast.error(r.error ?? "失败");
+      else toast.success(r.message ?? `已同步 ${r.rows ?? 0} 个 SKU，可用合计 ${r.total_available ?? 0}`);
+      [...(r.notes ?? []), ...(r.errors ?? [])].forEach((n) => toast.warning(n));
+      await reload();
+    }
     catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
   };
   const stale = ageH(w.stock_synced_at) > 26;
@@ -380,6 +388,21 @@ function WarehouseCard({ w, shops, reload }: { w: SeaWarehouse; shops: SeaShop[]
               onClick={() => save({ links: [...w.links.filter((l) => l.shop_id !== shopId || l.tts_warehouse_id !== ttsWh), { shop_id: shopId, tts_warehouse_id: ttsWh }] })}>添加绑定</Button>
           </div>
         </div>
+        {hasApi && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium">仓库系统里的仓库：</span>
+            <span className="font-mono text-xs">{w.provider_ref ?? <span className="text-amber-700">未选择，API 同步会失败</span>}</span>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={async () => {
+              try { setProvWhs((await seaApi.providerWarehouses(w.code)).warehouses); } catch (e) { toast.error((e as Error).message); }
+            }}>读取仓库列表</Button>
+            {provWhs && (
+              <select className="h-8 rounded-md border px-2" value={w.provider_ref ?? ""} disabled={busy} onChange={(e) => save({ provider_ref: e.target.value })}>
+                <option value="">选择…</option>
+                {provWhs.map((x) => <option key={x.ref} value={x.ref}>{x.name}{x.code ? `（${x.code}）` : ""}{x.country ? ` ${x.country}` : ""}</option>)}
+              </select>
+            )}
+          </div>
+        )}
         {w.kind === "overseas" && (
           <div className="space-y-2">
             <div className={stale ? "text-red-600" : ""}>
@@ -388,7 +411,7 @@ function WarehouseCard({ w, shops, reload }: { w: SeaWarehouse; shops: SeaShop[]
               {w.stock_error && <div className="text-red-600">⚠ {w.stock_error}</div>}
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {["qianyi", "dingmiao"].includes(w.provider) && <Button size="sm" variant="outline" disabled={busy} onClick={sync}><RefreshCw className="h-4 w-4 mr-1" />API 同步</Button>}
+              {hasApi && <Button size="sm" variant="outline" disabled={busy} onClick={sync}><RefreshCw className="h-4 w-4 mr-1" />API 同步</Button>}
               <label className="inline-flex">
                 <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={async (e) => {
                   const f = e.target.files?.[0]; e.target.value = "";
