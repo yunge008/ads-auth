@@ -19,6 +19,7 @@ import { Route as GmvAttributionAdminRouteImport } from './routes/gmv-attributio
 import { Route as GmvMaxCreateRouteImport } from './routes/gmv-max-create'
 import { Route as MaterialPerformanceRouteImport } from './routes/material-performance'
 import { Route as OutreachRouteImport } from './routes/outreach'
+import { Route as SeaInventoryRouteImport } from './routes/sea-inventory'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as TtsExportRouteImport } from './routes/tts-export'
 import { Route as OauthTiktokCallbackRouteImport } from './routes/oauth.tiktok.callback'
@@ -30,6 +31,7 @@ import { Route as ApiPublicHooksEcoRouteImport } from './routes/api/public/hooks
 import { Route as ApiPublicHooksEcoPingRouteImport } from './routes/api/public/hooks/eco-ping'
 import { Route as ApiPublicHooksFeishuSyncCronRouteImport } from './routes/api/public/hooks/feishu-sync-cron'
 import { Route as ApiPublicHooksGmvMaxCronRouteImport } from './routes/api/public/hooks/gmv-max-cron'
+import { Route as ApiPublicHooksSeaInventoryCronRouteImport } from './routes/api/public/hooks/sea-inventory-cron'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -79,6 +81,11 @@ const MaterialPerformanceRoute = MaterialPerformanceRouteImport.update({
 const OutreachRoute = OutreachRouteImport.update({
   id: '/outreach',
   path: '/outreach',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SeaInventoryRoute = SeaInventoryRouteImport.update({
+  id: '/sea-inventory',
+  path: '/sea-inventory',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRoute = SettingsRouteImport.update({
@@ -141,6 +148,12 @@ const ApiPublicHooksGmvMaxCronRoute =
     path: '/api/public/hooks/gmv-max-cron',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicHooksSeaInventoryCronRoute =
+  ApiPublicHooksSeaInventoryCronRouteImport.update({
+    id: '/api/public/hooks/sea-inventory-cron',
+    path: '/api/public/hooks/sea-inventory-cron',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -153,6 +166,7 @@ export interface FileRoutesByFullPath {
   '/gmv-max-create': typeof GmvMaxCreateRoute
   '/material-performance': typeof MaterialPerformanceRoute
   '/outreach': typeof OutreachRoute
+  '/sea-inventory': typeof SeaInventoryRoute
   '/settings': typeof SettingsRoute
   '/tts-export': typeof TtsExportRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
@@ -164,6 +178,7 @@ export interface FileRoutesByFullPath {
   '/api/public/hooks/eco-ping': typeof ApiPublicHooksEcoPingRoute
   '/api/public/hooks/feishu-sync-cron': typeof ApiPublicHooksFeishuSyncCronRoute
   '/api/public/hooks/gmv-max-cron': typeof ApiPublicHooksGmvMaxCronRoute
+  '/api/public/hooks/sea-inventory-cron': typeof ApiPublicHooksSeaInventoryCronRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -176,6 +191,7 @@ export interface FileRoutesByTo {
   '/gmv-max-create': typeof GmvMaxCreateRoute
   '/material-performance': typeof MaterialPerformanceRoute
   '/outreach': typeof OutreachRoute
+  '/sea-inventory': typeof SeaInventoryRoute
   '/settings': typeof SettingsRoute
   '/tts-export': typeof TtsExportRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
@@ -187,6 +203,7 @@ export interface FileRoutesByTo {
   '/api/public/hooks/eco-ping': typeof ApiPublicHooksEcoPingRoute
   '/api/public/hooks/feishu-sync-cron': typeof ApiPublicHooksFeishuSyncCronRoute
   '/api/public/hooks/gmv-max-cron': typeof ApiPublicHooksGmvMaxCronRoute
+  '/api/public/hooks/sea-inventory-cron': typeof ApiPublicHooksSeaInventoryCronRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -200,6 +217,7 @@ export interface FileRoutesById {
   '/gmv-max-create': typeof GmvMaxCreateRoute
   '/material-performance': typeof MaterialPerformanceRoute
   '/outreach': typeof OutreachRoute
+  '/sea-inventory': typeof SeaInventoryRoute
   '/settings': typeof SettingsRoute
   '/tts-export': typeof TtsExportRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
@@ -211,6 +229,7 @@ export interface FileRoutesById {
   '/api/public/hooks/eco-ping': typeof ApiPublicHooksEcoPingRoute
   '/api/public/hooks/feishu-sync-cron': typeof ApiPublicHooksFeishuSyncCronRoute
   '/api/public/hooks/gmv-max-cron': typeof ApiPublicHooksGmvMaxCronRoute
+  '/api/public/hooks/sea-inventory-cron': typeof ApiPublicHooksSeaInventoryCronRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -225,6 +244,7 @@ export interface FileRouteTypes {
     | '/gmv-max-create'
     | '/material-performance'
     | '/outreach'
+    | '/sea-inventory'
     | '/settings'
     | '/tts-export'
     | '/oauth/tiktok/callback'
@@ -236,6 +256,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/eco-ping'
     | '/api/public/hooks/feishu-sync-cron'
     | '/api/public/hooks/gmv-max-cron'
+    | '/api/public/hooks/sea-inventory-cron'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -248,6 +269,7 @@ export interface FileRouteTypes {
     | '/gmv-max-create'
     | '/material-performance'
     | '/outreach'
+    | '/sea-inventory'
     | '/settings'
     | '/tts-export'
     | '/oauth/tiktok/callback'
@@ -259,6 +281,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/eco-ping'
     | '/api/public/hooks/feishu-sync-cron'
     | '/api/public/hooks/gmv-max-cron'
+    | '/api/public/hooks/sea-inventory-cron'
   id:
     | '__root__'
     | '/'
@@ -271,6 +294,7 @@ export interface FileRouteTypes {
     | '/gmv-max-create'
     | '/material-performance'
     | '/outreach'
+    | '/sea-inventory'
     | '/settings'
     | '/tts-export'
     | '/oauth/tiktok/callback'
@@ -282,6 +306,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/eco-ping'
     | '/api/public/hooks/feishu-sync-cron'
     | '/api/public/hooks/gmv-max-cron'
+    | '/api/public/hooks/sea-inventory-cron'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -295,6 +320,7 @@ export interface RootRouteChildren {
   GmvMaxCreateRoute: typeof GmvMaxCreateRoute
   MaterialPerformanceRoute: typeof MaterialPerformanceRoute
   OutreachRoute: typeof OutreachRoute
+  SeaInventoryRoute: typeof SeaInventoryRoute
   SettingsRoute: typeof SettingsRoute
   TtsExportRoute: typeof TtsExportRoute
   OauthTiktokCallbackRoute: typeof OauthTiktokCallbackRoute
@@ -306,6 +332,7 @@ export interface RootRouteChildren {
   ApiPublicHooksEcoPingRoute: typeof ApiPublicHooksEcoPingRoute
   ApiPublicHooksFeishuSyncCronRoute: typeof ApiPublicHooksFeishuSyncCronRoute
   ApiPublicHooksGmvMaxCronRoute: typeof ApiPublicHooksGmvMaxCronRoute
+  ApiPublicHooksSeaInventoryCronRoute: typeof ApiPublicHooksSeaInventoryCronRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -378,6 +405,13 @@ declare module '@tanstack/react-router' {
       path: '/outreach'
       fullPath: '/outreach'
       preLoaderRoute: typeof OutreachRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sea-inventory': {
+      id: '/sea-inventory'
+      path: '/sea-inventory'
+      fullPath: '/sea-inventory'
+      preLoaderRoute: typeof SeaInventoryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -457,6 +491,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicHooksGmvMaxCronRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/hooks/sea-inventory-cron': {
+      id: '/api/public/hooks/sea-inventory-cron'
+      path: '/api/public/hooks/sea-inventory-cron'
+      fullPath: '/api/public/hooks/sea-inventory-cron'
+      preLoaderRoute: typeof ApiPublicHooksSeaInventoryCronRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -471,6 +512,7 @@ const rootRouteChildren: RootRouteChildren = {
   GmvMaxCreateRoute: GmvMaxCreateRoute,
   MaterialPerformanceRoute: MaterialPerformanceRoute,
   OutreachRoute: OutreachRoute,
+  SeaInventoryRoute: SeaInventoryRoute,
   SettingsRoute: SettingsRoute,
   TtsExportRoute: TtsExportRoute,
   OauthTiktokCallbackRoute: OauthTiktokCallbackRoute,
@@ -482,6 +524,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicHooksEcoPingRoute: ApiPublicHooksEcoPingRoute,
   ApiPublicHooksFeishuSyncCronRoute: ApiPublicHooksFeishuSyncCronRoute,
   ApiPublicHooksGmvMaxCronRoute: ApiPublicHooksGmvMaxCronRoute,
+  ApiPublicHooksSeaInventoryCronRoute: ApiPublicHooksSeaInventoryCronRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

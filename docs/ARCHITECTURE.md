@@ -29,6 +29,7 @@
 | `/api/public/hooks/feishu-sync-cron` | **服务端路由**：每晚北京 23:00 把四个「读飞书 → 写自己库」的基础同步各跑一次（`feishu-read-connection-stats` 发样及素材统计、`attribution-sync-creators` 达人登记、`attribution-feishu` 的 `sync-targets` / `sync-handovers`）。四步串行且互不影响，任一步失败发飞书机器人通知，运行状态写 `gmv_max_sync_state.id='feishu_nightly_sync'`；body 可传 `{only:["creators",...]}` 只跑其中几步（apikey 鉴权，单步 4 分钟超时） |
 | `/api/public/hooks/balance-alert-cron` | **服务端路由**：每天北京 10:00（pg_cron `balance-alert-daily`，`0 2 * * *`）先同步 ECO 余额（`eco.server.ts`），再调 `balance-alert` refresh（分片续跑）→ notify，开关开且可用天数 < X 的广告户由本路由经 `FEISHU_BOT_WEBHOOK` 发到**与每日自动授权通知同一个群**（消息由 `balance-alert` build_message 组装，Edge Function 自身不发飞书）；每天都发：交互卡片列出所有开了监控的户（按日耗倒序，可用天数红 < X / 黄 X~X+5 / 绿），卡片头 有户用光红、有户 < X 黄、否则绿。apikey 鉴权；页面「发送到飞书」按钮带口令头 + `{manual:true}` 调同一路由，口令转给 Edge Function 校验，不刷新、强制发送 |
 |  | ↳ **失败不静默、不用旧数据（2026-11-10）**：每天必发；ECO 同步失败/超 26h/未配置 → 卡片标题红 + 置顶原因；任务异常 → 单独红色失败卡片；ECO 同步失败即作废 `eco_balances` 全部行（fetched_at=1970），成功则作废本次列表外的户；刷新超时未更新的户清空余额与可用天数并注明 |
+| `/sea-inventory` | SEA库存监控：海外仓库存按销量分配到 listing、国内仓补货；计划需人工确认后经 TikTok Shop API 执行（见文末「SEA 库存监控」） |
 | `/api/public/hooks/authorize-cron` | **服务端路由**：每日 08:00 自动授权入口，循环 feishu-read → authorize-batch → feishu-writeback，结束发飞书机器人通知（apikey 鉴权，10 分钟硬预算 / 最多 4 轮） |
 
 `routeTree.gen.ts` 自动生成，禁止手改。
@@ -164,8 +165,16 @@
 - Edge Function `tts-p0-probe`（管理员）：P0 实测工具，`exchange/shops/refresh/read/write/raw`。
 - Edge Function `tts-export`（管理员，只读）：店铺固定内容分片导出 `kind=orders|finance|products|affiliate`，前端 `src/lib/ttsExport.ts` 循环 `next_cursor` 并生成与卖家后台同列名的 CSV/xlsx；页面 `/tts-export`。
 - 达人外联 A 线（规则 `docs/CREATOR_OWNERSHIP_RULES.md` v1.2）：表 `outreach_settings` / `outreach_touches`（触达，一条消息一行）/ `outreach_creator_events`（回复、申样批准、发样、回收、外部建联）/ `outreach_conflicts` / `outreach_creator_state`（归属快照）；纯计算 `_shared/ownership.ts`（冷却、保护期、认领、冲突、标签），DB 读写 `_shared/outreach.ts`；Edge Function `outreach-precheck`（发送前预检）、`outreach-touch`（触达回传，插件与系统共用）。与 GMV 归因的 `creator_registry` / `creator_ownership` 互不读写。
-- 所有 TTS 调用经 `_shared/tts.ts` 的 `ttsAccessCheck` 只读闸门（写接口仅放行：定向计划新建/修改、达人私信、商品图片上传、新建商品**且 body.save_mode 必须为 AS_DRAFT**）。`ttsCall` 支持 `form`（multipart，不参与签名）。
+- 所有 TTS 调用经 `_shared/tts.ts` 的 `ttsAccessCheck` 只读闸门（写接口仅放行：定向计划新建/修改、达人私信、商品图片上传、新建商品**且 body.save_mode 必须为 AS_DRAFT**、改库存 Update Inventory **且必须 INCREMENTAL、不得 unlink 仓库**、全球商品改库存）。`ttsCall` 支持 `form`（multipart，不参与签名）。
 - 商品上架（2026-11-17 起）：Edge Function `tts-listing`（管理员）`shops/prepare/find_products/product/replicated`（只读，给 Excel 方案自动取商品/SKU ID 与详情）+ `upload_image/create_draft`，只建草稿，人工在 Seller Center 发布。本地工具链 `tools/tts-listing/`（Python，Claude / Codex 共用，说明见其 `SKILL.md`）：定价表 → `prices.json`，商品表导出 → `refs.json`，图片包 → 压缩图 → 火山引擎 TOS 公网 URL，listing spec（执行者写标题/描述/变体）→ Seller Center 批量上传 Excel（直接改模板 XML，保留下拉与校验）或 `tts-listing` 草稿。所需权限包：Product Basic + Product Modify。
 - Secrets：`TTS_APP_KEY`、`TTS_APP_SECRET`。
 - 规划与业务规则：`docs/OUTREACH_HANDOFF.md`；P0 进度：`docs/OUTREACH_P0.md`。
+
+## SEA 库存监控（2026-11-17 起，页面 `/sea-inventory`，tab key `sea-inventory`）
+
+- 纯函数 `_shared/sea-inventory.ts`（单测 `sea-inventory.test.ts`）：海外仓「可分配 = 仓库可用 − 每 SKU 预留 5」，同仓库 SKU 下任一 listing 槽位可售 < 10 天或 < 5 件 → 整组按近 N 天销量占比重分（最大余数法，合计 = 可分配，绝不超卖；无销量槽位保底 zero_sale_qty 且合计 ≤ 20%）；listing 合计已超过可分配也压回；国内仓只补可售 < 10 天的到 cn_target_days 天销量；新仓（status=onboarding）为未挂新仓的 listing 生成虚拟槽位（首次设置，INCREMENTAL 自动建关联）。listing 商家 SKU 与仓库 SKU **完全一致**才算同一实物（包装不同编码不同，不合并），可人工覆盖。
+- Edge Function `sea-inventory`：overview / save_settings / save_warehouse / shop_warehouses / import_stock / sync_warehouse / sync_shop（Search Products 202502 ACTIVATE → 槽位；Get Order List 近 N 天，一个 line_item = 一件，取消不计，分片续跑 cursor）/ refresh_map / set_override / map_list / stock_list / build_plan（店铺同步失败或 > 14h、海外仓库存 > stock_max_age_hours 的不参与，写入 data_warnings）/ plan_get / plan_update / execute（confirm=EXECUTE；先 Inventory Search 读实时库存，海外仓扣掉计划后已卖件数；目标 0 不执行；Update Inventory INCREMENTAL；逐条记 OK/FAILED/SKIPPED；计划 > 14h 拒绝执行）/ build_message（飞书卡片，table 组件 + 纯文本兜底）。cron 身份只放行 overview/sync_*/refresh_map/build_plan/build_message，**cron 永远不能执行改库存**。
+- 服务端路由 `/api/public/hooks/sea-inventory-cron`：pg_cron `sea-inventory-day`（`10 1 * * *` 北京 09:10）/ `sea-inventory-night`（`10 13 * * *` 北京 21:10，额外刷新映射表）；没有任何仓库绑定店铺时跳过不发；发送到 `SEA_INV_FEISHU_WEBHOOK`，未配置用 `FEISHU_BOT_WEBHOOK`；任务失败发红色卡片。页面「发送到飞书」带口令调同一路由 `{manual:true, plan_id}`。
+- 表：`sea_inv_settings`（单行参数）、`sea_inv_warehouses`（实体仓 + links=[{shop_id,tts_warehouse_id}] + 库存同步状态）、`sea_inv_wh_stock`、`sea_inv_shop_sync`、`sea_inv_slots`（店铺×SKU×TikTok 仓）、`sea_inv_sku_map`（映射表 + 覆盖 + 变化记录）、`sea_inv_plans`、`sea_inv_plan_items`。RLS 仅 service role。
+- 仓库库存来源：千易（MY/PH）、顶妙WMS（TH1）**API 文档未提供，`sync_warehouse` 明确报错**；BigSeller（VN）无 API；目前全部可用页面导入（xlsx/csv/粘贴，整仓覆盖）。预留 secrets 名：`QIANYI_ACCESS_ID`/`QIANYI_SECRET_KEY`、`DINGMIAO_APP_KEY`/`DINGMIAO_APP_SECRET`。
 

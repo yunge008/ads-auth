@@ -1,7 +1,7 @@
 // Central registry of app tabs (UI nav + permission keys).
 // To add a new tab: add an entry here, create the route file, then admin
 // assigns the tab key in the account permissions UI.
-import { Database, FileDown, Handshake, MessageSquare, PlusCircle, Settings, Target, TerminalSquare, TrendingUp, Users, Zap, type LucideIcon } from "lucide-react";
+import { Boxes, Database, FileDown, Handshake, MessageSquare, PlusCircle, Settings, Target, TerminalSquare, TrendingUp, Users, Zap, type LucideIcon } from "lucide-react";
 
 export type TabDef = {
   key: string;
@@ -23,6 +23,7 @@ export const TABS: TabDef[] = [
   { key: "feishu-data", label: "已获取数据查阅", to: "/feishu-data", icon: Database },
   { key: "tts-export", label: "店铺数据导出", to: "/tts-export", icon: FileDown },
   { key: "outreach", label: "达人建联", to: "/outreach", icon: Handshake },
+  { key: "sea-inventory", label: "SEA库存监控", to: "/sea-inventory", icon: Boxes },
   { key: "settings", label: "设置", to: "/settings", icon: Settings },
   { key: "api-test", label: "API测试", to: "/api-test", icon: TerminalSquare, position: "bottom" },
 ];

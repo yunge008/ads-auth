@@ -86,3 +86,23 @@ Deno.test("只读闸门：商品只允许传图 + 建草稿，不允许直接上
     if (ok(m, p, b) !== want) throw new Error(`${m} ${p} ${JSON.stringify(b)} 期望 ${want ? "放行" : "拦截"}`);
   }
 });
+
+Deno.test("只读闸门：改库存只允许 INCREMENTAL 设数量，不允许 FULL / 解除仓库关联", async () => {
+  const { ttsAccessCheck } = await import("./tts.ts");
+  const ok = (m: string, p: string, b?: unknown) => ttsAccessCheck(m, p, b) === null;
+  const P = "/product/202309/products/1729/inventory/update";
+  const inv = [{ id: "1", inventory: [{ warehouse_id: "7", quantity: 10 }] }];
+  const cases: Array<[string, string, unknown, boolean]> = [
+    ["POST", P, { sku_warehouse_stock_update_mode: "INCREMENTAL", skus: inv }, true],
+    ["POST", P, { sku_warehouse_stock_update_mode: "FULL", skus: inv }, false],
+    ["POST", P, { skus: inv }, false],
+    ["POST", P, { sku_warehouse_stock_update_mode: "INCREMENTAL", skus: [{ id: "1", inventory: [], unlink_warehouse_ids: ["7"] }] }, false],
+    ["POST", P, { sku_warehouse_stock_update_mode: "INCREMENTAL", skus: [{ id: "1", inventory: [{ warehouse_id: "7", quantity: 1 }], unlink_warehouse_ids: ["8"] }] }, false],
+    ["POST", P, { sku_warehouse_stock_update_mode: "INCREMENTAL", skus: [] }, false],
+    ["POST", "/product/202309/global_products/99/inventory/update", { global_skus: [] }, true],
+    ["POST", "/product/202309/products/1729/prices/update", undefined, false],
+  ];
+  for (const [m, p, b, want] of cases) {
+    if (ok(m, p, b) !== want) throw new Error(`${m} ${p} ${JSON.stringify(b)} 期望 ${want ? "放行" : "拦截"}`);
+  }
+});

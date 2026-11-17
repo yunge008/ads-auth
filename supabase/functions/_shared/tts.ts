@@ -107,6 +107,19 @@ const TTS_WRITE_ALLOW: Array<{ method: string; path: RegExp; why: string; body?:
   { method: "POST", path: /^\/affiliate_seller\/\d+\/conversations$/, why: "建立/获取达人会话" },
   { method: "POST", path: /^\/affiliate_seller\/\d+\/conversations\/[^/]+\/messages$/, why: "发送达人私信" },
   { method: "POST", path: /^\/affiliate_seller\/\d+\/conversatons\/read$/, why: "达人会话标为已读（官方路径拼写为 conversatons）" },
+  // 2026-11-17 负责人要求「SEA库存监控」确认后经 API 改库存。只允许设数量（INCREMENTAL），不允许 FULL 替换仓库列表、不允许解除仓库关联。
+  {
+    method: "POST", path: /^\/product\/\d+\/products\/\d+\/inventory\/update$/, why: "改 listing 库存（SEA库存监控，用户确认后执行）",
+    body: (b) => {
+      const x = (b ?? {}) as { sku_warehouse_stock_update_mode?: string; skus?: Array<{ unlink_warehouse_ids?: unknown[]; inventory?: unknown[] }> };
+      if (x.sku_warehouse_stock_update_mode !== "INCREMENTAL") return "改库存只允许 sku_warehouse_stock_update_mode=INCREMENTAL";
+      if (!Array.isArray(x.skus) || !x.skus.length) return "skus 不能为空";
+      if (x.skus.some((s) => (s.unlink_warehouse_ids?.length ?? 0) > 0)) return "不允许解除仓库关联（unlink_warehouse_ids）";
+      if (x.skus.some((s) => !Array.isArray(s.inventory) || !s.inventory.length)) return "每个 SKU 必须带 inventory";
+      return null;
+    },
+  },
+  { method: "POST", path: /^\/product\/\d+\/global_products\/\d+\/inventory\/update$/, why: "改全球商品库存（跨境店，SEA库存监控，用户确认后执行）" },
 ];
 const TTS_READ_POST = /\/(search|filter|query|check)$/;
 
@@ -120,7 +133,7 @@ export function ttsAccessCheck(method: string, path: string, body?: unknown): st
     const why = w.body?.(body ?? null);
     return why ? `只读闸门拦截：${m} ${path}：${why}` : null;
   }
-  return `只读闸门拦截：${m} ${path} 不在允许清单内（当前只允许读取 + 定向计划新建/修改 + 达人私信 + 商品草稿；其他写接口需负责人确认后加入 _shared/tts.ts 的 TTS_WRITE_ALLOW）`;
+  return `只读闸门拦截：${m} ${path} 不在允许清单内（当前只允许读取 + 定向计划新建/修改 + 达人私信 + 商品草稿 + 改库存；其他写接口需负责人确认后加入 _shared/tts.ts 的 TTS_WRITE_ALLOW）`;
 }
 
 export async function ttsCall<T = unknown>(opts: TtsCallOpts): Promise<TtsResult<T>> {
