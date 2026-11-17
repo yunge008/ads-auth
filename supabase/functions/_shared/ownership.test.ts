@@ -90,3 +90,10 @@ Deno.test("§8.1 未回复标签在最近一次触达满 90 天后消失", () =>
   eq(computeState(input, "2026-03-31").tag, "李汝华·未回复");
   eq(computeState(input, "2026-04-01").tag, "");
 });
+
+Deno.test("负责人 11-17 确认：发样（审批样品）算认领，公共池达人发样即归属发样 BD", () => {
+  const s = computeState({ touches: [], events: [{ date: "2026-05-01", type: "sample_shipped", bd: "林乐欣" }] }, "2026-05-02");
+  eq(s.owner, "林乐欣");
+  eq(s.anchorType, "发样");
+  eq(s.protectUntil, "2026-07-30");
+});

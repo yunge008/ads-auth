@@ -72,7 +72,8 @@ export type State = {
   conflicts: Conflict[]; // 本次计算新发现的冲突（写入冲突表前需去重）
 };
 
-const CLAIM = new Set(["reply", "sample_approved", "vid_recovered", "external_success"]);
+// 2026-11-17 负责人确认：发样 = 审批样品，算认领（与申样批准同等）
+const CLAIM = new Set(["reply", "sample_approved", "sample_shipped", "vid_recovered", "external_success"]);
 const REASON: Record<string, string> = {
   reply: "达人回复", sample_approved: "申样批准", vid_recovered: "回收素材", external_success: "外部渠道登记", sample_shipped: "发样",
 };
@@ -124,7 +125,7 @@ export function computeState(input: Input, today: string, s: Settings = DEFAULT_
     if (e.type === "reply") repliedBds.add(e.bd);
 
     if (!owner) {
-      if (!isClaim) continue; // 发样本身不认领（规则 §1 只列回复/申样批准/回收），仅为保护期内续期锚点
+      if (!isClaim) continue;
       // 同一天另一个 BD 也建联成功 → 冲突（§5 同日无法判断）
       const rival = events.slice(i + 1).find((x) => x.date === e.date && x.bd && x.bd !== e.bd && CLAIM.has(x.type));
       if (rival?.bd) conflicts.push({ date: e.date, type: "同日无法判断", bds: [e.bd, rival.bd], detail: `${e.bd}「${REASON[e.type]}」与 ${rival.bd}「${REASON[rival.type]}」同日` });
