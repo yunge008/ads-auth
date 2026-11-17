@@ -1,5 +1,7 @@
 # 完工日志（只追加，不修改历史行）
 
+2026-11-17 | lovable | 重新部署 Edge Function `tts-export`（新函数首次部署）与 `tts-p0-probe`（main af61428，共享文件 _shared/tts.ts 有改动两函数一并重新部署）；无代码改动、无 migration；版本号改为 1117.159 | supabase/functions/{tts-export,tts-p0-probe}/index.ts, supabase/functions/_shared/tts.ts, src/lib/version.ts, docs/{PLAN,WORKLOG}.md
+
 2026-09-18 | claude | 重新部署 Edge Function `attribution-sync-creators`、`feishu-read-connection-stats`、`attribution-feishu`（main 当前版本，无代码改动） | supabase/functions/{attribution-sync-creators,feishu-read-connection-stats,attribution-feishu}/index.ts, src/lib/version.ts, docs/WORKLOG.md
 
 格式：`日期 | 工具 | 改了什么 | 涉及文件`
