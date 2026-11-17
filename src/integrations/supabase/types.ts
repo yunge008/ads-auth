@@ -1780,6 +1780,261 @@ export type Database = {
         }
         Relationships: []
       }
+      outreach_conflicts: {
+        Row: {
+          bds: string[]
+          created_at: string
+          creator_key: string
+          decided_at: string | null
+          decided_by: string | null
+          decision: string | null
+          detail: string | null
+          found_date: string
+          id: string
+          site_pool: string
+          status: string
+          type: string
+          username: string | null
+        }
+        Insert: {
+          bds: string[]
+          created_at?: string
+          creator_key: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision?: string | null
+          detail?: string | null
+          found_date: string
+          id?: string
+          site_pool: string
+          status?: string
+          type: string
+          username?: string | null
+        }
+        Update: {
+          bds?: string[]
+          created_at?: string
+          creator_key?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision?: string | null
+          detail?: string | null
+          found_date?: string
+          id?: string
+          site_pool?: string
+          status?: string
+          type?: string
+          username?: string | null
+        }
+        Relationships: []
+      }
+      outreach_creator_events: {
+        Row: {
+          bd: string | null
+          created_at: string
+          creator_key: string
+          creator_open_id: string | null
+          event: string
+          event_at: string
+          event_date: string
+          id: string
+          raw: Json | null
+          ref: string
+          shop_id: string | null
+          site_pool: string
+          source: string
+          username: string | null
+        }
+        Insert: {
+          bd?: string | null
+          created_at?: string
+          creator_key: string
+          creator_open_id?: string | null
+          event: string
+          event_at: string
+          event_date: string
+          id?: string
+          raw?: Json | null
+          ref: string
+          shop_id?: string | null
+          site_pool: string
+          source: string
+          username?: string | null
+        }
+        Update: {
+          bd?: string | null
+          created_at?: string
+          creator_key?: string
+          creator_open_id?: string | null
+          event?: string
+          event_at?: string
+          event_date?: string
+          id?: string
+          raw?: Json | null
+          ref?: string
+          shop_id?: string | null
+          site_pool?: string
+          source?: string
+          username?: string | null
+        }
+        Relationships: []
+      }
+      outreach_creator_state: {
+        Row: {
+          anchor_date: string | null
+          anchor_type: string | null
+          computed_for: string
+          cooldown_until: string | null
+          creator_key: string
+          creator_open_id: string | null
+          last_touch_bd: string | null
+          last_touch_date: string | null
+          nickname: string | null
+          owner_bd: string | null
+          protect_until: string | null
+          site_pool: string
+          tag: string
+          updated_at: string
+          username: string | null
+        }
+        Insert: {
+          anchor_date?: string | null
+          anchor_type?: string | null
+          computed_for: string
+          cooldown_until?: string | null
+          creator_key: string
+          creator_open_id?: string | null
+          last_touch_bd?: string | null
+          last_touch_date?: string | null
+          nickname?: string | null
+          owner_bd?: string | null
+          protect_until?: string | null
+          site_pool: string
+          tag?: string
+          updated_at?: string
+          username?: string | null
+        }
+        Update: {
+          anchor_date?: string | null
+          anchor_type?: string | null
+          computed_for?: string
+          cooldown_until?: string | null
+          creator_key?: string
+          creator_open_id?: string | null
+          last_touch_bd?: string | null
+          last_touch_date?: string | null
+          nickname?: string | null
+          owner_bd?: string | null
+          protect_until?: string | null
+          site_pool?: string
+          tag?: string
+          updated_at?: string
+          username?: string | null
+        }
+        Relationships: []
+      }
+      outreach_settings: {
+        Row: {
+          key: string
+          note: string | null
+          updated_at: string
+          updated_by: string | null
+          value: Json
+        }
+        Insert: {
+          key: string
+          note?: string | null
+          updated_at?: string
+          updated_by?: string | null
+          value: Json
+        }
+        Update: {
+          key?: string
+          note?: string | null
+          updated_at?: string
+          updated_by?: string | null
+          value?: Json
+        }
+        Relationships: []
+      }
+      outreach_touches: {
+        Row: {
+          batch_id: string | null
+          bd: string
+          channel: string
+          client_ref: string | null
+          content: string | null
+          conversation_id: string | null
+          created_at: string
+          creator_key: string
+          creator_open_id: string | null
+          id: string
+          kind: string
+          message_id: string | null
+          message_type: string | null
+          nickname: string | null
+          reason: string | null
+          result: string
+          shop_id: string | null
+          site_pool: string
+          source: string
+          tc_id: string | null
+          touch_date: string
+          touched_at: string
+          username: string | null
+        }
+        Insert: {
+          batch_id?: string | null
+          bd: string
+          channel: string
+          client_ref?: string | null
+          content?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          creator_key: string
+          creator_open_id?: string | null
+          id?: string
+          kind: string
+          message_id?: string | null
+          message_type?: string | null
+          nickname?: string | null
+          reason?: string | null
+          result?: string
+          shop_id?: string | null
+          site_pool: string
+          source?: string
+          tc_id?: string | null
+          touch_date: string
+          touched_at: string
+          username?: string | null
+        }
+        Update: {
+          batch_id?: string | null
+          bd?: string
+          channel?: string
+          client_ref?: string | null
+          content?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          creator_key?: string
+          creator_open_id?: string | null
+          id?: string
+          kind?: string
+          message_id?: string | null
+          message_type?: string | null
+          nickname?: string | null
+          reason?: string | null
+          result?: string
+          shop_id?: string | null
+          site_pool?: string
+          source?: string
+          tc_id?: string | null
+          touch_date?: string
+          touched_at?: string
+          username?: string | null
+        }
+        Relationships: []
+      }
       site_handovers: {
         Row: {
           country: string
