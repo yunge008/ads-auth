@@ -30,3 +30,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# TikTok 上架工具链的工作目录（含图片、上传结果）
+tools/tts-listing/work/
+__pycache__/

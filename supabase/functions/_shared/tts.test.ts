@@ -67,3 +67,22 @@ Deno.test("只读闸门：放行定向计划与达人私信，拦截审样/删�
     if (ok(m, p) !== want) throw new Error(`${m} ${p} 期望 ${want ? "放行" : "拦截"}`);
   }
 });
+
+Deno.test("只读闸门：商品只允许传图 + 建草稿，不允许直接上架/编辑/改价", async () => {
+  const { ttsAccessCheck } = await import("./tts.ts");
+  const ok = (m: string, p: string, b?: unknown) => ttsAccessCheck(m, p, b) === null;
+  const cases: Array<[string, string, unknown, boolean]> = [
+    ["POST", "/product/202309/images/upload", undefined, true],
+    ["POST", "/product/202309/products", { save_mode: "AS_DRAFT", title: "x" }, true],
+    ["POST", "/product/202309/products", { save_mode: "LISTING" }, false],
+    ["POST", "/product/202309/products", { title: "缺 save_mode 默认会直接上架" }, false],
+    ["POST", "/product/202309/products", undefined, false],
+    ["PUT", "/product/202309/products/123", { save_mode: "AS_DRAFT" }, false],
+    ["POST", "/product/202309/products/activate", undefined, false],
+    ["POST", "/product/202309/products/123/prices/update", undefined, false],
+    ["DELETE", "/product/202309/products", undefined, false],
+  ];
+  for (const [m, p, b, want] of cases) {
+    if (ok(m, p, b) !== want) throw new Error(`${m} ${p} ${JSON.stringify(b)} 期望 ${want ? "放行" : "拦截"}`);
+  }
+});

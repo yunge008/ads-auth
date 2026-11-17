@@ -84,6 +84,8 @@ export type TtsCallOpts = {
   shopCipher?: string;
   query?: Record<string, string | number | boolean | undefined | null>;
   body?: unknown; // 省略 = 不发请求体
+  /** multipart/form-data 请求体（如上传商品图片）。按官方签名规则，multipart 请求体不参与签名。与 body 互斥。 */
+  form?: FormData;
   /** 写操作：只在「明确被限流拒绝」时重试，绝不在超时/5xx 时重试，避免重复建计划/重复发消息。 */
   write?: boolean;
   timeoutMs?: number;
@@ -92,7 +94,13 @@ export type TtsCallOpts = {
 // ── 读写闸门（2026-11-16 负责人规定）────────────────────────────────────────
 // 所有 TTS 接口默认只读：GET，以及路径以 /search、/filter、/query、/check 结尾的查询类 POST。
 // 写接口只放行下表（2026-11-17 起含达人私信）；新增任何写接口必须先经负责人逐条明确确认，再加到这里。
-const TTS_WRITE_ALLOW: Array<{ method: string; path: RegExp; why: string }> = [
+const TTS_WRITE_ALLOW: Array<{ method: string; path: RegExp; why: string; body?: (b: unknown) => string | null }> = [
+  // 2026-11-17 负责人确认放开：商品上架只写草稿（AS_DRAFT），人工在 Seller Center 审核后发布。
+  { method: "POST", path: /^\/product\/\d+\/images\/upload$/, why: "上传商品图片（只生成 TikTok 图片 URI，不影响在售商品）" },
+  {
+    method: "POST", path: /^\/product\/\d+\/products$/, why: "新建商品（仅草稿）",
+    body: (b) => (b as { save_mode?: string } | null)?.save_mode === "AS_DRAFT" ? null : "新建商品只允许 save_mode=AS_DRAFT（写草稿，人工审核后发布）",
+  },
   { method: "POST", path: /^\/affiliate_seller\/\d+\/target_collaborations$/, why: "新建定向计划" },
   { method: "PUT", path: /^\/affiliate_seller\/\d+\/target_collaborations\/\d+$/, why: "修改定向计划" },
   // 2026-11-17 负责人确认放开：达人私信（建会话 / 发消息 / 标已读）。发送前必须经 BD 确认由业务函数保证。
@@ -103,16 +111,20 @@ const TTS_WRITE_ALLOW: Array<{ method: string; path: RegExp; why: string }> = [
 const TTS_READ_POST = /\/(search|filter|query|check)$/;
 
 /** 返回 null 表示放行；否则返回拦截原因。 */
-export function ttsAccessCheck(method: string, path: string): string | null {
+export function ttsAccessCheck(method: string, path: string, body?: unknown): string | null {
   const m = method.toUpperCase();
   if (m === "GET") return null;
   if (m === "POST" && TTS_READ_POST.test(path)) return null;
-  if (TTS_WRITE_ALLOW.some((w) => w.method === m && w.path.test(path))) return null;
-  return `只读闸门拦截：${m} ${path} 不在允许清单内（当前只允许读取 + 定向计划新建/修改；其他写接口需负责人确认后加入 _shared/tts.ts 的 TTS_WRITE_ALLOW）`;
+  const w = TTS_WRITE_ALLOW.find((w) => w.method === m && w.path.test(path));
+  if (w) {
+    const why = w.body?.(body ?? null);
+    return why ? `只读闸门拦截：${m} ${path}：${why}` : null;
+  }
+  return `只读闸门拦截：${m} ${path} 不在允许清单内（当前只允许读取 + 定向计划新建/修改 + 达人私信 + 商品草稿；其他写接口需负责人确认后加入 _shared/tts.ts 的 TTS_WRITE_ALLOW）`;
 }
 
 export async function ttsCall<T = unknown>(opts: TtsCallOpts): Promise<TtsResult<T>> {
-  const blocked = ttsAccessCheck(opts.method, opts.path);
+  const blocked = ttsAccessCheck(opts.method, opts.path, opts.body);
   if (blocked) {
     return {
       method: opts.method, path: opts.path, http_status: 0, code: null, message: blocked,
@@ -143,8 +155,11 @@ export async function ttsCall<T = unknown>(opts: TtsCallOpts): Promise<TtsResult
     try {
       const res = await fetch(url, {
         method: opts.method,
-        headers: { "content-type": "application/json", "x-tts-access-token": opts.accessToken },
-        body: bodyStr || undefined,
+        // multipart 时不手动设 content-type，由 fetch 生成带 boundary 的头
+        headers: opts.form
+          ? { "x-tts-access-token": opts.accessToken }
+          : { "content-type": "application/json", "x-tts-access-token": opts.accessToken },
+        body: opts.form ?? (bodyStr || undefined),
         signal: AbortSignal.timeout(opts.timeoutMs ?? 30_000),
       });
       httpStatus = res.status;
