@@ -36,9 +36,9 @@ function withFetch(handler: (url: string, init: RequestInit) => unknown, env: Re
   };
 }
 
-Deno.test("千易库存：分页取完、过滤其他仓、APP_NOT_EXIST 换海外环境", withFetch((url, init) => {
+Deno.test("千易库存：分页取完、过滤其他仓、APP_NOT_EXIST 换另一个环境", withFetch((url, init) => {
   const fd = init.body as FormData;
-  if (url.includes("www.")) return { state: "failure", errorCode: "APP_NOT_EXIST", errorMsg: "appId不存在" };
+  if (url.includes("asia.")) return { state: "failure", errorCode: "APP_NOT_EXIST", errorMsg: "appId不存在" };
   const biz = JSON.parse(String(fd.get("bizParam")));
   if (fd.get("sign") !== qianyiSign("ID", String(fd.get("serviceType")), String(fd.get("bizParam")), String(fd.get("timestamp")), "S")) throw new Error("sign 不对");
   const all = Array.from({ length: 250 }, (_, i) => ({ sku: `S${i}`, available: i % 7, total: i % 7 + 1, warehouse: "MY仓" }));

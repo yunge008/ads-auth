@@ -4,7 +4,7 @@
 //   POST https://{host}/api/v1/{path}，multipart/form-data；公共参数 appId / serviceType / bizParam(JSON 字符串) / timestamp(毫秒) / sign
 //   sign = md5("appId=" + appId + "bizParam=" + bizParam + "serviceType=" + serviceType + "timestamp=" + ts + appSecret)，32 位小写
 //   响应 {errorCode:"0"|"", state:"success"|"failure", errorMsg, bizContent:"<JSON 字符串>"}
-//   host：国内 www.qianyierp.com / 海外 asia.qianyierp.com；未指定时依次尝试（APP_NOT_EXIST 时换下一个）
+//   host：国内 www.qianyierp.com / 海外 asia.qianyierp.com；本账号是海外站，默认先 asia，APP_NOT_EXIST 时再试 www
 //   库存：path=inventory, serviceType=QUERY_SIMPLE_LIST_INVENTORY_V2, bizParam {warehouse:<千易仓库名称>, page, pageSize≤200, showEmpty}
 //         → result[] {sku, skuName, warehouse, total, available(可用量), allocated, unavailable, …}
 //   仓库：path=warehouse, serviceType=QUERY_WAREHOUSE_LIST → result[] {id, name, code, country, status, kind}
@@ -40,7 +40,7 @@ function qianyiCreds() {
   const secret = Deno.env.get("QIANYI_SECRET_KEY") ?? "";
   if (!appId || !secret) throw new Error("千易未配置：Supabase secrets 缺 QIANYI_ACCESS_ID / QIANYI_SECRET_KEY（千易ERP → 设置 → 三方应用对接 里的 accessId / secretKey）");
   const env = (Deno.env.get("QIANYI_HOST") ?? "").trim();
-  const hosts = env ? [env] : ["www.qianyierp.com", "asia.qianyierp.com"];
+  const hosts = env ? [env] : ["asia.qianyierp.com", "www.qianyierp.com"]; // 负责人确认（2026-11-17）：账号在海外站
   return { appId, secret, hosts };
 }
 
