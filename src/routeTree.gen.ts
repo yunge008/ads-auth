@@ -18,6 +18,7 @@ import { Route as GmvAttributionRouteImport } from './routes/gmv-attribution'
 import { Route as GmvAttributionAdminRouteImport } from './routes/gmv-attribution-admin'
 import { Route as GmvMaxCreateRouteImport } from './routes/gmv-max-create'
 import { Route as MaterialPerformanceRouteImport } from './routes/material-performance'
+import { Route as OutreachRouteImport } from './routes/outreach'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as TtsExportRouteImport } from './routes/tts-export'
 import { Route as OauthTiktokCallbackRouteImport } from './routes/oauth.tiktok.callback'
@@ -73,6 +74,11 @@ const GmvMaxCreateRoute = GmvMaxCreateRouteImport.update({
 const MaterialPerformanceRoute = MaterialPerformanceRouteImport.update({
   id: '/material-performance',
   path: '/material-performance',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OutreachRoute = OutreachRouteImport.update({
+  id: '/outreach',
+  path: '/outreach',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRoute = SettingsRouteImport.update({
@@ -146,6 +152,7 @@ export interface FileRoutesByFullPath {
   '/gmv-attribution-admin': typeof GmvAttributionAdminRoute
   '/gmv-max-create': typeof GmvMaxCreateRoute
   '/material-performance': typeof MaterialPerformanceRoute
+  '/outreach': typeof OutreachRoute
   '/settings': typeof SettingsRoute
   '/tts-export': typeof TtsExportRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
@@ -168,6 +175,7 @@ export interface FileRoutesByTo {
   '/gmv-attribution-admin': typeof GmvAttributionAdminRoute
   '/gmv-max-create': typeof GmvMaxCreateRoute
   '/material-performance': typeof MaterialPerformanceRoute
+  '/outreach': typeof OutreachRoute
   '/settings': typeof SettingsRoute
   '/tts-export': typeof TtsExportRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
@@ -191,6 +199,7 @@ export interface FileRoutesById {
   '/gmv-attribution-admin': typeof GmvAttributionAdminRoute
   '/gmv-max-create': typeof GmvMaxCreateRoute
   '/material-performance': typeof MaterialPerformanceRoute
+  '/outreach': typeof OutreachRoute
   '/settings': typeof SettingsRoute
   '/tts-export': typeof TtsExportRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
@@ -215,6 +224,7 @@ export interface FileRouteTypes {
     | '/gmv-attribution-admin'
     | '/gmv-max-create'
     | '/material-performance'
+    | '/outreach'
     | '/settings'
     | '/tts-export'
     | '/oauth/tiktok/callback'
@@ -237,6 +247,7 @@ export interface FileRouteTypes {
     | '/gmv-attribution-admin'
     | '/gmv-max-create'
     | '/material-performance'
+    | '/outreach'
     | '/settings'
     | '/tts-export'
     | '/oauth/tiktok/callback'
@@ -259,6 +270,7 @@ export interface FileRouteTypes {
     | '/gmv-attribution-admin'
     | '/gmv-max-create'
     | '/material-performance'
+    | '/outreach'
     | '/settings'
     | '/tts-export'
     | '/oauth/tiktok/callback'
@@ -282,6 +294,7 @@ export interface RootRouteChildren {
   GmvAttributionAdminRoute: typeof GmvAttributionAdminRoute
   GmvMaxCreateRoute: typeof GmvMaxCreateRoute
   MaterialPerformanceRoute: typeof MaterialPerformanceRoute
+  OutreachRoute: typeof OutreachRoute
   SettingsRoute: typeof SettingsRoute
   TtsExportRoute: typeof TtsExportRoute
   OauthTiktokCallbackRoute: typeof OauthTiktokCallbackRoute
@@ -358,6 +371,13 @@ declare module '@tanstack/react-router' {
       path: '/material-performance'
       fullPath: '/material-performance'
       preLoaderRoute: typeof MaterialPerformanceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/outreach': {
+      id: '/outreach'
+      path: '/outreach'
+      fullPath: '/outreach'
+      preLoaderRoute: typeof OutreachRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -450,6 +470,7 @@ const rootRouteChildren: RootRouteChildren = {
   GmvAttributionAdminRoute: GmvAttributionAdminRoute,
   GmvMaxCreateRoute: GmvMaxCreateRoute,
   MaterialPerformanceRoute: MaterialPerformanceRoute,
+  OutreachRoute: OutreachRoute,
   SettingsRoute: SettingsRoute,
   TtsExportRoute: TtsExportRoute,
   OauthTiktokCallbackRoute: OauthTiktokCallbackRoute,
