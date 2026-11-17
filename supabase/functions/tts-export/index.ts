@@ -660,7 +660,7 @@ async function exportAffiliate(shop: Shop, b: Record<string, unknown>, started: 
 type SampleApp = {
   id?: string; status?: string; commission_rate?: string | number; is_approvable?: boolean; disapprovable_reasons?: string[];
   fulfillment_status?: string; order_id?: string; tracking_number?: string; partner_name?: string; approve_expiration_time?: number;
-  creator?: { creator_open_id?: string; username?: string; nickname?: string; follower_count?: number; gmv?: { amount?: string; currency?: string };
+  creator?: { creator_open_id?: string; username?: string; nickname?: string; follower_count?: number; avatar_url?: string; gmv?: { amount?: string; currency?: string };
     content_count?: number; fulfillment_percentage?: string | number; ec_video_view?: number };
   product?: { id?: string; title?: string; sku_id?: string; sku_name?: string };
 };
@@ -668,7 +668,9 @@ export const SAMPLE_COLUMNS = [
   "审核建议", "建议理由", "申样单 ID", "申请状态", "达人用户名", "达人昵称", "粉丝数", "达人GMV", "GMV币种", "带货内容数", "平台履约率(%)",
   "电商视频播放", "本店历史申样数", "本店已发样数", "本店已履约数", "本店已发未履约数", "商品 ID", "商品名称", "SKU ID", "SKU 名称",
   "申请佣金率", "平台可审批", "不可审批原因", "服务商", "审核截止时间", "creator_open_id",
+  "头像", "达人销量(件)", "带货率(post_rate)", "电商视频平均播放", "近30天发视频数(中位)",
 ];
+type Perf = { units_sold?: number; post_rate?: number | string; avg_ec_video_play_count?: number; creator_profile?: { video_publish_cnt_30d_med?: number } };
 
 async function exportSamples(shop: Shop, b: Record<string, unknown>, started: number): Promise<Chunk> {
   const th = {
@@ -692,7 +694,12 @@ async function exportSamples(shop: Shop, b: Record<string, unknown>, started: nu
     const apps = r.data?.sample_applications ?? [];
     // 本店历史：按达人查全部申样（不限状态），每个达人 1 次
     const hist = new Map<string, { total: number; shipped: number; fulfilled: number }>();
+    const perf = new Map<string, Perf>();
     for (const oid of [...new Set(apps.map((a) => a.creator?.creator_open_id ?? "").filter(Boolean))]) {
+      // 达人广场表现（销量、带货率、播放）；统计窗口以接口口径为准，未核验
+      const pr = await ttsCall<{ creator?: Perf }>({ ...T, method: "GET", path: `/affiliate_seller/202608/marketplace_creators/${oid}` });
+      if (pr.code === 0 && pr.data?.creator) perf.set(oid, pr.data.creator);
+      else errors.push(apiErr(`达人表现 ${oid}`, pr));
       const h = { total: 0, shipped: 0, fulfilled: 0 };
       const hr = await ttsCall<{ sample_applications?: SampleApp[]; total_count?: number }>({
         ...T, method: "POST", path: "/affiliate_seller/202508/sample_applications/search",
@@ -731,6 +738,8 @@ async function exportSamples(shop: Shop, b: Record<string, unknown>, started: nu
         a.product?.id ?? "", a.product?.title ?? "", a.product?.sku_id ?? "", a.product?.sku_name ?? "",
         a.commission_rate === undefined ? "" : String(a.commission_rate), a.is_approvable === undefined ? "" : a.is_approvable ? "是" : "否",
         (a.disapprovable_reasons ?? []).join("/"), a.partner_name ?? "", fmtTime(a.approve_expiration_time, shop), c.creator_open_id ?? "",
+        c.avatar_url ?? "", num(perf.get(c.creator_open_id ?? "")?.units_sold), num(perf.get(c.creator_open_id ?? "")?.post_rate),
+        num(perf.get(c.creator_open_id ?? "")?.avg_ec_video_play_count), num(perf.get(c.creator_open_id ?? "")?.creator_profile?.video_publish_cnt_30d_med),
       ]);
     }
     pageToken = r.data?.next_page_token ?? "";
