@@ -234,3 +234,17 @@ tts-p0-probe {"action":"raw","shop_id":"店铺ID","method":"GET","path":"/promot
 | 最新商品 + 活动价 | `POST /product/202502/products/search`（默认在售）+ `GET /product/202309/products/{id}`（locale=zh-CN）+ `GET /promotion/202309/activities/{id}` | xlsx「Template」，前 5 行表头同后台批量编辑模板，最右列「活动价」 | 属性列按全部商品出现过的属性汇总（后台模板按类目，可能列序不同）；商品状态非「在售」的中文写法未核验 |
 
 未做：GMV MAX 素材维度（Business API，已有 `gmv-max-raw-export` 按天明细；按后台格式需按期汇总，播放率不能按天加总，需改为不带 stat_time_day 的维度查询）；商品评论明细（无接口，用 Chrome 插件）；MCP 连接器。
+
+## 13. finance-order 项目能否改用 API 数据（2026-11-17 核对 yunge008/finance-order 源码）
+它只读订单表的 15 列、财务表的 SKU ID/数量/结算日期/交易类型/订单号/相关订单 ID + 11 个标准金额字段。
+
+| finance-order 用到 | API 能否提供 | `tts-export` 现状 | 差距 |
+|---|---|---|---|
+| 订单：Order ID / Status / Substatus / Created Time / Seller SKU / SKU ID / Quantity / SKU Unit Original Price（=0 判样品）/ Subtotal Before / Seller Discount / Order Amount | ✅ 已逐单核对一致 | ✅ | 无 |
+| 订单：Cancelation/Return Type（判退款单） | ✅ Search Returns / Search Aftersales（另一个接口） | ❌ 只填了 Cancel | 需补：按月拉退货退款单回填 `Return/Refund` |
+| 订单：Warehouse Name（仓库分布、本地履约率） | ✅ 订单 `warehouse_id` + Get Warehouse List 取名称 | ❌ 留空 | 需补 |
+| 订单：Shipped Time（判发货后取消） | ✅ 取 `collection_time` | 已填，口径未核验 | 用 10 月数据核一次 |
+| 财务：11 个金额字段（享受商家折扣后小计、退款小计、结算总金额、总费用、进口税/VAT、联盟佣金三项、SFP/物流服务费、商家运费、调整金额） | ✅ statement_transactions 均有对应字段 | 已映射，未核验 | 用 10 月财务表核一次 |
+| 财务：**SKU ID + 数量（非 PHL 必需，空则整行丢弃；成本按 SKU×数量计算）** | ✅ 仅 Get Transactions by Order（逐单，SKU 级） | ❌ 订单维度，SKU 列为空 | **关键差距**：按月逐单拉，PH 约 1.9 万次调用，约 2 小时；建议改成**每日增量同步入库**（每天约 700 单，约 4 分钟），月底直接导出 SKU 级 |
+
+结论：订单表补 2 列、财务表改为 SKU 级（每日同步）后，finance-order 可以完全用 API 数据，不再需要手动导出。在那之前，财务仍需用后台导出的表。
