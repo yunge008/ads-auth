@@ -91,10 +91,14 @@ export type TtsCallOpts = {
 
 // ── 读写闸门（2026-11-16 负责人规定）────────────────────────────────────────
 // 所有 TTS 接口默认只读：GET，以及路径以 /search、/filter、/query、/check 结尾的查询类 POST。
-// 写接口只放行下表；新增任何写接口必须先经负责人逐条明确确认，再加到这里。
+// 写接口只放行下表（2026-11-17 起含达人私信）；新增任何写接口必须先经负责人逐条明确确认，再加到这里。
 const TTS_WRITE_ALLOW: Array<{ method: string; path: RegExp; why: string }> = [
   { method: "POST", path: /^\/affiliate_seller\/\d+\/target_collaborations$/, why: "新建定向计划" },
   { method: "PUT", path: /^\/affiliate_seller\/\d+\/target_collaborations\/\d+$/, why: "修改定向计划" },
+  // 2026-11-17 负责人确认放开：达人私信（建会话 / 发消息 / 标已读）。发送前必须经 BD 确认由业务函数保证。
+  { method: "POST", path: /^\/affiliate_seller\/\d+\/conversations$/, why: "建立/获取达人会话" },
+  { method: "POST", path: /^\/affiliate_seller\/\d+\/conversations\/[^/]+\/messages$/, why: "发送达人私信" },
+  { method: "POST", path: /^\/affiliate_seller\/\d+\/conversatons\/read$/, why: "达人会话标为已读（官方路径拼写为 conversatons）" },
 ];
 const TTS_READ_POST = /\/(search|filter|query|check)$/;
 

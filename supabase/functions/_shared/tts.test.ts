@@ -44,3 +44,26 @@ Deno.test("pctToRate: 10% → 1000，35.87% → 3587", () => {
   assertEquals(pctToRate(35.87), 3587);
   assertEquals(pctToRate(1), 100);
 });
+
+Deno.test("只读闸门：放行定向计划与达人私信，拦截审样/删除计划/冲突处理", async () => {
+  const { ttsAccessCheck } = await import("./tts.ts");
+  const ok = (m: string, p: string) => ttsAccessCheck(m, p) === null;
+  const cases: Array<[string, string, boolean]> = [
+    ["GET", "/order/202309/orders", true],
+    ["POST", "/order/202309/orders/search", true],
+    ["POST", "/return_refund/202602/returns/search", true],
+    ["POST", "/affiliate_seller/202508/target_collaborations", true],
+    ["PUT", "/affiliate_seller/202508/target_collaborations/123", true],
+    ["POST", "/affiliate_seller/202508/conversations", true],
+    ["POST", "/affiliate_seller/202412/conversations/abc123/messages", true],
+    ["POST", "/affiliate_seller/202412/conversatons/read", true],
+    ["POST", "/affiliate_seller/202608/conversations/abc/status", false],
+    ["POST", "/affiliate_seller/202507/sample_applications/1/review", false],
+    ["DELETE", "/affiliate_seller/202409/target_collaborations/1", false],
+    ["POST", "/affiliate_seller/202605/target_collaborations/conflicts/resolve", false],
+    ["POST", "/affiliate_seller/202509/target_collaboration/1/link", false],
+  ];
+  for (const [m, p, want] of cases) {
+    if (ok(m, p) !== want) throw new Error(`${m} ${p} 期望 ${want ? "放行" : "拦截"}`);
+  }
+});

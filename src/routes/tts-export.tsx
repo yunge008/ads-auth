@@ -25,6 +25,7 @@ const KINDS: Array<{ key: TtsExportKind; label: string; desc: string }> = [
   { key: "finance", label: "月度财务结算", desc: "按结算单生成时间，每月一个 xlsx（订单详情 + 对账单），订单维度" },
   { key: "affiliate", label: "月度联盟订单", desc: "按下单时间，每月拆成「达人」「服务商」两个 xlsx" },
   { key: "products", label: "最新商品 + 活动价", desc: "在售商品，后台批量编辑模板格式，最右加「活动价」" },
+  { key: "samples", label: "申样审核建议", desc: "待审申样逐条给出 推荐批准 / 待审核 / 不批准 及理由（只读，不会审样）" },
 ];
 
 function lastMonth(): string {

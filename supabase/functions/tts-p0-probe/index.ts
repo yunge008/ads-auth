@@ -852,8 +852,8 @@ Deno.serve(async (req) => {
       const path = String(b.path ?? "");
       const method = String(b.method ?? "GET").toUpperCase() as "GET" | "POST" | "PUT" | "DELETE";
       if (!["GET", "POST", "PUT", "DELETE"].includes(method)) bad("method 只能是 GET/POST/PUT/DELETE");
-      if (!/^\/(affiliate_seller|authorization|product|analytics|order|finance|promotion)\//.test(path)) {
-        bad("raw 只允许 /affiliate_seller/ /authorization/ /product/ /analytics/ /order/ /finance/ /promotion/ 开头的 path");
+      if (!/^\/(affiliate_seller|authorization|product|analytics|order|finance|promotion|return_refund|logistics|fulfillment)\//.test(path)) {
+        bad("raw 只允许 /affiliate_seller/ /authorization/ /product/ /analytics/ /order/ /finance/ /promotion/ /return_refund/ /logistics/ /fulfillment/ 开头的 path");
       }
       // 读写由 _shared/tts.ts 的只读闸门统一判断：写接口（除定向计划新建/修改）一律拦截
       const r = await ttsCall({

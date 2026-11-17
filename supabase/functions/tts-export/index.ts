@@ -7,8 +7,10 @@
 //              另返回 statements（= 后台「对账单」页签）
 //   products   最新商品信息（在售），列名 = 后台「批量编辑-全部信息」模板，最右加「活动价」（来自 activity_id 指定的活动）
 //   affiliate  月度联盟订单（按下单时间），SKU 级；前端按 group 字段拆成「达人」「服务商」两张表
+//   samples    待审申样 + 审核建议（推荐批准 / 待审核 / 不批准），只读，不调审样接口
 //
 // 所有 TTS 调用都经 _shared/tts.ts 的只读闸门；本函数只用 GET 和 /search 类 POST。
+// 订单导出另用 Search Returns 补退货件数/退款金额/Return/Refund 标记，用 Get Warehouse List 补仓库名称。
 // 鉴权：requireAdmin（与 tts-p0-probe 一致，仅管理员）。
 import { admin, requireAdmin } from "../_shared/auth.ts";
 import { corsHeaders } from "../_shared/feishu.ts";
@@ -130,11 +132,54 @@ type Order = {
   id: string; status?: string; create_time?: number; paid_time?: number; rts_time?: number; collection_time?: number; delivery_time?: number;
   cancel_time?: number; cancellation_initiator?: string; cancel_reason?: string; fulfillment_type?: string; tracking_number?: string;
   delivery_option_name?: string; shipping_provider?: string; buyer_message?: string; payment_method_name?: string; seller_note?: string;
-  packages?: Array<{ id?: string }>; line_items?: LineItem[]; payment?: Record<string, string>;
+  packages?: Array<{ id?: string }>; line_items?: LineItem[]; payment?: Record<string, string>; warehouse_id?: string;
   recipient_address?: { postal_code?: string; district_info?: Array<{ address_level?: string; address_name?: string }> };
 };
 
-function orderRows(o: Order, shop: Shop, th: boolean): Cell[][] {
+/** 退货退款（Search Returns）按订单汇总：每个 SKU 的退货件数、退款金额（分） */
+type ReturnInfo = Map<string, { qty: number; refund: number }>;
+type Enrich = { warehouses: Map<string, string>; returns: Map<string, ReturnInfo> };
+
+async function warehouseNames(shop: Shop, errors: string[]): Promise<Map<string, string>> {
+  const r = await ttsCall<{ warehouses?: Array<{ id?: string; name?: string }> }>({
+    method: "GET", path: "/logistics/202309/warehouses", accessToken: shop.access_token, shopCipher: shop.shop_cipher,
+  });
+  if (r.code !== 0) { errors.push(apiErr("warehouses", r)); return new Map(); }
+  return new Map((r.data?.warehouses ?? []).map((w) => [w.id ?? "", w.name ?? ""]));
+}
+
+type ReturnOrder = {
+  order_id?: string; return_status?: string; return_type?: string;
+  return_line_items?: Array<{ sku_id?: string; refund_amount?: { refund_total?: string } }>;
+};
+/** 按订单号查退货退款单；被拒绝/已取消的申请不计（口径待与后台 Cancelation/Return Type 核对） */
+async function returnsFor(shop: Shop, orderIds: string[], errors: string[]): Promise<Map<string, ReturnInfo>> {
+  const out = new Map<string, ReturnInfo>();
+  if (!orderIds.length) return out;
+  let tok = "";
+  do {
+    const r = await ttsCall<{ return_orders?: ReturnOrder[]; next_page_token?: string }>({
+      method: "POST", path: "/return_refund/202602/returns/search", accessToken: shop.access_token, shopCipher: shop.shop_cipher,
+      query: { page_size: 50, page_token: tok }, body: { order_ids: orderIds },
+    });
+    if (r.code !== 0) { errors.push(apiErr("returns/search", r)); break; }
+    for (const ro of r.data?.return_orders ?? []) {
+      if (/REJECT|CANCEL/i.test(ro.return_status ?? "") || !ro.order_id) continue;
+      const m = out.get(ro.order_id) ?? new Map();
+      for (const li of ro.return_line_items ?? []) {
+        const k = li.sku_id ?? "";
+        const a = m.get(k) ?? { qty: 0, refund: 0 };
+        a.qty++; a.refund += cents(li.refund_amount?.refund_total);
+        m.set(k, a);
+      }
+      out.set(ro.order_id, m);
+    }
+    tok = r.data?.next_page_token ?? "";
+  } while (tok);
+  return out;
+}
+
+function orderRows(o: Order, shop: Shop, th: boolean, en?: Enrich): Cell[][] {
   const p = o.payment ?? {};
   const [st, sub] = ORDER_STATUS[o.status ?? ""] ?? [o.status ?? "", o.status ?? ""];
   const lv = new Map((o.recipient_address?.district_info ?? []).map((d) => [d.address_level ?? "", d.address_name ?? ""]));
@@ -157,22 +202,23 @@ function orderRows(o: Order, shop: Shop, th: boolean): Cell[][] {
     left -= share;
     a.pd -= share;
   });
-  const cancelType = o.status === "CANCELLED" ? "Cancel" : "";
+  const ret = en?.returns.get(o.id);
+  const cancelType = o.status === "CANCELLED" ? "Cancel" : ret ? "Return/Refund" : "";
   return list.map((a) => {
     const r: Record<string, Cell> = {
       "Order ID": o.id, "Order Status": st, "Order Substatus": sub, "Cancelation/Return Type": cancelType,
       "Normal or Pre-order": a.li.sku_type === "PRE_ORDER" ? "Pre-order" : "Normal",
       "SKU ID": a.li.sku_id ?? "", "Seller SKU": a.li.seller_sku ?? "", "Product Name": a.li.product_name ?? "", "Variation": a.li.sku_name ?? "",
-      "Quantity": a.qty, "Sku Quantity of return": null, "SKU Unit Original Price": money(Math.round(a.orig / a.qty)),
+      "Quantity": a.qty, "Sku Quantity of return": en ? (ret?.get(a.li.sku_id ?? "")?.qty ?? 0) : null, "SKU Unit Original Price": money(Math.round(a.orig / a.qty)),
       "SKU Subtotal Before Discount": money(a.orig), "SKU Platform Discount": money(a.pd), "SKU Seller Discount": money(a.sd),
       "SKU Subtotal After Discount": money(a.sale),
       "Shipping Fee After Discount": num(p.shipping_fee), "Original Shipping Fee": num(p.original_shipping_fee),
       "Shipping Fee Seller Discount": num(p.shipping_fee_seller_discount), "Shipping Fee Platform Discount": num(p.shipping_fee_platform_discount),
-      "Payment platform discount": money(pay), "Taxes": num(p.tax), "Order Amount": num(p.total_amount), "Order Refund Amount": null,
+      "Payment platform discount": money(pay), "Taxes": num(p.tax), "Order Amount": num(p.total_amount), "Order Refund Amount": en ? money(ret?.get(a.li.sku_id ?? "")?.refund ?? 0) : null,
       "Created Time": fmtTime(o.create_time, shop), "Paid Time": fmtTime(o.paid_time, shop), "RTS Time": fmtTime(o.rts_time, shop),
       "Shipped Time": fmtTime(o.collection_time, shop), "Delivered Time": fmtTime(o.delivery_time, shop), "Cancelled Time": fmtTime(o.cancel_time, shop),
       "Cancel By": CANCEL_BY[o.cancellation_initiator ?? ""] ?? (o.cancellation_initiator ?? ""), "Cancel Reason": o.cancel_reason ?? "",
-      "Fulfillment Type": FULFILL[o.fulfillment_type ?? ""] ?? (o.fulfillment_type ?? ""), "Warehouse Name": "",
+      "Fulfillment Type": FULFILL[o.fulfillment_type ?? ""] ?? (o.fulfillment_type ?? ""), "Warehouse Name": en?.warehouses.get(o.warehouse_id ?? "") ?? "",
       "Tracking ID": o.tracking_number ?? "", "Delivery Option": o.delivery_option_name ?? "", "Shipping Provider Name": o.shipping_provider ?? "",
       "Buyer Message": o.buyer_message ?? "",
       // 买家个人信息（用户名/收件人/电话/详细地址）不导出
@@ -194,6 +240,7 @@ async function exportOrders(shop: Shop, b: Record<string, unknown>, started: num
   let pageToken = cur.page_token ?? "", done = Number(cur.done ?? 0), total: number | null = null;
   const rows: Cell[][] = [];
   const errors: string[] = [];
+  const warehouses = await warehouseNames(shop, errors);
   do {
     const r = await ttsCall<{ orders?: Order[]; next_page_token?: string; total_count?: number }>({
       method: "POST", path: "/order/202309/orders/search", accessToken: shop.access_token, shopCipher: shop.shop_cipher,
@@ -202,12 +249,15 @@ async function exportOrders(shop: Shop, b: Record<string, unknown>, started: num
     });
     if (r.code !== 0) { errors.push(apiErr("orders/search", r)); break; }
     total = r.data?.total_count ?? total;
-    for (const o of r.data?.orders ?? []) { rows.push(...orderRows(o, shop, th)); done++; }
+    const orders = r.data?.orders ?? [];
+    const returns = await returnsFor(shop, orders.map((o) => o.id), errors);
+    for (const o of orders) { rows.push(...orderRows(o, shop, th, { warehouses, returns })); done++; }
     pageToken = r.data?.next_page_token ?? "";
   } while (pageToken && Date.now() - started < SOFT_MS);
   return {
     kind: "orders", columns: th ? ORDER_COLUMNS_TH : ORDER_COLUMNS, rows,
-    next_cursor: pageToken && !errors.length ? { page_token: pageToken, done } : null,
+    // 仓库/退货补充失败不中断导出（记在 errors 里），只有订单列表本身失败才停
+    next_cursor: pageToken && !errors.some((e) => e.startsWith("orders/search")) ? { page_token: pageToken, done } : null,
     progress: { done, total, unit: "单" }, errors,
   };
 }
@@ -605,6 +655,93 @@ async function exportAffiliate(shop: Shop, b: Record<string, unknown>, started: 
   };
 }
 
+// ═══ 5. 申样审核建议（只读，不调审样接口）══════════════════════════════════
+// 规则为初版默认值，可在请求里覆盖；先给负责人看建议与实际审核结果的吻合率，再决定是否放开自动审样。
+type SampleApp = {
+  id?: string; status?: string; commission_rate?: string | number; is_approvable?: boolean; disapprovable_reasons?: string[];
+  fulfillment_status?: string; order_id?: string; tracking_number?: string; partner_name?: string; approve_expiration_time?: number;
+  creator?: { creator_open_id?: string; username?: string; nickname?: string; follower_count?: number; gmv?: { amount?: string; currency?: string };
+    content_count?: number; fulfillment_percentage?: string | number; ec_video_view?: number };
+  product?: { id?: string; title?: string; sku_id?: string; sku_name?: string };
+};
+export const SAMPLE_COLUMNS = [
+  "审核建议", "建议理由", "申样单 ID", "申请状态", "达人用户名", "达人昵称", "粉丝数", "达人GMV", "GMV币种", "带货内容数", "平台履约率(%)",
+  "电商视频播放", "本店历史申样数", "本店已发样数", "本店已履约数", "本店已发未履约数", "商品 ID", "商品名称", "SKU ID", "SKU 名称",
+  "申请佣金率", "平台可审批", "不可审批原因", "服务商", "审核截止时间", "creator_open_id",
+];
+
+async function exportSamples(shop: Shop, b: Record<string, unknown>, started: number): Promise<Chunk> {
+  const th = {
+    min_fulfill_ok: Number(b.min_fulfill_ok ?? 60), max_fulfill_reject: Number(b.max_fulfill_reject ?? 30),
+    min_followers_ok: Number(b.min_followers_ok ?? 5000), min_gmv_ok: Number(b.min_gmv_ok ?? 100),
+    max_unfulfilled_reject: Number(b.max_unfulfilled_reject ?? 2),
+  };
+  const status = String(b.status ?? "PENDING");
+  const cur = (b.cursor ?? {}) as { page_token?: string; done?: number };
+  let pageToken = cur.page_token ?? "", done = Number(cur.done ?? 0), total: number | null = null;
+  const rows: Cell[][] = [];
+  const errors: string[] = [];
+  const T = { accessToken: shop.access_token, shopCipher: shop.shop_cipher };
+  do {
+    const r = await ttsCall<{ sample_applications?: SampleApp[]; next_page_token?: string; total_count?: number }>({
+      ...T, method: "POST", path: "/affiliate_seller/202508/sample_applications/search",
+      query: { page_size: 50, page_token: pageToken }, body: status === "ALL" ? {} : { status },
+    });
+    if (r.code !== 0) { errors.push(apiErr("sample_applications/search", r)); break; }
+    total = r.data?.total_count ?? total;
+    const apps = r.data?.sample_applications ?? [];
+    // 本店历史：按达人查全部申样（不限状态），每个达人 1 次
+    const hist = new Map<string, { total: number; shipped: number; fulfilled: number }>();
+    for (const oid of [...new Set(apps.map((a) => a.creator?.creator_open_id ?? "").filter(Boolean))]) {
+      const h = { total: 0, shipped: 0, fulfilled: 0 };
+      const hr = await ttsCall<{ sample_applications?: SampleApp[]; total_count?: number }>({
+        ...T, method: "POST", path: "/affiliate_seller/202508/sample_applications/search",
+        query: { page_size: 50 }, body: { creator_user_oepn_id: oid },
+      });
+      if (hr.code !== 0) { errors.push(apiErr(`达人历史 ${oid}`, hr)); continue; }
+      for (const x of hr.data?.sample_applications ?? []) {
+        h.total++;
+        if (["SHIPPED", "CONTENT_PENDING", "COMPLETED"].includes(String(x.status)) || x.order_id) h.shipped++;
+        if (/COMPLETED|ONGOING/.test(String(x.fulfillment_status ?? ""))) h.fulfilled++;
+      }
+      hist.set(oid, h);
+    }
+    for (const a of apps) {
+      done++;
+      const c = a.creator ?? {};
+      const h = hist.get(c.creator_open_id ?? "") ?? { total: 0, shipped: 0, fulfilled: 0 };
+      const unfulfilled = Math.max(0, h.shipped - h.fulfilled - (a.order_id ? 1 : 0));
+      const fp = c.fulfillment_percentage === undefined || c.fulfillment_percentage === "" ? null : Number(c.fulfillment_percentage);
+      const gmv = Number(c.gmv?.amount ?? 0), fol = Number(c.follower_count ?? 0);
+      const reasons: string[] = [];
+      let advice = "待审核";
+      if (a.is_approvable === false) { advice = "不批准"; reasons.push(`平台不可审批：${(a.disapprovable_reasons ?? []).join("/") || "未给原因"}`); }
+      else if (unfulfilled >= th.max_unfulfilled_reject) { advice = "不批准"; reasons.push(`本店已发样未履约 ${unfulfilled} 次（≥${th.max_unfulfilled_reject}）`); }
+      else if (fp !== null && fp < th.max_fulfill_reject) { advice = "不批准"; reasons.push(`平台履约率 ${fp}% < ${th.max_fulfill_reject}%`); }
+      else if ((fp === null || fp >= th.min_fulfill_ok) && (gmv >= th.min_gmv_ok || fol >= th.min_followers_ok)) {
+        advice = "推荐批准";
+        reasons.push(fp === null ? "无履约率记录" : `履约率 ${fp}% ≥ ${th.min_fulfill_ok}%`, gmv >= th.min_gmv_ok ? `GMV ${gmv} ≥ ${th.min_gmv_ok}` : `粉丝 ${fol} ≥ ${th.min_followers_ok}`);
+        if (h.fulfilled > 0) reasons.push(`本店已履约 ${h.fulfilled} 次`);
+      } else {
+        reasons.push(`履约率 ${fp ?? "无"}%，GMV ${gmv}，粉丝 ${fol}，未达推荐线`);
+      }
+      rows.push([
+        advice, reasons.join("；"), a.id ?? "", a.status ?? "", c.username ?? "", c.nickname ?? "", fol, gmv, c.gmv?.currency ?? "",
+        num(c.content_count), fp, num(c.ec_video_view), h.total, h.shipped, h.fulfilled, unfulfilled,
+        a.product?.id ?? "", a.product?.title ?? "", a.product?.sku_id ?? "", a.product?.sku_name ?? "",
+        a.commission_rate === undefined ? "" : String(a.commission_rate), a.is_approvable === undefined ? "" : a.is_approvable ? "是" : "否",
+        (a.disapprovable_reasons ?? []).join("/"), a.partner_name ?? "", fmtTime(a.approve_expiration_time, shop), c.creator_open_id ?? "",
+      ]);
+    }
+    pageToken = r.data?.next_page_token ?? "";
+  } while (pageToken && Date.now() - started < SOFT_MS);
+  return {
+    kind: "samples", columns: SAMPLE_COLUMNS, rows,
+    next_cursor: pageToken && !errors.some((e) => e.startsWith("sample_applications")) ? { page_token: pageToken, done } : null,
+    progress: { done, total, unit: "条申样" }, meta: { thresholds: th, status }, errors,
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   const started = Date.now();
@@ -617,7 +754,8 @@ Deno.serve(async (req) => {
     if (kind === "finance") return json(await exportFinance(shop, b, started));
     if (kind === "products") return json(await exportProducts(shop, b, started));
     if (kind === "affiliate") return json(await exportAffiliate(shop, b, started));
-    bad("kind 只能是 orders / finance / products / affiliate");
+    if (kind === "samples") return json(await exportSamples(shop, b, started));
+    bad("kind 只能是 orders / finance / products / affiliate / samples");
   } catch (error) {
     const status = (error as Error & { status?: number }).status ?? 400;
     return json({ error: (error as Error).message }, status);

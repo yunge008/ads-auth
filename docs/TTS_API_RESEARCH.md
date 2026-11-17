@@ -248,3 +248,18 @@ tts-p0-probe {"action":"raw","shop_id":"店铺ID","method":"GET","path":"/promot
 | 财务：**SKU ID + 数量（非 PHL 必需，空则整行丢弃；成本按 SKU×数量计算）** | ✅ 仅 Get Transactions by Order（逐单，SKU 级） | ❌ 订单维度，SKU 列为空 | **关键差距**：按月逐单拉，PH 约 1.9 万次调用，约 2 小时；建议改成**每日增量同步入库**（每天约 700 单，约 4 分钟），月底直接导出 SKU 级 |
 
 结论：订单表补 2 列、财务表改为 SKU 级（每日同步）后，finance-order 可以完全用 API 数据，不再需要手动导出。在那之前，财务仍需用后台导出的表。
+
+### 13.1 新增授权后的补齐情况（2026-11-17，退货退款 / 物流 / 履约授权已开）
+| finance-order 缺口 | 处理 | 状态 |
+|---|---|---|
+| 订单 Cancelation/Return Type | `POST /return_refund/202602/returns/search`（按订单号批量）：有未被拒绝、未取消的退货退款单 → `Return/Refund` | 1117.156 已加入订单导出，口径待核对 |
+| 订单 Sku Quantity of return / Order Refund Amount | 同上，按 SKU 汇总退货件数与 `refund_total` | 1117.156 已加入 |
+| 订单 Warehouse Name | `GET /logistics/202309/warehouses` 按订单 `warehouse_id` 取名称 | 1117.156 已加入 |
+| 财务 SKU 级 | `GET /finance/202501/orders/{order_id}/statement_transactions` 逐单 | 待做：每晚增量同步 |
+
+### 13.2 每晚自动汇总方案（负责人确认：每晚跑一次，写入单独 sheet、格式与现有回写一致）
+1. **ads-auth 每晚同步（Supabase 定时任务）**：前一日新增/变更的订单（SKU 级、含退货与仓库）、前一日新结算单的逐单 SKU 级交易，写入新表 `tts_orders_sku`、`tts_finance_sku`（需 migration）。PH 约 700 单/天，约 4–5 分钟。
+2. **finance-order 每晚汇总（Vercel 定时任务）**：读上述两表（只读接口，带口令），复用现有解析后的汇总逻辑（不重写口径），写入飞书**专用 sheet**，列格式与「汇总数据回写」一致。
+3. 首次上线：用 10 月数据跑一遍，与手工上传的结果逐列对比，0 差异后再开启定时。
+
+需负责人决定：专用 sheet 的名称和所在文档；finance-order 每晚写入是覆盖当月行还是追加。
