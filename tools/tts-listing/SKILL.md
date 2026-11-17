@@ -17,7 +17,7 @@ description: TikTok Shop 饰品批量上架（ARTPHRO）。输入定价表 + 图
 | 默认包装 | PH / TH = B2；MY / SG / VN = B4（JP 未定，需问） |
 | 售价 | 日常价 × 2（VN 的日常价列 = 第 2 行「提价-日常价」） |
 | 库存 | 1000，写在「The Chinese mainland Pickup Warehouse」 |
-| 上架方式 | API 只建草稿（`AS_DRAFT`，后端闸门强制），人工在 Seller Center 审核发布；JP 走 Excel |
+| 上架方式 | 当前先走 Excel：PH 首发 → 同步到 MY/TH/VN/SG → 本地化改稿（见 4a）；API 只建草稿（`AS_DRAFT`，后端闸门强制）暂缓；JP 走 Excel |
 | 图片 | 子文件夹 = SPU；序号 1 = 主图、2 = 佩戴图，其后由执行者建议顺序；`未使用` 开头跳过 |
 
 ## 1. 准备数据
@@ -60,14 +60,28 @@ python3 tos_upload.py              # 上传全部压缩图，URL 写 work/images
 ```
 需要环境变量 `TOS_ACCESS_KEY` `TOS_SECRET_KEY` `TOS_BUCKET` `TOS_REGION`（见脚本头注释）。缺了就停下来告诉用户，不要改用别的图床。
 
-## 4a. Excel（JP 及需要 Excel 的站点）
+## 4a. Excel（当前默认方案，SEA 5 国同一店铺：PH 首发 → 同步 → 本地化）
+
+与 Seller Center 页面一致：先在 PH 建品，再「同步到其他站点」（平台自动翻译），最后逐站点改本地化标题描述。
 
 ```bash
-python3 build_excel.py --site PH --template "<PH 模板.xlsx>" --specs "work/listings/*.json" -o work/out/PH_upload.xlsx
+# ① PH 建品：用 PH「批量上传」模板
+python3 build_excel.py --site PH --template "<PH batchupload 模板.xlsx>" --specs "work/listings/*.json" -o work/out/PH_create.xlsx
+#    → 用户在 Seller Center 导入；审核通过后进入下一步
+# ② 同步到 MY/TH/VN/SG：用户勾选 PH 商品 → 下载「同步本地商品」模板（已预填源商品/SKU ID）
+python3 fill_sync.py "<sync_local_product_template.xlsx>" -o work/out/sync_filled.xlsx      # 填各站点价格（日常价×2）+ 库存 1000
+#    → 用户导入；平台按英文自动翻译生成各站点商品
+# ③ 本地化：用户在各站点「批量编辑-全部信息」导出同步出来的商品
+python3 fill_localize.py --site TH "<TH 全部信息导出.xlsx>" --specs "work/listings/*.json" [--product-ids 新商品ID ...]
+#    → 只保留要改的商品行，写入该站点 title/description；变体名在此模板不可改（保留平台翻译）
 ```
-产出 xlsx + `.report.json`（缺价 SKU、属性值告警）。模板必须是用户从 Seller Center 下载的对应站点模板。
+每步都产出 `.report.json`（缺价 SKU、跳过的混合链接等），逐条告诉用户。
+JP 等不在同一店铺的站点：直接用该站点「批量上传」模板走 ① 即可。
 
-## 4b. API 建草稿（SEA 站点）
+## 4b. API 建草稿（暂缓，负责人 2026-11-17：先测 Excel）
+
+对应关系：① Create Product（PH，AS_DRAFT）② Replicate Product `POST /product/202507/products/{id}/global_replicate`（按 region 传 skus.source_sku_id + price.sale_price + inventory）③ Edit / Partial Edit Product 改各站点本地化。
+② ③ 尚未接入 `tts-listing`，且草稿能否被复制未核验。
 
 ```bash
 export ADS_AUTH_PASSCODE=...        # 网站管理员口令

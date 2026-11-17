@@ -28,6 +28,23 @@ from pathlib import Path
 from common import die, dump_json, load_json
 
 
+REGION_ALIASES = {  # 控制台显示的中文地域名 → 地域代码
+    "华北2（北京）": "cn-beijing", "华北2(北京)": "cn-beijing", "北京": "cn-beijing",
+    "华东2（上海）": "cn-shanghai", "华东2(上海)": "cn-shanghai", "上海": "cn-shanghai",
+    "华南1（广州）": "cn-guangzhou", "华南1(广州)": "cn-guangzhou", "广州": "cn-guangzhou",
+    "中国香港": "cn-hongkong", "亚太东南（柔佛）": "ap-southeast-1", "柔佛": "ap-southeast-1",
+}
+
+
+def norm_region(v: str) -> str:
+    v = v.strip()
+    if v in REGION_ALIASES:
+        return REGION_ALIASES[v]
+    if not v.isascii():
+        die(f"TOS_REGION={v!r} 无法识别，请填地域代码（如 cn-beijing），见桶概览页 Endpoint：tos-<地域代码>.volces.com")
+    return v
+
+
 def env(k, default=None, required=True):
     v = os.environ.get(k, default)
     if required and not v:
@@ -69,7 +86,7 @@ def main():
     ap.add_argument("--check", action="store_true")
     a = ap.parse_args()
     ak, sk = env("TOS_ACCESS_KEY"), env("TOS_SECRET_KEY")
-    bucket, region = env("TOS_BUCKET"), env("TOS_REGION")
+    bucket, region = env("TOS_BUCKET").strip(), norm_region(env("TOS_REGION"))
     prefix = env("TOS_PREFIX", "tts-listing/", required=False)
     acl = env("TOS_OBJECT_ACL", "public-read", required=False) or None
     base = (env("TOS_PUBLIC_BASE", None, required=False) or f"https://{bucket}.tos-{region}.volces.com").rstrip("/")
