@@ -163,6 +163,7 @@
 - 表 `tts_shops`：店铺授权（shop_cipher / token / 到期 / scope / 联系方式），RLS 开、无 policy，仅 service role 读写。
 - Edge Function `tts-p0-probe`（管理员）：P0 实测工具，`exchange/shops/refresh/read/write/raw`。
 - Edge Function `tts-export`（管理员，只读）：店铺固定内容分片导出 `kind=orders|finance|products|affiliate`，前端 `src/lib/ttsExport.ts` 循环 `next_cursor` 并生成与卖家后台同列名的 CSV/xlsx；页面 `/tts-export`。
+- 达人外联 A 线（规则 `docs/CREATOR_OWNERSHIP_RULES.md` v1.2）：表 `outreach_settings` / `outreach_touches`（触达，一条消息一行）/ `outreach_creator_events`（回复、申样批准、发样、回收、外部建联）/ `outreach_conflicts` / `outreach_creator_state`（归属快照）；纯计算 `_shared/ownership.ts`（冷却、保护期、认领、冲突、标签），DB 读写 `_shared/outreach.ts`；Edge Function `outreach-precheck`（发送前预检）、`outreach-touch`（触达回传，插件与系统共用）。与 GMV 归因的 `creator_registry` / `creator_ownership` 互不读写。
 - 所有 TTS 调用经 `_shared/tts.ts` 的 `ttsAccessCheck` 只读闸门（写接口仅放行定向计划新建/修改）。
 - Secrets：`TTS_APP_KEY`、`TTS_APP_SECRET`。
 - 规划与业务规则：`docs/OUTREACH_HANDOFF.md`；P0 进度：`docs/OUTREACH_P0.md`。
