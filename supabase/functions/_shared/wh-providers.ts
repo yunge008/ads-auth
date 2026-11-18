@@ -9,12 +9,14 @@
 //         → result[] {sku, skuName, warehouse, total, available(可用量), allocated, unavailable, …}
 //   仓库：path=warehouse, serviceType=QUERY_WAREHOUSE_LIST → result[] {id, name, code, country, status, kind}
 //   ERP 页面上的 accessId / secretKey 即文档里的 appId / appSecret。
-//   注意：文档给的签名示例值（b3dfeed4…）按文档算法复现不出来，算法以文字描述为准，需实测确认。
+//   文档给的签名示例值（b3dfeed4…）按文档算法复现不出来，但 2026-11-18 按文字描述实测 asia 站签名通过：
+//   55 个仓库；ARTPHRO-MY 48 个 SKU（有货 34、可用合计 2992），ARTPHRO.PH 245 个 SKU（有货 186、可用合计 38352）。
 //
 // 顶妙WMS（https://s.apifox.cn/422721aa-3e4e-48b3-89dd-eae8192f22ac ，2026-11-17 拉取）
 //   POST {baseUrl}{uri}，application/json；baseUrl 文档里打码为 https://xxxxxxxxxx/api/open/erp，需找 WMS 对接人要
 //   header AppKey / Signature；Signature = md5(md5(body原文) + appSecret)
-//   body 公共参数 requestTimestamp(秒) / source(接入的 ERP 名称，找 WMS 对接人获取)
+//   body 公共参数 requestTimestamp(秒) / source(可选：2026-11-18 实测 gogo.topwms.com 不传即可，传错值报「source来源不正确」)
+//   2026-11-18 实测：baseUrl=https://gogo.topwms.com/api/open/erp，仓库 warehouseId=147（TH001 GOGO云仓），库存 124 个 SKU、data.total 恒为 0
 //   响应 {result:"success"|"fail", code, message, data, reason}；分页 cursor，pageSize ≤ 100；限频 300 次/分钟
 //   库存：/goods_sku_warehouse/search_page {warehouseId, pageSize, cursor, isShowAllStock:1}
 //         → data.list[] {goodsSkuOuterId(商品SKU), availableStockNum(可用), lockedStockNum(预占), onWayNum, faultyStockNum, …}
@@ -131,7 +133,7 @@ function dingmiaoCreds() {
   const appKey = Deno.env.get("DINGMIAO_APP_KEY") ?? "";
   const secret = Deno.env.get("DINGMIAO_APP_SECRET") ?? "";
   const source = Deno.env.get("DINGMIAO_SOURCE") ?? "";
-  const miss = [!base && "DINGMIAO_BASE_URL（接口地址，文档里打码，找 WMS 对接人要，形如 https://域名/api/open/erp）", !appKey && "DINGMIAO_APP_KEY", !secret && "DINGMIAO_APP_SECRET", !source && "DINGMIAO_SOURCE（接入的 ERP 名称，找 WMS 对接人要）"].filter(Boolean);
+  const miss = [!base && "DINGMIAO_BASE_URL（如 https://gogo.topwms.com/api/open/erp）", !appKey && "DINGMIAO_APP_KEY", !secret && "DINGMIAO_APP_SECRET"].filter(Boolean);
   if (miss.length) throw new Error(`顶妙WMS 未配置：Supabase secrets 缺 ${miss.join("、")}`);
   return { base, appKey, secret, source };
 }
@@ -144,7 +146,8 @@ export async function dingmiaoCall<T = unknown>(uri: string, biz: Record<string,
     const wait = dmLast + 250 - Date.now(); // 300 次/分钟 → ≥ 200ms 间隔，留余量
     if (wait > 0) await sleep(wait);
     dmLast = Date.now();
-    const body = JSON.stringify({ ...biz, requestTimestamp: Math.floor(Date.now() / 1000), source });
+    // source 可选：2026-11-18 实测不传可以正常返回，传错值会报「source来源不正确」
+    const body = JSON.stringify({ ...biz, requestTimestamp: Math.floor(Date.now() / 1000), ...(source ? { source } : {}) });
     let j: { result?: string; code?: string; message?: string; reason?: string; data?: T } = {};
     let status = 0;
     try {
@@ -196,6 +199,6 @@ export async function dingmiaoInventory(warehouseId: string): Promise<{ rows: St
     if (!list.length || !next || next === cursor) break;
     cursor = next;
   }
-  if (total && rows.length !== total) notes.push(`顶妙返回 total=${total}，实际取到 ${rows.length} 行`);
+  if (total && rows.length !== total) notes.push(`顶妙返回 total=${total}，实际取到 ${rows.length} 行`); // 实测 total 恒为 0，不能用来校验
   return { rows, notes };
 }

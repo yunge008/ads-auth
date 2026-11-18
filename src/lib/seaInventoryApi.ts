@@ -8,6 +8,15 @@ export type SeaWarehouse = {
   status: "active" | "onboarding" | "phasing_out" | "disabled"; region: string | null; links: WhLink[];
   provider_ref: string | null; note: string | null; stock_synced_at: string | null; stock_source: string | null;
   stock_rows: number | null; stock_error: string | null;
+  drive_folder: string | null; drive_name_pattern: string | null; file_config: FileConfig | null;
+  stock_file_name: string | null; stock_file_modified: string | null;
+};
+export type FileConfig = { sheet?: string; sku_col?: string; avail_col?: string; onhand_col?: string; name_col?: string; warehouse_col?: string; warehouse_value?: string };
+export type DrivePreview = {
+  files: Array<{ id: string; name: string; mimeType: string; modifiedTime: string }>;
+  picked: { id: string; name: string; modifiedTime: string } | null;
+  sheet?: string | null; header_row?: number | null; count?: number; total_available?: number;
+  rows: Array<{ wh_sku: string; available: number; on_hand: number | null; product_name: string | null }>; notes: string[];
 };
 export type SeaSettings = {
   window_days: number; min_days: number; min_qty: number; reserve_per_sku: number; zero_sale_qty: number;
@@ -44,11 +53,12 @@ const fn = <T,>(action: string, body: Record<string, unknown> = {}, timeout = 15
 export const seaApi = {
   overview: () => fn<Overview>("overview"),
   saveSettings: (s: Partial<SeaSettings>) => fn<{ ok: true }>("save_settings", s),
+  drivePreview: (code: string, cfg: { drive_folder?: string; drive_name_pattern?: string; file_config?: FileConfig }) => fn<DrivePreview>("drive_preview", { code, ...cfg }),
   saveWarehouse: (w: Partial<SeaWarehouse> & { code: string }) => fn<{ ok: true }>("save_warehouse", w),
   shopWarehouses: (shop_id: string) => fn<{ warehouses: Array<{ id: string; name?: string; type?: string; sub_type?: string; is_default?: boolean; effect_status?: string; address?: { region_code?: string } }> }>("shop_warehouses", { shop_id }),
   importStock: (warehouse_code: string, rows: Array<{ wh_sku: string; available: number; on_hand?: number | null; product_name?: string | null }>) =>
     fn<{ ok: true; rows: number; total_available: number; errors: string[] }>("import_stock", { warehouse_code, rows }),
-  syncWarehouse: (code: string) => fn<{ ok: boolean; error?: string; message?: string; rows?: number; total_available?: number; notes?: string[]; errors?: string[] }>("sync_warehouse", { code }),
+  syncWarehouse: (code: string, force = false) => fn<{ ok: boolean; error?: string; message?: string; rows?: number; total_available?: number; notes?: string[]; errors?: string[]; file?: string; unchanged?: boolean }>("sync_warehouse", { code, force }),
   providerWarehouses: (code: string) => fn<{ provider: string; warehouses: Array<{ ref: string; name: string; code: string | null; country: string | null; status: string | null }> }>("provider_warehouses", { code }),
   syncShop: (shop_id: string, cursor: unknown) => fn<{ done: boolean; cursor: unknown; slots?: number; orders?: number }>("sync_shop", { shop_id, cursor }),
   refreshMap: () => fn<{ total: number; multi_listing_skus: number; counts: Record<string, number> }>("refresh_map"),

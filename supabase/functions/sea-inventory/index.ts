@@ -6,7 +6,8 @@
 //   save_warehouse {code, name?, status?, links?, provider_ref?, note?}
 //   shop_warehouses {shop_id}         只读：店铺在 TikTok 里的仓库列表（绑定仓库用）
 //   import_stock {warehouse_code, rows:[{wh_sku, available, on_hand?, product_name?}], replace?=true}
-//   sync_warehouse {code}             从仓库系统 API 拉库存整仓覆盖（千易 QUERY_SIMPLE_LIST_INVENTORY_V2 / 顶妙 goods_sku_warehouse/search_page，见 _shared/wh-providers.ts）
+//   sync_warehouse {code, force?}     配了云盘文件夹 → 取最新 RPA 导出文件（库存时间 = 文件修改时间，同一文件不重复导入）；否则从仓库系统 API 拉库存整仓覆盖（千易 QUERY_SIMPLE_LIST_INVENTORY_V2 / 顶妙 goods_sku_warehouse/search_page，见 _shared/wh-providers.ts）
+//   drive_preview {code, drive_folder?, drive_name_pattern?, file_config?}  云盘：列文件 + 预览解析（不写库）
 //   provider_warehouses {code}        仓库系统里的仓库列表（绑定 provider_ref 用：千易=仓库名称，顶妙=warehouseId）
 //   sync_shop {shop_id, cursor?}      分片续跑：listings（Search Products）→ orders（近 N 天）→ 写 sea_inv_slots
 //   refresh_map                       用最新 listing 重建映射表，返回新增 / 下架 / SKU 变化
@@ -19,6 +20,8 @@ import { admin, verifyPasscode } from "../_shared/auth.ts";
 import { corsHeaders } from "../_shared/feishu.ts";
 import { cronAuthed } from "../_shared/cron.ts";
 import { ttsCall, type TtsResult } from "../_shared/tts.ts";
+import { downloadFile, listFolder, pickLatest } from "../_shared/gdrive.ts";
+import { type FileConfig, parseStockWorkbook } from "../_shared/stock-file.ts";
 import { dingmiaoInventory, dingmiaoWarehouses, qianyiInventory, qianyiWarehouses } from "../_shared/wh-providers.ts";
 import {
   applySold,
@@ -108,7 +111,7 @@ async function overview() {
 }
 
 // ── 仓库库存 ───────────────────────────────────────────────────────────────
-async function importStock(b: Record<string, unknown>, source = "manual") {
+async function importStock(b: Record<string, unknown>, source = "manual", asOf?: string, extra: Record<string, unknown> = {}) {
   const code = String(b.warehouse_code ?? "");
   if (!code) bad("warehouse_code 必填");
   const rows = (Array.isArray(b.rows) ? b.rows : []) as Array<Record<string, unknown>>;
@@ -124,7 +127,8 @@ async function importStock(b: Record<string, unknown>, source = "manual") {
   });
   if (!clean.size) bad(`没有有效行（${errors.slice(0, 3).join("；")}）`);
   const db = admin();
-  const t = nowIso();
+  // 库存时间：云盘文件用文件修改时间（= RPA 导出时间），否则用当前时间；过期判断按这个时间
+  const t = asOf ?? nowIso();
   if (b.replace !== false) {
     const { error } = await db.from("sea_inv_wh_stock").delete().eq("warehouse_code", code);
     if (error) throw error;
@@ -134,23 +138,46 @@ async function importStock(b: Record<string, unknown>, source = "manual") {
     const { error } = await db.from("sea_inv_wh_stock").upsert(list.slice(i, i + 500), { onConflict: "warehouse_code,wh_sku" });
     if (error) throw error;
   }
-  await db.from("sea_inv_warehouses").update({ stock_synced_at: t, stock_source: source, stock_rows: list.length, stock_error: null, updated_at: t }).eq("code", code);
+  await db.from("sea_inv_warehouses").update({ stock_synced_at: t, stock_source: source, stock_rows: list.length, stock_error: null, updated_at: nowIso(), ...extra }).eq("code", code);
   return { ok: true, rows: list.length, total_available: list.reduce((s, r) => s + r.available, 0), errors };
 }
 
-async function loadWh(code: string) {
+type WhRow = {
+  code: string; name: string; provider: string; provider_ref: string | null;
+  drive_folder: string | null; drive_name_pattern: string | null; file_config: FileConfig | null;
+  stock_file_id: string | null; stock_file_modified: string | null;
+};
+async function loadWh(code: string): Promise<WhRow> {
   const { data: w } = await admin().from("sea_inv_warehouses").select("*").eq("code", code).maybeSingle();
   if (!w) bad(`仓库 ${code} 不存在`);
-  return w as { code: string; name: string; provider: string; provider_ref: string | null };
+  return w as WhRow;
 }
 
-async function syncWarehouse(code: string) {
+/** 云盘：取文件夹里最新一份库存表（RPA 导出），同一文件同一修改时间不重复导入 */
+async function syncFromDrive(w: WhRow, force: boolean) {
+  const files = await listFolder(w.drive_folder!);
+  const f = pickLatest(files, w.drive_name_pattern);
+  if (!f) throw new Error(`云盘文件夹里没有${w.drive_name_pattern ? `文件名含「${w.drive_name_pattern}」的` : ""}表格文件（xlsx/xls/csv/Google 表格），共 ${files.length} 个文件`);
+  if (!force && f.id === w.stock_file_id && w.stock_file_modified && Date.parse(w.stock_file_modified) === Date.parse(f.modifiedTime)) {
+    return { ok: true, unchanged: true, file: f.name, file_time: f.modifiedTime, message: `云盘最新文件「${f.name}」已导入过，未变化` };
+  }
+  const bytes = await downloadFile(f);
+  const p = parseStockWorkbook(bytes, w.file_config ?? {});
+  if (!p.rows.length) throw new Error(`解析「${f.name}」得到 0 个 SKU，未覆盖原库存：${p.notes.join("；")}`);
+  const res = await importStock({ warehouse_code: w.code, rows: p.rows }, "drive", new Date(f.modifiedTime).toISOString(),
+    { stock_file_name: f.name, stock_file_id: f.id, stock_file_modified: f.modifiedTime });
+  return { ...res, file: f.name, file_time: f.modifiedTime, sheet: p.sheet, notes: p.notes };
+}
+
+async function syncWarehouse(code: string, force = false) {
   const db = admin();
   const w = await loadWh(code);
-  if (!["qianyi", "dingmiao"].includes(w.provider)) {
-    return { ok: true, skipped: true, message: w.provider === "tiktok" ? "国内仓不同步实物库存" : `${w.name} 没有 API，用页面「导入库存」` };
+  const useDrive = !!(w.drive_folder ?? "").trim();
+  if (!useDrive && !["qianyi", "dingmiao"].includes(w.provider)) {
+    return { ok: true, skipped: true, message: w.provider === "tiktok" ? "国内仓不同步实物库存" : `${w.name} 没有 API，也没配云盘文件夹，用页面「导入库存」` };
   }
   try {
+    if (useDrive) return await syncFromDrive(w, force);
     const r = w.provider === "qianyi" ? await qianyiInventory(w.provider_ref ?? "") : await dingmiaoInventory(w.provider_ref ?? "");
     const valid = r.rows.filter((x) => x.wh_sku);
     if (!valid.length) throw new Error("接口返回 0 个 SKU，未覆盖原库存（请确认仓库系统仓库选对了）");
@@ -162,6 +189,20 @@ async function syncWarehouse(code: string) {
     await db.from("sea_inv_warehouses").update({ stock_error: err, updated_at: nowIso() }).eq("code", code);
     return { ok: false, error: err };
   }
+}
+
+/** 云盘预览：列出文件夹里的文件、会选中哪份、解析结果前 20 行（不写库） */
+async function drivePreview(b: Record<string, unknown>) {
+  const w = await loadWh(String(b.code ?? ""));
+  const folder = String(b.drive_folder ?? w.drive_folder ?? "").trim();
+  if (!folder) bad("先填云盘文件夹链接");
+  const pattern = b.drive_name_pattern !== undefined ? String(b.drive_name_pattern) : w.drive_name_pattern;
+  const cfg = (b.file_config ?? w.file_config ?? {}) as FileConfig;
+  const files = await listFolder(folder);
+  const f = pickLatest(files, pattern);
+  if (!f) return { files: files.slice(0, 20), picked: null, rows: [], notes: ["没有符合条件的表格文件"] };
+  const p = parseStockWorkbook(await downloadFile(f), cfg);
+  return { files: files.slice(0, 20), picked: f, sheet: p.sheet, header_row: p.header_row, count: p.rows.length, total_available: p.rows.reduce((t, r) => t + r.available, 0), rows: p.rows.slice(0, 20), notes: p.notes };
 }
 
 async function providerWarehouses(code: string) {
@@ -652,7 +693,12 @@ Deno.serve(async (req) => {
         const code = String(b.code ?? "");
         if (!code) bad("code 必填");
         const patch: Record<string, unknown> = { updated_at: nowIso() };
-        for (const k of ["name", "status", "provider_ref", "note", "region"]) if (b[k] !== undefined) patch[k] = b[k] === "" ? null : b[k];
+        for (const k of ["name", "status", "provider_ref", "note", "region", "drive_folder", "drive_name_pattern"]) if (b[k] !== undefined) patch[k] = b[k] === "" ? null : b[k];
+        if (b.file_config !== undefined) {
+          const fc = (b.file_config ?? {}) as Record<string, unknown>;
+          patch.file_config = Object.fromEntries(["sheet", "sku_col", "avail_col", "onhand_col", "name_col", "warehouse_col", "warehouse_value"]
+            .filter((k) => String(fc[k] ?? "").trim()).map((k) => [k, String(fc[k]).trim()]));
+        }
         if (b.links !== undefined) {
           const links = (Array.isArray(b.links) ? b.links : []).map((l: Record<string, unknown>) => ({ shop_id: String(l.shop_id ?? ""), tts_warehouse_id: String(l.tts_warehouse_id ?? "") }))
             .filter((l) => l.shop_id && l.tts_warehouse_id);
@@ -669,7 +715,8 @@ Deno.serve(async (req) => {
         return json({ warehouses: r.data?.warehouses ?? [] });
       }
       case "import_stock": return json(await importStock(b));
-      case "sync_warehouse": return json(await syncWarehouse(String(b.code ?? "")));
+      case "sync_warehouse": return json(await syncWarehouse(String(b.code ?? ""), !!b.force));
+      case "drive_preview": return json(await drivePreview(b));
       case "provider_warehouses": return json(await providerWarehouses(String(b.code ?? "")));
       case "sync_shop": return json(await syncShop(b));
       case "refresh_map": return json(await refreshMap());

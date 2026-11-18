@@ -15,7 +15,7 @@ import {
 import { getAdminName, getPasscode } from "@/lib/api";
 import {
   type MapRow, type Overview, parseStockFile, parseStockPaste, type ParsedStock, type PlanItem, type PlanRow,
-  type SeaShop, type SeaWarehouse, seaApi, sendPlanToFeishu, type StockRow,
+  type SeaShop, type SeaWarehouse, seaApi, type DrivePreview, type FileConfig, sendPlanToFeishu, type StockRow,
 } from "@/lib/seaInventoryApi";
 
 export const Route = createFileRoute("/sea-inventory")({
@@ -339,12 +339,12 @@ function WarehouseCard({ w, shops, reload }: { w: SeaWarehouse; shops: SeaShop[]
       setParsed(null); setPaste(""); await reload();
     } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
   };
-  const sync = async () => {
+  const sync = async (force = false) => {
     setBusy(true);
     try {
-      const r = await seaApi.syncWarehouse(w.code);
+      const r = await seaApi.syncWarehouse(w.code, force);
       if (!r.ok) toast.error(r.error ?? "失败");
-      else toast.success(r.message ?? `已同步 ${r.rows ?? 0} 个 SKU，可用合计 ${r.total_available ?? 0}`);
+      else toast.success(r.message ?? `已同步 ${r.rows ?? 0} 个 SKU，可用合计 ${r.total_available ?? 0}${r.file ? `（文件「${r.file}」）` : ""}`);
       [...(r.notes ?? []), ...(r.errors ?? [])].forEach((n) => toast.warning(n));
       await reload();
     }
@@ -403,15 +403,20 @@ function WarehouseCard({ w, shops, reload }: { w: SeaWarehouse; shops: SeaShop[]
             )}
           </div>
         )}
+        {w.kind === "overseas" && <DriveConfig w={w} reload={reload} />}
         {w.kind === "overseas" && (
           <div className="space-y-2">
             <div className={stale ? "text-red-600" : ""}>
-              库存：{w.stock_rows ?? 0} 个 SKU，更新于 {bj(w.stock_synced_at)}（{w.stock_source === "api" ? "API" : w.stock_source === "manual" ? "手动导入" : "—"}）
+              库存：{w.stock_rows ?? 0} 个 SKU，更新于 {bj(w.stock_synced_at)}（{w.stock_source === "api" ? "API" : w.stock_source === "drive" ? `云盘「${w.stock_file_name ?? ""}」，按文件修改时间计` : w.stock_source === "manual" ? "手动导入" : "—"}）
               {stale && "，已过期，计划会跳过这个仓"}
               {w.stock_error && <div className="text-red-600">⚠ {w.stock_error}</div>}
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {hasApi && <Button size="sm" variant="outline" disabled={busy} onClick={sync}><RefreshCw className="h-4 w-4 mr-1" />API 同步</Button>}
+              {(hasApi || w.drive_folder) && (
+                <Button size="sm" variant="outline" disabled={busy} onClick={() => sync(!!w.drive_folder)}>
+                  <RefreshCw className="h-4 w-4 mr-1" />{w.drive_folder ? "从云盘同步" : "API 同步"}
+                </Button>
+              )}
               <label className="inline-flex">
                 <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={async (e) => {
                   const f = e.target.files?.[0]; e.target.value = "";
@@ -427,7 +432,7 @@ function WarehouseCard({ w, shops, reload }: { w: SeaWarehouse; shops: SeaShop[]
               <div className="rounded border p-2 space-y-1">
                 <div>识别 {parsed.rows.length} 个 SKU，可用合计 {parsed.rows.reduce((s, r) => s + r.available, 0)}。<b>导入会整仓覆盖</b>（表里没有的 SKU 视为 0 / 无货）。</div>
                 {parsed.notes.map((n, i) => <div key={i} className="text-amber-700">⚠ {n}</div>)}
-                <div className="font-mono text-xs max-h-32 overflow-auto">{parsed.rows.slice(0, 20).map((r) => `${r.wh_sku}  ${r.available}`).join("\n")}{parsed.rows.length > 20 && "\n…"}</div>
+                <div className="font-mono text-xs max-h-32 overflow-auto whitespace-pre">{parsed.rows.slice(0, 20).map((r) => `${r.wh_sku}  ${r.available}`).join("\n")}{parsed.rows.length > 20 && "\n…"}</div>
                 <Button size="sm" disabled={busy || !parsed.rows.length} onClick={doImport}>确认导入</Button>
               </div>
             )}
@@ -441,6 +446,58 @@ function WarehouseCard({ w, shops, reload }: { w: SeaWarehouse; shops: SeaShop[]
         )}
       </CardContent>
     </Card>
+  );
+}
+
+const FC_FIELDS: Array<[keyof FileConfig, string]> = [
+  ["sku_col", "SKU 列表头"], ["avail_col", "可用数量列表头"], ["sheet", "sheet 名"],
+  ["warehouse_col", "仓库列表头"], ["warehouse_value", "只取该仓库"], ["onhand_col", "在库列表头"],
+];
+/** 云盘（RPA 导出）配置：填了文件夹就优先从云盘取，不再走 API */
+function DriveConfig({ w, reload }: { w: SeaWarehouse; reload: () => Promise<void> }) {
+  const [open, setOpen] = React.useState(!!w.drive_folder);
+  const [folder, setFolder] = React.useState(w.drive_folder ?? "");
+  const [pattern, setPattern] = React.useState(w.drive_name_pattern ?? "");
+  const [fc, setFc] = React.useState<FileConfig>(w.file_config ?? {});
+  const [pv, setPv] = React.useState<DrivePreview | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  if (!open) return <Button size="sm" variant="ghost" className="px-0" onClick={() => setOpen(true)}>＋ 配置云盘自动导入（RPA 导出 Excel）</Button>;
+  const preview = async () => {
+    setBusy(true);
+    try { setPv(await seaApi.drivePreview(w.code, { drive_folder: folder, drive_name_pattern: pattern, file_config: fc })); }
+    catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
+  };
+  const save = async () => {
+    setBusy(true);
+    try { await seaApi.saveWarehouse({ code: w.code, drive_folder: folder.trim(), drive_name_pattern: pattern.trim(), file_config: fc }); toast.success(folder.trim() ? "已保存：之后该仓库存从云盘取" : "已清空云盘配置"); await reload(); }
+    catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
+  };
+  return (
+    <div className="rounded border p-2 space-y-2">
+      <div className="font-medium">云盘自动导入 <span className="text-xs font-normal text-muted-foreground">填了文件夹后，定时任务取文件夹里最新一份表格（xlsx/xls/csv/Google 表格），库存时间按文件修改时间算，超过有效期的不参与调整</span></div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Input className="h-8 w-96" placeholder="Google 云盘文件夹链接（需共享给服务账号邮箱）" value={folder} onChange={(e) => setFolder(e.target.value)} />
+        <Input className="h-8 w-40" placeholder="文件名包含（可空）" value={pattern} onChange={(e) => setPattern(e.target.value)} />
+      </div>
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        {FC_FIELDS.map(([k, label]) => (
+          <Input key={k} className="h-7 w-32 text-xs" placeholder={label} value={fc[k] ?? ""} onChange={(e) => setFc({ ...fc, [k]: e.target.value })} />
+        ))}
+        <span className="text-muted-foreground">列名留空 = 自动识别（SKU / 可用库存 等常见表头）</span>
+      </div>
+      <div className="flex gap-2">
+        <Button size="sm" variant="outline" disabled={busy || !folder.trim()} onClick={preview}>预览最新文件</Button>
+        <Button size="sm" disabled={busy} onClick={save}>保存</Button>
+      </div>
+      {pv && (
+        <div className="text-xs space-y-1">
+          <div>文件夹内 {pv.files.length} 个文件；选中：<b>{pv.picked ? `${pv.picked.name}（修改于 ${bj(pv.picked.modifiedTime)}）` : "无"}</b>
+            {pv.picked && <>；sheet「{pv.sheet}」，表头第 {pv.header_row ?? "—"} 行，识别 {pv.count} 个 SKU，可用合计 {pv.total_available}</>}</div>
+          {pv.notes.map((n, i) => <div key={i} className="text-amber-700">⚠ {n}</div>)}
+          {!!pv.rows.length && <div className="font-mono max-h-40 overflow-auto whitespace-pre">{pv.rows.map((r) => `${r.wh_sku}  ${r.available}`).join("\n")}</div>}
+        </div>
+      )}
+    </div>
   );
 }
 

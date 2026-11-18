@@ -1,4 +1,5 @@
 -- SEA 库存监控（左侧 TAB「SEA库存监控」，tab key = sea-inventory）
+-- 2026-11-18 合并：原 20261117190000_sea_inventory.sql + 20261117200000_sea_inventory_qianyi_refs.sql（均未执行）+ 云盘导入列，一次执行即可
 --   sea_inv_settings     全局参数（单行 id=1）
 --   sea_inv_warehouses   实体仓：千易 MY/PH、顶妙 TH1、BigSeller VN、泰国新仓、国内仓；links = 绑定的 TikTok 仓库（每店一个 warehouse_id）
 --   sea_inv_wh_stock     海外仓 SKU 可用库存快照（API 同步或页面手动导入）
@@ -32,22 +33,28 @@ CREATE TABLE IF NOT EXISTS public.sea_inv_warehouses (
   status      text NOT NULL DEFAULT 'active' CHECK (status IN ('active','onboarding','phasing_out','disabled')),
   region      text,
   links       jsonb NOT NULL DEFAULT '[]'::jsonb,  -- [{shop_id, tts_warehouse_id}]
-  provider_ref text,                               -- 仓库系统里的仓库编码（API 查询用，待对接）
+  provider_ref text,                               -- 仓库系统里的仓库：千易=仓库名称，顶妙=warehouseId
   note        text,
   sort        int NOT NULL DEFAULT 0,
   stock_synced_at timestamptz,
   stock_source    text,
   stock_rows      int,
   stock_error     text,
+  drive_folder       text,                         -- 云盘文件夹链接或 ID（RPA 每天导出库存 Excel 放这里；填了就优先从云盘取）
+  drive_name_pattern text,                         -- 文件名需包含的文字（空 = 文件夹里最新的表格文件）
+  file_config        jsonb NOT NULL DEFAULT '{}'::jsonb,  -- {sheet, sku_col, avail_col, onhand_col, name_col, warehouse_col, warehouse_value}
+  stock_file_name    text,
+  stock_file_id      text,
+  stock_file_modified timestamptz,
   updated_at  timestamptz NOT NULL DEFAULT now()
 );
-INSERT INTO public.sea_inv_warehouses (code, name, provider, kind, status, region, sort, note) VALUES
-  ('QY-MY',  '千易 MY 海外仓',        'qianyi',    'overseas', 'active',  'MY', 10, '千易 ERP openAPI（accessId/secretKey），接口文档待提供'),
-  ('QY-PH',  '千易 PH 海外仓',        'qianyi',    'overseas', 'active',  'PH', 20, '千易 ERP openAPI（accessId/secretKey），接口文档待提供'),
-  ('DM-TH1', '顶妙WMS TH 海外仓1',    'dingmiao',  'overseas', 'phasing_out', 'TH', 30, '逐步退出，库存转移到泰国新仓'),
-  ('TH-NEW', '泰国新仓（待定）',       'manual',    'overseas', 'disabled', 'TH', 40, '新仓系统待定；启用时状态改 onboarding'),
-  ('BS-VN',  'BigSeller VN 海外仓',   'bigseller', 'overseas', 'active',  'VN', 50, 'BigSeller 暂无可用 API，页面手动导入库存'),
-  ('CN',     '国内仓',                'tiktok',    'cn',       'active',  NULL, 90, '实物库存未接入，只按销量补 TikTok 库存，执行前人工确认')
+INSERT INTO public.sea_inv_warehouses (code, name, provider, kind, status, region, sort, provider_ref, note) VALUES
+  ('QY-MY',  '千易 MY 海外仓',        'qianyi',    'overseas', 'active',      'MY', 10, 'ARTPHRO-MY', '千易 ERP 海外站（asia.qianyierp.com），仓库「ARTPHRO-MY」'),
+  ('QY-PH',  '千易 PH 海外仓',        'qianyi',    'overseas', 'active',      'PH', 20, 'ARTPHRO.PH', '千易 ERP 海外站（asia.qianyierp.com），仓库「ARTPHRO.PH」'),
+  ('DM-TH1', '顶妙WMS TH 海外仓1',    'dingmiao',  'overseas', 'phasing_out', 'TH', 30, '147',        'TOPWMS gogo.topwms.com，仓库 147（TH001 GOGO云仓）；逐步退出，库存转移到泰国新仓'),
+  ('TH-NEW', '泰国新仓（待定）',       'manual',    'overseas', 'disabled',    'TH', 40, NULL,         '新仓系统待定；启用时状态改「新仓接入中」'),
+  ('BS-VN',  'BigSeller VN 海外仓',   'bigseller', 'overseas', 'active',      'VN', 50, NULL,         'BigSeller API 收费：RPA 每天导出库存 Excel 到云盘文件夹，系统自动读取；也可页面手动导入'),
+  ('CN',     '国内仓',                'tiktok',    'cn',       'active',      NULL, 90, NULL,         '实物库存未接入，只按销量补 TikTok 库存，执行前人工确认')
 ON CONFLICT (code) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS public.sea_inv_wh_stock (
@@ -56,7 +63,7 @@ CREATE TABLE IF NOT EXISTS public.sea_inv_wh_stock (
   available      int  NOT NULL,
   on_hand        int,
   product_name   text,
-  source         text NOT NULL DEFAULT 'manual',   -- api / manual
+  source         text NOT NULL DEFAULT 'manual',   -- api / drive / manual
   fetched_at     timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (warehouse_code, wh_sku)
 );
