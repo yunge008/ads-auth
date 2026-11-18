@@ -3,6 +3,31 @@
 > 状态：📝 计划已定（2026-11-18 负责人确认），P0 实测未开始。接口字段未核验项以本文「未核验」标注为准，P0 实测后覆盖更新。
 > 资料来源：Partner Center 文档目录 https://partner.tiktokshop.com/docv2/page/affiliate-creator-api-overview 、https://partner.tiktokshop.com/docv2/page/get-shoppable-video-status-202509 、https://partner.tiktokshop.com/docv2/page/get-shoppable-video-precheck-result-202601 ；Content Posting API https://developers.tiktok.com/doc/content-posting-api-reference-direct-post
 
+## 2026-11-18 接口核验（官方方案文档 Shoppable_video_Integration_Solutions.md + tts_open_toolkit 0.1.7 内置 OAS）
+已核验：Host `open-api.tiktokglobalshop.com`，签名同 `_shared/tts.ts` 的 `ttsSign`；header `x-tts-access-token` = **达人侧 access_token（Get Access Token 时 user_type=1）**；无 shop_cipher。
+官方号 = `TIKTOK_SHOP_OFFICIAL_ACCOUNT`（每店 1 个），渠道号 = `TIKTOK_MARKETING_ACCOUNT`（每店最多 4 个），两者挂车商品均取 Get Shop Products。
+
+| 步骤 | Method Path | 方案文档版本 | OAS 版本 | 关键字段 |
+|---|---|---|---|---|
+| 账号类型 | GET `/affiliate_creator/{v}/profiles` | 202508 | 202405/202508 | `user_type` |
+| 可挂商品 | GET `/affiliate_creator/{v}/shop_products` | 202509 | 202509 | page_size 1–20、page_token、title_keyword |
+| 上传 | POST `/affiliate_creator/{v}/videos/video_files`（multipart `data`） | 202505 | 202505 | ≤100MB，9:16–16:9；**≥10MB 须走大文件分片方案（文档链接是飞书内部文档，未拿到）**；返回 video_file.id / md5 |
+| 封面（可选） | POST `/affiliate_creator/{v}/photos/photo_files` | 202511 | — | ≤10MB |
+| 预检 | POST `/affiliate_creator/{v}/videos/precheck_task`（file_id + product_id） | 202511 | 202511 | **每账号 API 渠道 50 次/天**；同一 file_id 重复预检也扣次数 |
+| 预检结果 | GET `/affiliate_creator/{v}/videos/precheck_tasks/{task_id}` | 202511 | 202511/202601 | PROCESSING 轮询；FAIL 必须拦截发布 |
+| 发布 | POST `/affiliate_creator/{v}/videos` | **202607** | **202505** | `video_info{file_id, title≤4000, cover_uri?, cover_timestamp_ms?, music_id?, is_ai_generated?}` + `product_link_info{product_id, title<30 且无标点/emoji}`；返回 video.id、quota |
+| 状态 | GET `/affiliate_creator/{v}/videos/{video_id}/status` | 202509 | 202509 | |
+
+- 版本不一致：发布接口方案文档写 202607，OAS 只有 202505 → 默认用 202607，P0 实测失败再退 202505。
+- 合规要求（IF-161111）：系统必须提供「取消授权」入口。
+- 发布错误码：16011007/16011069（锚点标题过长/含标点）、170001020（发帖频率超限）、170001014/015（风控）等，原文见方案文档。
+
+### 阻塞项（未核验）：所需 scope
+- 方案文档和工具包 OAS 都没写 shoppable video 接口需要哪个 scope。
+- 负责人截图（Partner Center →「管理 内部开发 的权限范围」，共 31 项）中**没有任何视频/内容发布类 scope**；creator 类只有 `creator.affiliate.link.write`、`creator.data.live.read.public`、`creator.affiliate.share_link.read`。
+- 结论：当前 App 不能直接勾选开通，需要单独申请。拿到 scope 前 P0 无法开始。
+- `tts_open_toolkit` 的 devapi（可查/管理 App 权限）登录令牌只能存 macOS Keychain / Windows DPAPI，云端 Linux 容器用不了；负责人可在自己电脑上用它查。
+
 ## Context
 需要并行新增「通过 API 发布挂商品链接（小黄车）视频」的能力，发布账号 = 我们自己的官方号/矩阵号；
 后期由自研视频发布前端工具调用本项目 Edge Function。要求与现有功能（授权 / GMV Max / 归因 / 外联 / SEA 库存 / 上架）互不影响。
