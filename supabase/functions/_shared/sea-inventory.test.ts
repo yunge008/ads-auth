@@ -208,3 +208,29 @@ Deno.test("预组装到货后：仓库有同名实物 SKU 时按实物分配，�
   ], { "AR108+B4": 25, AR108: 100, B4: 10 });
   eq(r.items.map((i) => [i.sku_id, i.proposed_qty, i.reason?.includes("组合") ?? false]), [["C", 20, false]]);
 });
+
+Deno.test("预组装实物没货（可用 ≤ 预留）→ 改用单品组套；单品凑不齐才按实物", () => {
+  const r = run([th({ sku_id: "C", seller_sku: "AR108+B4", qty: 0, sold: 10 })], { "AR108+B4": 3, AR108: 105, B4: 45 });
+  // 实物可分配 0 → 单品组套：min(100, 40) = 40
+  eq(r.items.map((i) => [i.sku_id, i.proposed_qty, i.reason?.includes("临时组合") ?? false]), [["C", 40, true]]);
+  const r2 = run([th({ sku_id: "C", seller_sku: "AR108+B4", qty: 2, sold: 10 })], { "AR108+B4": 3, AR108: 105 });
+  eq(r2.items.map((i) => [i.sku_id, i.proposed_qty]), [["C", 0]]);
+});
+
+Deno.test("跨店铺多个 listing 共用单品：合计不超卖", () => {
+  const two: Warehouse = { ...whTH, links: [{ shop_id: "TH1", tts_warehouse_id: "W" }, { shop_id: "TH2", tts_warehouse_id: "W2" }] };
+  const r = planOverseas({
+    warehouses: [two],
+    slots: [
+      th({ sku_id: "A", seller_sku: "AR141", qty: 900, sold: 50 }),
+      th({ shop_id: "TH2", tts_warehouse_id: "W2", sku_id: "B", seller_sku: "AR141+AR371", qty: 900, sold: 50 }),
+      th({ shop_id: "TH2", tts_warehouse_id: "W2", sku_id: "C", seller_sku: "AR141+AR223-2", qty: 900, sold: 50 }),
+    ],
+    stock: stock("BS-TH", { AR141: 1005, AR371: 205, "AR223-2": 105 }), overrides: new Map(), params: P,
+  });
+  const q = Object.fromEntries(r.items.map((i) => [i.sku_id, i.proposed_qty]));
+  // AR141 消耗 = A + B + C ≤ 1000；AR371 ≤ 200；AR223-2 ≤ 100
+  eq(q.A + q.B + q.C <= 1000 && q.B <= 200 && q.C <= 100, true);
+  eq([q.B, q.C], [200, 100]);
+  eq(q.A, 700);
+});

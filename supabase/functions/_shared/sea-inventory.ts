@@ -384,12 +384,15 @@ export function planOverseas(input: OverseasInput): { items: PlanItem[]; groups:
     const physical = new Map<string, Slot[]>();
     const combos = new Map<string, { comps: Map<string, number>; slots: Slot[] }>();
     for (const [whSku, g] of byWhSku) {
-      if (stockMap?.has(whSku)) { physical.set(whSku, g); continue; }
       const comps = parseCombo(whSku);
+      const hasPhysical = !!stockMap?.has(whSku);
+      // 有现成预组装实物（可用 − 预留 > 0）→ 按实物；实物没货 → 用单品组套（负责人 2026-11-18）
+      if (hasPhysical && (!comps || stockMap!.get(whSku)! - p.reserve_per_sku > 0)) { physical.set(whSku, g); continue; }
       const real = g.filter((s) => !s.virtual);
       if (comps) {
         const miss = [...comps.keys()].filter((k) => !stockMap?.has(k));
         if (!miss.length) { combos.set(whSku, { comps, slots: g }); continue; }
+        if (hasPhysical) { physical.set(whSku, g); continue; } // 实物为 0 且单品凑不齐 → 按实物（会压到 0 并提示）
         if (real.length) groups.push({ warehouse_code: w.code, wh_sku: whSku, wh_available: null, pool: null, slots: real.length, triggered: false, note: `组合款单品在仓库库存里找不到：${miss.join("、")}，未调整` });
         continue;
       }
