@@ -299,8 +299,6 @@ type Pick = { include: boolean; target: string };
 function BatchUploadCard({ ov, reload }: { ov: Overview; reload: () => Promise<void> }) {
   const [groups, setGroups] = React.useState<UpGroup[]>([]);
   const [picks, setPicks] = React.useState<Record<string, Pick>>({});
-  const [includeCombo, setIncludeCombo] = React.useState(false);
-  const [files, setFiles] = React.useState<File[]>([]);
   const [busy, setBusy] = React.useState(false);
   const overseas = ov.warehouses.filter((w) => w.kind === "overseas");
   const isApi = (code: string) => ["qianyi", "dingmiao"].includes(ov.warehouses.find((w) => w.code === code)?.provider ?? "");
@@ -344,7 +342,7 @@ function BatchUploadCard({ ov, reload }: { ov: Overview; reload: () => Promise<v
         toast.success(`${ov.warehouses.find((w) => w.code === code)?.name ?? code}：导入 ${r.rows} 个 SKU，可用合计 ${r.total_available}`);
         r.errors.forEach((e) => toast.warning(e));
       }
-      setGroups([]); setPicks({}); setFiles([]);
+      setGroups([]); setPicks({});
       await reload();
     } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
   };
@@ -356,12 +354,11 @@ function BatchUploadCard({ ov, reload }: { ov: Overview; reload: () => Promise<v
         <label className="inline-flex">
           <input type="file" multiple accept=".xlsx,.xls,.csv" className="hidden" onChange={(e) => {
             const fs = [...(e.target.files ?? [])]; e.target.value = "";
-            if (fs.length) { setFiles(fs); void parse(fs, includeCombo); }
+            if (fs.length) void parse(fs, false);
           }} />
           <span className="inline-flex items-center h-8 px-3 rounded-md border cursor-pointer hover:bg-muted"><Upload className="h-4 w-4 mr-1" />选择文件（可多选）</span>
         </label>
-        <label className="flex items-center gap-1"><Checkbox checked={includeCombo} onCheckedChange={(v) => { setIncludeCombo(v === true); if (files.length) void parse(files, v === true); }} />含组合 SKU</label>
-        <span className="text-xs text-muted-foreground">支持 BigSeller、顶妙 TOPWMS、千易导出；按文件里的「仓库」列自动分仓，<b>导入会整仓覆盖</b>。千易 / 顶妙有 API 的仓默认不勾选，只用来核对。</span>
+        <span className="text-xs text-muted-foreground">支持 BigSeller、顶妙 TOPWMS、千易导出；按文件里的「仓库」列自动分仓，<b>导入会整仓覆盖</b>。千易 / 顶妙有 API 的仓默认不勾选，只用来核对。BigSeller 组合 SKU 不导入（库存由单品推算），组合款 listing 在生成计划时按单品库存分配。</span>
       </div>
       {busy && <div className="flex items-center gap-1 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />处理中…</div>}
       {!!groups.length && (

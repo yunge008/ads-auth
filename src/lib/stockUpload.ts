@@ -4,7 +4,8 @@
 //   BigSeller   sheet「单个SKU」「组合SKU」，列 SKU编号 / 仓库 / 现有库存 / 订单已锁 / 整仓可用 / 活动预留 / SKU类型；
 //               整仓可用 = 现有库存 − 订单已锁 − 活动预留（单品全部成立）。
 //               组合SKU 的库存是由单品推算的虚拟数（如 AR108+ B4 = min(AR108, B4)），与单品共用同一批实物，
-//               一起导入会重复计算 → 默认跳过组合 SKU（SKU类型 = Combination SKU 或 sheet 名含「组合」）。
+//               一起导入会重复计算 → 跳过组合 SKU（SKU类型 = Combination SKU 或 sheet 名含「组合」）；
+//               组合款 listing 在生成计划时按「+」拆成单品、用单品库存分配（_shared/sea-inventory.ts planCluster）。
 //   顶妙 TOPWMS sheet「WorkSheet」，列 商品SKU / 预占库存 / 可用库存 / 仓库（GOGO云仓）；与 API 逐 SKU 一致。
 //   千易        sheet「Sheet1」两行表头（第 1 行分组、第 2 行列名），列 商品编码 / 仓库 / 可用量 / 在库量；MY、PH 两个仓在同一个文件。
 import * as XLSX from "xlsx";
@@ -92,7 +93,7 @@ export function parseSheetTable(table: unknown[][], file: string, sheet: string,
   return [...groups.entries()].map(([wh, x]) => {
     const notes: string[] = [];
     if (hi > 0) notes.push(`表头在第 ${hi + 1} 行`);
-    if (x.combos) notes.push(`跳过 ${x.combos} 个组合 SKU（库存由单品推算，导入会重复计算）`);
+    if (x.combos) notes.push(`跳过 ${x.combos} 个组合 SKU（BigSeller 组合库存由单品推算；组合款 listing 生成计划时按单品库存分配）`);
     if (x.bad) notes.push(`${x.bad} 行 SKU 为空或可用数量不是数字，已跳过`);
     if (x.dup) notes.push(`${x.dup} 行 SKU 重复，已合计`);
     if (x.neg) notes.push(`${x.neg} 行可用为负数，按 0 计`);

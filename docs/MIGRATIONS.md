@@ -28,3 +28,4 @@ git show <提交号>:supabase/migrations/<文件名>
 | 2026-10-13 | `20261012130000_purge_gmv_max_storage.sql` | `953a41a` | 停 GMV Max pg_cron（unschedule 3 个 job）+ TRUNCATE `gmv_max_vid_daily`/`gmv_max_vid_meta`（之后被手动同步又写入 537 行，由 20261013090000 再清） |
 | 2026-11-10 | `20261105120000_tts_shops.sql` | `9a3f93b` | 联盟达人外联：新表 `tts_shops`（TikTok Shop 店铺授权，RLS 开、无 policy） |
 | 2026-11-18 | `20261118120000_sea_inventory.sql` | `96e7099` | SEA库存监控：8 张表（sea_inv_*，RLS 仅 service role）+ 6 个预置仓库（千易 MY/PH、顶妙 TH1、泰国新仓、BigSeller VN、国内仓）+ pg_cron `sea-inventory-day`（北京 09:10）/ `sea-inventory-night`（北京 21:10） |
+| 2026-11-18 | `20261118150000_sea_inventory_file_wh_names.sql` | `68a0637` | SEA库存监控：各仓导出文件仓库名（file_config.warehouse_value）；TH-NEW 改 BigSeller「AR thailand 泰国」 |

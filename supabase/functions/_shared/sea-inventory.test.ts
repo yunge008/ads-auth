@@ -146,3 +146,65 @@ Deno.test("紧急度排序", () => {
   const s = sortByUrgency([{ ...base, sku_id: "x", days_before: 8 }, { ...base, sku_id: "n", days_before: null, new_link: true }, { ...base, sku_id: "y", days_before: 1 }]);
   eq(s.map((i) => i.sku_id), ["y", "x", "n"]);
 });
+
+// ── 临时组合款（2026-11-18 负责人：AR108+B4 这类临时组合也要分配，按单品库存） ──
+import { parseCombo } from "./sea-inventory.ts";
+
+Deno.test("组合解析：空格、(组合) 后缀、同单品两件、*n", () => {
+  const m = (s: string) => [...(parseCombo(s) ?? new Map()).entries()];
+  eq(m("AR108+ B4"), [["AR108", 1], ["B4", 1]]);
+  eq(m("AR1063+B4(组合)"), [["AR1063", 1], ["B4", 1]]);
+  eq(m("AR141+AR104-B  组合"), [["AR141", 1], ["AR104-B", 1]]);
+  eq(m("AR372-2+ AR372-2"), [["AR372-2", 2]]);
+  eq(m("AR1+B4*2"), [["AR1", 1], ["B4", 2]]);
+  eq(parseCombo("AR245-B4"), null);
+});
+
+const whTH: Warehouse = { code: "BS-TH", name: "BigSeller TH 新仓", kind: "overseas", status: "active", region: "TH", links: [{ shop_id: "TH1", tts_warehouse_id: "W" }] };
+const th = (o: Partial<Slot>) => slot({ shop_id: "TH1", region: "TH", tts_warehouse_id: "W", ...o });
+const run = (slots: Slot[], st: Record<string, number>) =>
+  planOverseas({ warehouses: [whTH], slots, stock: stock("BS-TH", st), overrides: new Map(), params: P });
+
+Deno.test("组合款与单品共用库存：按日销×用量占比分，单品消耗合计不超过可分配", () => {
+  // AR108 可分配 100、B4 可分配 50；单品 AR108 日销 2、组合 AR108+B4 日销 2
+  const r = run([
+    th({ sku_id: "S", seller_sku: "AR108", qty: 5, sold: 20 }),
+    th({ sku_id: "C", seller_sku: "AR108+B4", qty: 10, sold: 20 }),
+  ], { AR108: 105, B4: 55 });
+  // 组合：AR108 份额 100×2/4=50、B4 份额 50 → 50；单品拿 AR108 剩余 50
+  eq(r.items.map((i) => [i.sku_id, i.proposed_qty]).sort(), [["C", 50], ["S", 50]]);
+  eq(r.groups[0].note.includes("临时组合"), true);
+});
+
+Deno.test("同单品两件的组合：AR372-2+AR372-2 每套用 2 件", () => {
+  const r = run([
+    th({ sku_id: "S", seller_sku: "AR372-2", qty: 1, sold: 10 }),
+    th({ sku_id: "C", seller_sku: "AR372-2+ AR372-2", qty: 1, sold: 10 }),
+  ], { "AR372-2": 145 });
+  // 可分配 140；分母 1×1+1×2=3；组合份额 140×2/3=93.3 → 46 套（92 件）；单品拿 48
+  eq(r.items.map((i) => [i.sku_id, i.proposed_qty]).sort(), [["C", 46], ["S", 48]]);
+});
+
+Deno.test("包装 B4 被多个组合共用：B4 按组合销量分，没有单品 listing 的剩余补给天数最短的组合", () => {
+  const r = run([
+    th({ sku_id: "A", seller_sku: "AR108+B4", qty: 0, sold: 30 }),   // 日销 3
+    th({ sku_id: "B", seller_sku: "AR1084+B4", qty: 0, sold: 10 }),  // 日销 1
+  ], { AR108: 1000, AR1084: 1000, B4: 46 });
+  // B4 可分配 41：A 份额 41×3/4=30.75→30，B 10.25→10；剩 1 件补给天数最短的（A 30/3=10 天，B 10/1=10 天 → 并列取先者）
+  const got = Object.fromEntries(r.items.map((i) => [i.sku_id, i.proposed_qty]));
+  eq([got.A, got.B], [31, 10]);
+});
+
+Deno.test("组合款单品缺货（仓库没有该单品）→ 不调整，并列出缺哪个", () => {
+  const r = run([th({ sku_id: "C", seller_sku: "AR138-B-1-60+AR339-B19", qty: 1, sold: 10 })], { "AR138-B-1-60": 160 });
+  eq(r.items.length, 0);
+  eq(r.groups[0].note.includes("AR339-B19"), true);
+});
+
+Deno.test("预组装到货后：仓库有同名实物 SKU 时按实物分配，不再拆单品", () => {
+  const r = run([
+    th({ sku_id: "C", seller_sku: "AR108+B4", qty: 1, sold: 10 }),
+    th({ sku_id: "S", seller_sku: "AR108", qty: 50, sold: 1 }),
+  ], { "AR108+B4": 25, AR108: 100, B4: 10 });
+  eq(r.items.map((i) => [i.sku_id, i.proposed_qty, i.reason?.includes("组合") ?? false]), [["C", 20, false]]);
+});

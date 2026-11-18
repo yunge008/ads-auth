@@ -78,7 +78,7 @@ export function parseStockTable(table: unknown[][], cfg: FileConfig & { sheet_is
       map.set(sku, { wh_sku: sku, available: Math.max(0, Math.trunc(av)), on_hand: on === null ? null : Math.trunc(on), product_name: cName >= 0 ? String(r[cName] ?? "").trim() || null : null });
     }
   }
-  if (combos) notes.push(`跳过 ${combos} 个组合 SKU（库存由单品推算，导入会重复计算）`);
+  if (combos) notes.push(`跳过 ${combos} 个组合 SKU（BigSeller 组合库存由单品推算；组合款 listing 生成计划时按单品库存分配）`);
   if (skipped) notes.push(`${skipped} 行 SKU 为空或可用数量不是数字，已跳过`);
   if (otherWh) notes.push(`${otherWh} 行属于其他仓库，已跳过`);
   if (dup) notes.push(`${dup} 行 SKU 重复，已按 SKU 合计（如果文件含多个仓，请在配置里填仓库列与仓库名）`);

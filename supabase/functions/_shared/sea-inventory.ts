@@ -190,6 +190,119 @@ export function addOnboardingSlots(warehouses: Warehouse[], slots: Slot[]): Slot
   return out;
 }
 
+/** listing 商家 SKU → 组合构成（单品 → 件数）。不含「+」返回 null。去掉末尾「(组合)」「组合」「(临时组合)」，支持「SKU*2」。 */
+export function parseCombo(sku: string): Map<string, number> | null {
+  const s = normSku(sku);
+  if (!s.includes("+")) return null;
+  const out = new Map<string, number>();
+  for (let part of s.split("+")) {
+    part = part.replace(/[（(]?\s*(临时)?组合\s*[)）]?\s*$/, "").trim();
+    if (!part) continue;
+    const m = part.match(/^(.+?)\s*[*×]\s*(\d+)$/);
+    const k = (m ? m[1] : part).trim();
+    out.set(k, (out.get(k) ?? 0) + (m ? Number(m[2]) : 1));
+  }
+  return out.size ? out : null;
+}
+
+type Consumer = { slot: Slot; whSku: string; comps: Map<string, number>; daily: number };
+
+/**
+ * 单品簇分配（有临时组合款时）：组合款与单品共用单品库存。
+ *   可分配（每个单品）= 仓库可用 − 预留；
+ *   ① 无销量的 listing 各拿 zero_sale_qty（每个单品合计不超过其可分配 20%）；
+ *   ② 有销量的组合款：在每个单品上按「日销 × 用量」占比拿份额，组合可设数量 = 各单品份额 ÷ 用量 的最小值；
+ *   ③ 单品 listing 分该单品剩余（按日销占比）；④ 只被组合用到的单品（如包装 B4）剩余，再逐件补给可售天数最短的组合。
+ *   任何单品上的消耗合计都不超过其可分配量（不超卖）。
+ */
+export function planCluster(w: Warehouse, cs: Consumer[], stock: Map<string, number>, p: Params): { items: PlanItem[]; group: GroupStatus } {
+  const skus = [...new Set(cs.flatMap((c) => [...c.comps.keys()]))].sort();
+  const pool = new Map(skus.map((k) => [k, Math.max(0, (stock.get(k) ?? 0) - p.reserve_per_sku)]));
+  const cap = (c: Consumer, m: Map<string, number>) => Math.min(...[...c.comps].map(([k, q]) => Math.floor((m.get(k) ?? 0) / q)));
+  const isCombo = (c: Consumer) => c.comps.size > 1 || [...c.comps.values()][0] > 1 || !c.comps.has(c.whSku);
+  const label = skus.join("+");
+  const triggered = cs.some((c) => {
+    if (c.slot.virtual) return cap(c, pool) > 0;
+    const d = daysOf(c.slot.qty, c.daily);
+    return c.slot.qty < p.min_qty || (d !== null && d < p.min_days);
+  });
+  const used = new Map(skus.map((k) => [k, 0]));
+  for (const c of cs) if (!c.slot.virtual) for (const [k, q] of c.comps) used.set(k, used.get(k)! + c.slot.qty * q);
+  const overSold = skus.some((k) => used.get(k)! > pool.get(k)!);
+  const group: GroupStatus = {
+    warehouse_code: w.code, wh_sku: label, wh_available: Math.min(...skus.map((k) => stock.get(k) ?? 0)), pool: Math.min(...skus.map((k) => pool.get(k)!)),
+    slots: cs.length, triggered: triggered || overSold,
+    note: `含临时组合款（单品 ${skus.join("、")}）：${overSold ? "当前合计超过单品可分配量，按销量压回" : triggered ? "触发调整" : "无需调整"}`,
+  };
+  if (!triggered && !overSold) return { items: [], group };
+
+  const target = new Map<Consumer, number>(cs.map((c) => [c, 0]));
+  const rem = new Map(pool);
+  const take = (c: Consumer, n: number) => { target.set(c, target.get(c)! + n); for (const [k, q] of c.comps) rem.set(k, rem.get(k)! - n * q); };
+  const sel = cs.filter((c) => c.daily > 0);
+  const zero = cs.filter((c) => !(c.daily > 0));
+  if (!sel.length) {
+    // 全部无销量：按单品平均
+    for (const c of zero) {
+      const n = Math.min(...[...c.comps].map(([k, q]) => Math.floor(pool.get(k)! / (zero.filter((z) => z.comps.has(k)).reduce((t, z) => t + z.comps.get(k)!, 0)))));
+      take(c, Math.max(0, n));
+    }
+  } else {
+    // ① 无销量保底
+    for (const c of zero) {
+      const n = Math.min(p.zero_sale_qty, ...[...c.comps].map(([k, q]) => Math.floor(Math.floor(pool.get(k)! * 0.2) / (q * zero.filter((z) => z.comps.has(k)).length))));
+      take(c, Math.max(0, n));
+    }
+    // ② 组合款按份额
+    const snap = new Map(rem);
+    const denom = new Map(skus.map((k) => [k, sel.filter((c) => c.comps.has(k)).reduce((t, c) => t + c.daily * c.comps.get(k)!, 0)]));
+    for (const c of sel.filter(isCombo)) {
+      const n = Math.min(...[...c.comps].map(([k, q]) => Math.floor((snap.get(k)! * c.daily * q / denom.get(k)!) / q)));
+      take(c, Math.max(0, n));
+    }
+    // ③ 单品 listing 分剩余
+    for (const k of skus) {
+      const singles = sel.filter((c) => !isCombo(c) && c.whSku === k);
+      if (!singles.length) continue;
+      const parts = largestRemainder(Math.max(0, rem.get(k)!), singles.map((c) => c.daily));
+      singles.forEach((c, i) => take(c, parts[i]));
+    }
+    // ④ 剩余补给可售天数最短的组合款
+    const combosSel = sel.filter(isCombo);
+    for (let guard = 0; guard < 100_000 && combosSel.length; guard++) {
+      const ok = combosSel.filter((c) => cap(c, rem) >= 1);
+      if (!ok.length) break;
+      ok.sort((a, b) => target.get(a)! / a.daily - target.get(b)! / b.daily);
+      take(ok[0], 1);
+    }
+  }
+
+  const items: PlanItem[] = [];
+  for (const c of cs) {
+    const s = c.slot;
+    const t = target.get(c)!;
+    if (t === s.qty || (s.virtual && t === 0)) continue;
+    const combo = isCombo(c);
+    const compText = [...c.comps].map(([k, q]) => (q > 1 ? `${k}×${q}` : k)).join(" + ");
+    const warnings: string[] = [];
+    if (t === 0) warnings.push("目标为 0：官方文档写 quantity 范围 1–99,999，设 0 未实测，可能需改为解除仓库关联");
+    if (w.status === "phasing_out") warnings.push("旧仓逐步退出中");
+    const before = daysOf(s.qty, c.daily);
+    const avail = combo ? cap(c, stock) : stock.get(c.whSku) ?? 0;
+    const pl = combo ? cap(c, pool) : pool.get(c.whSku)!;
+    const why = s.virtual ? `新仓首次设置库存（listing 尚未关联 ${w.name}）`
+      : combo ? `临时组合款（${compText}），与单品共用库存，按销量占比分配`
+      : `单品与临时组合款共用库存（${label}），按销量占比分配`;
+    items.push({
+      kind: "overseas", warehouse_code: w.code, wh_sku: c.whSku, shop_id: s.shop_id, region: s.region,
+      product_id: s.product_id, sku_id: s.sku_id, seller_sku: s.seller_sku, title: s.title, tts_warehouse_id: s.tts_warehouse_id,
+      current_qty: s.qty, proposed_qty: t, daily_sales: Math.round(c.daily * 100) / 100,
+      days_before: r1(before), days_after: r1(daysOf(t, c.daily)), wh_available: avail, pool: pl, reason: why, warnings, new_link: !!s.virtual,
+    });
+  }
+  return { items, group };
+}
+
 export function planOverseas(input: OverseasInput): { items: PlanItem[]; groups: GroupStatus[] } {
   const { params: p } = input;
   const items: PlanItem[] = [];
@@ -210,7 +323,8 @@ export function planOverseas(input: OverseasInput): { items: PlanItem[]; groups:
       byWhSku.set(k, [...(byWhSku.get(k) ?? []), s]);
     }
     const stockMap = input.stock.get(w.code);
-    for (const [whSku, g] of byWhSku) {
+    const dailyOf = (s: Slot) => (w.status === "onboarding" ? (totalSold.get(`${s.shop_id}|${s.sku_id}`) ?? s.sold) : s.sold) / p.window_days;
+    const singleGroup = (whSku: string, g: Slot[]) => {
       // 虚拟槽位只在仓库确实有该 SKU 时才出现
       const avail = stockMap?.get(whSku);
       const real = g.filter((s) => !s.virtual);
@@ -218,7 +332,7 @@ export function planOverseas(input: OverseasInput): { items: PlanItem[]; groups:
         if (real.length) {
           groups.push({ warehouse_code: w.code, wh_sku: whSku, wh_available: null, pool: null, slots: real.length, triggered: false, note: "仓库库存里找不到这个 SKU（编码不一致或仓库无货），未调整" });
         }
-        continue;
+        return;
       }
       const useGroup = g;
       const pool = Math.max(0, avail - p.reserve_per_sku);
@@ -238,7 +352,7 @@ export function planOverseas(input: OverseasInput): { items: PlanItem[]; groups:
         triggered: triggered || overSold,
         note: overSold ? "listing 库存合计超过仓库可分配量，按销量压回" : triggered ? "触发调整" : "无需调整",
       });
-      if (!triggered && !overSold) continue;
+      if (!triggered && !overSold) return;
       const target = allocatePool(pool, daily, p);
       useGroup.forEach((s, i) => {
         if (target[i] === s.qty) return;
@@ -264,6 +378,40 @@ export function planOverseas(input: OverseasInput): { items: PlanItem[]; groups:
           days_before: r1(before), days_after: r1(after), wh_available: avail, pool, reason: why, warnings, new_link: !!s.virtual,
         });
       });
+    };
+
+    // 分类：仓库有同名 SKU → 实物；否则按「+」拆成单品，全部单品在仓库有库存 → 组合（临时组合，按单品库存分配）；其余 → 找不到
+    const physical = new Map<string, Slot[]>();
+    const combos = new Map<string, { comps: Map<string, number>; slots: Slot[] }>();
+    for (const [whSku, g] of byWhSku) {
+      if (stockMap?.has(whSku)) { physical.set(whSku, g); continue; }
+      const comps = parseCombo(whSku);
+      const real = g.filter((s) => !s.virtual);
+      if (comps) {
+        const miss = [...comps.keys()].filter((k) => !stockMap?.has(k));
+        if (!miss.length) { combos.set(whSku, { comps, slots: g }); continue; }
+        if (real.length) groups.push({ warehouse_code: w.code, wh_sku: whSku, wh_available: null, pool: null, slots: real.length, triggered: false, note: `组合款单品在仓库库存里找不到：${miss.join("、")}，未调整` });
+        continue;
+      }
+      singleGroup(whSku, g); // 走原逻辑（会记「找不到」）
+    }
+    // 被组合用到的单品与这些组合一起按「单品簇」分配，其余单品走原逻辑
+    const uf = new Map<string, string>();
+    const find = (x: string): string => { while (uf.get(x) !== x) { const px = uf.get(x)!; uf.set(x, uf.get(px)!); x = uf.get(x)!; } return x; };
+    for (const { comps } of combos.values()) {
+      const ks = [...comps.keys()];
+      for (const k of ks) if (!uf.has(k)) uf.set(k, k);
+      for (const k of ks.slice(1)) uf.set(find(k), find(ks[0]));
+    }
+    for (const [whSku, g] of physical) if (!uf.has(whSku)) singleGroup(whSku, g);
+    const clusters = new Map<string, Consumer[]>();
+    const add = (root: string, c: Consumer) => clusters.set(root, [...(clusters.get(root) ?? []), c]);
+    for (const [whSku, g] of physical) if (uf.has(whSku)) for (const s of g) add(find(whSku), { slot: s, whSku, comps: new Map([[whSku, 1]]), daily: dailyOf(s) });
+    for (const [whSku, { comps, slots: g }] of combos) for (const s of g) add(find([...comps.keys()][0]), { slot: s, whSku, comps, daily: dailyOf(s) });
+    for (const cs of clusters.values()) {
+      const r = planCluster(w, cs, stockMap!, p);
+      items.push(...r.items);
+      groups.push(r.group);
     }
   }
   return { items, groups };
