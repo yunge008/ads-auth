@@ -2035,6 +2035,424 @@ export type Database = {
         }
         Relationships: []
       }
+      sea_inv_plan_items: {
+        Row: {
+          current_qty: number
+          daily_sales: number | null
+          days_after: number | null
+          days_before: number | null
+          exec_at: string | null
+          exec_message: string | null
+          exec_qty: number | null
+          exec_status: string
+          final_qty: number | null
+          id: number
+          kind: string
+          live_qty: number | null
+          new_link: boolean
+          plan_id: string
+          pool: number | null
+          product_id: string
+          proposed_qty: number
+          reason: string | null
+          region: string | null
+          selected: boolean
+          seller_sku: string | null
+          shop_id: string
+          sku_id: string
+          title: string | null
+          tts_warehouse_id: string
+          warehouse_code: string
+          warnings: Json
+          wh_available: number | null
+          wh_sku: string
+        }
+        Insert: {
+          current_qty: number
+          daily_sales?: number | null
+          days_after?: number | null
+          days_before?: number | null
+          exec_at?: string | null
+          exec_message?: string | null
+          exec_qty?: number | null
+          exec_status?: string
+          final_qty?: number | null
+          id?: number
+          kind: string
+          live_qty?: number | null
+          new_link?: boolean
+          plan_id: string
+          pool?: number | null
+          product_id: string
+          proposed_qty: number
+          reason?: string | null
+          region?: string | null
+          selected?: boolean
+          seller_sku?: string | null
+          shop_id: string
+          sku_id: string
+          title?: string | null
+          tts_warehouse_id: string
+          warehouse_code: string
+          warnings?: Json
+          wh_available?: number | null
+          wh_sku: string
+        }
+        Update: {
+          current_qty?: number
+          daily_sales?: number | null
+          days_after?: number | null
+          days_before?: number | null
+          exec_at?: string | null
+          exec_message?: string | null
+          exec_qty?: number | null
+          exec_status?: string
+          final_qty?: number | null
+          id?: number
+          kind?: string
+          live_qty?: number | null
+          new_link?: boolean
+          plan_id?: string
+          pool?: number | null
+          product_id?: string
+          proposed_qty?: number
+          reason?: string | null
+          region?: string | null
+          selected?: boolean
+          seller_sku?: string | null
+          shop_id?: string
+          sku_id?: string
+          title?: string | null
+          tts_warehouse_id?: string
+          warehouse_code?: string
+          warnings?: Json
+          wh_available?: number | null
+          wh_sku?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sea_inv_plan_items_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "sea_inv_plans"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sea_inv_plans: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          data_warnings: Json | null
+          executed_at: string | null
+          executed_by: string | null
+          id: string
+          map_diff: Json | null
+          params: Json | null
+          source: string
+          status: string
+          summary: Json | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          data_warnings?: Json | null
+          executed_at?: string | null
+          executed_by?: string | null
+          id?: string
+          map_diff?: Json | null
+          params?: Json | null
+          source?: string
+          status?: string
+          summary?: Json | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          data_warnings?: Json | null
+          executed_at?: string | null
+          executed_by?: string | null
+          id?: string
+          map_diff?: Json | null
+          params?: Json | null
+          source?: string
+          status?: string
+          summary?: Json | null
+        }
+        Relationships: []
+      }
+      sea_inv_settings: {
+        Row: {
+          cn_min_days: number
+          cn_target_days: number
+          id: number
+          last_run_at: string | null
+          last_run_summary: Json | null
+          map_refreshed_at: string | null
+          min_days: number
+          min_qty: number
+          reserve_per_sku: number
+          stock_max_age_hours: number
+          updated_at: string
+          window_days: number
+          zero_sale_qty: number
+        }
+        Insert: {
+          cn_min_days?: number
+          cn_target_days?: number
+          id?: number
+          last_run_at?: string | null
+          last_run_summary?: Json | null
+          map_refreshed_at?: string | null
+          min_days?: number
+          min_qty?: number
+          reserve_per_sku?: number
+          stock_max_age_hours?: number
+          updated_at?: string
+          window_days?: number
+          zero_sale_qty?: number
+        }
+        Update: {
+          cn_min_days?: number
+          cn_target_days?: number
+          id?: number
+          last_run_at?: string | null
+          last_run_summary?: Json | null
+          map_refreshed_at?: string | null
+          min_days?: number
+          min_qty?: number
+          reserve_per_sku?: number
+          stock_max_age_hours?: number
+          updated_at?: string
+          window_days?: number
+          zero_sale_qty?: number
+        }
+        Relationships: []
+      }
+      sea_inv_shop_sync: {
+        Row: {
+          error: string | null
+          listings_at: string | null
+          orders_at: string | null
+          orders_count: number | null
+          orders_from: string | null
+          shop_id: string
+          slots_count: number | null
+          updated_at: string
+        }
+        Insert: {
+          error?: string | null
+          listings_at?: string | null
+          orders_at?: string | null
+          orders_count?: number | null
+          orders_from?: string | null
+          shop_id: string
+          slots_count?: number | null
+          updated_at?: string
+        }
+        Update: {
+          error?: string | null
+          listings_at?: string | null
+          orders_at?: string | null
+          orders_count?: number | null
+          orders_from?: string | null
+          shop_id?: string
+          slots_count?: number | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      sea_inv_sku_map: {
+        Row: {
+          active: boolean
+          changed_at: string | null
+          first_seen_at: string
+          last_seen_at: string
+          prev_seller_sku: string | null
+          product_id: string
+          seller_sku: string
+          shop_id: string
+          sku_id: string
+          wh_sku_override: string | null
+        }
+        Insert: {
+          active?: boolean
+          changed_at?: string | null
+          first_seen_at?: string
+          last_seen_at?: string
+          prev_seller_sku?: string | null
+          product_id: string
+          seller_sku?: string
+          shop_id: string
+          sku_id: string
+          wh_sku_override?: string | null
+        }
+        Update: {
+          active?: boolean
+          changed_at?: string | null
+          first_seen_at?: string
+          last_seen_at?: string
+          prev_seller_sku?: string | null
+          product_id?: string
+          seller_sku?: string
+          shop_id?: string
+          sku_id?: string
+          wh_sku_override?: string | null
+        }
+        Relationships: []
+      }
+      sea_inv_slots: {
+        Row: {
+          committed: number
+          product_id: string
+          qty: number
+          region: string | null
+          seller_sku: string
+          shop_id: string
+          sku_id: string
+          sold: number
+          synced_at: string
+          title: string | null
+          tts_warehouse_id: string
+        }
+        Insert: {
+          committed?: number
+          product_id: string
+          qty?: number
+          region?: string | null
+          seller_sku?: string
+          shop_id: string
+          sku_id: string
+          sold?: number
+          synced_at?: string
+          title?: string | null
+          tts_warehouse_id: string
+        }
+        Update: {
+          committed?: number
+          product_id?: string
+          qty?: number
+          region?: string | null
+          seller_sku?: string
+          shop_id?: string
+          sku_id?: string
+          sold?: number
+          synced_at?: string
+          title?: string | null
+          tts_warehouse_id?: string
+        }
+        Relationships: []
+      }
+      sea_inv_warehouses: {
+        Row: {
+          code: string
+          drive_folder: string | null
+          drive_name_pattern: string | null
+          file_config: Json
+          kind: string
+          links: Json
+          name: string
+          note: string | null
+          provider: string
+          provider_ref: string | null
+          region: string | null
+          sort: number
+          status: string
+          stock_error: string | null
+          stock_file_id: string | null
+          stock_file_modified: string | null
+          stock_file_name: string | null
+          stock_rows: number | null
+          stock_source: string | null
+          stock_synced_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          code: string
+          drive_folder?: string | null
+          drive_name_pattern?: string | null
+          file_config?: Json
+          kind: string
+          links?: Json
+          name: string
+          note?: string | null
+          provider: string
+          provider_ref?: string | null
+          region?: string | null
+          sort?: number
+          status?: string
+          stock_error?: string | null
+          stock_file_id?: string | null
+          stock_file_modified?: string | null
+          stock_file_name?: string | null
+          stock_rows?: number | null
+          stock_source?: string | null
+          stock_synced_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          code?: string
+          drive_folder?: string | null
+          drive_name_pattern?: string | null
+          file_config?: Json
+          kind?: string
+          links?: Json
+          name?: string
+          note?: string | null
+          provider?: string
+          provider_ref?: string | null
+          region?: string | null
+          sort?: number
+          status?: string
+          stock_error?: string | null
+          stock_file_id?: string | null
+          stock_file_modified?: string | null
+          stock_file_name?: string | null
+          stock_rows?: number | null
+          stock_source?: string | null
+          stock_synced_at?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      sea_inv_wh_stock: {
+        Row: {
+          available: number
+          fetched_at: string
+          on_hand: number | null
+          product_name: string | null
+          source: string
+          warehouse_code: string
+          wh_sku: string
+        }
+        Insert: {
+          available: number
+          fetched_at?: string
+          on_hand?: number | null
+          product_name?: string | null
+          source?: string
+          warehouse_code: string
+          wh_sku: string
+        }
+        Update: {
+          available?: number
+          fetched_at?: string
+          on_hand?: number | null
+          product_name?: string | null
+          source?: string
+          warehouse_code?: string
+          wh_sku?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sea_inv_wh_stock_warehouse_code_fkey"
+            columns: ["warehouse_code"]
+            isOneToOne: false
+            referencedRelation: "sea_inv_warehouses"
+            referencedColumns: ["code"]
+          },
+        ]
+      }
       site_handovers: {
         Row: {
           country: string
