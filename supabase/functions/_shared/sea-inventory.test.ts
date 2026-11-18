@@ -1,5 +1,11 @@
 // 跑法：deno test supabase/functions/_shared/sea-inventory.test.ts
 import {
+  addDays,
+  dayStartSec,
+  localDay,
+  parseCombo,
+  salesPullStart,
+  windowSold,
   allocatePool,
   applySold,
   countSold,
@@ -43,30 +49,11 @@ Deno.test("allocatePool: 无销量槽位先拿 zero_sale_qty，但合计不超�
   eq(allocatePool(9, [0, 0], P), [5, 4], "全无销量平均分");
 });
 
-Deno.test("海外仓：任一 listing 可售 < 10 天 → 整组按销量重分；扣预留 5；合计 = 池子", () => {
-  const slots = [
-    slot({ sku_id: "A", qty: 5, sold: 20 }), // 2/天 → 2.5 天，触发
-    slot({ shop_id: "PH2", tts_warehouse_id: "W_PH2", sku_id: "B", qty: 80, sold: 20 }), // 2/天 → 40 天
-  ];
-  const { items, groups } = planOverseas({ warehouses: [whPH], slots, stock: stock("QY-PH", { "AR140-B2": 105 }), overrides: new Map(), params: P });
-  eq(groups[0].pool, 100);
-  eq(items.map((i) => [i.sku_id, i.current_qty, i.proposed_qty]), [["A", 5, 50], ["B", 80, 50]]);
-  eq(items[0].days_before, 2.5);
-  eq(items[0].days_after, 25);
-});
-
 Deno.test("海外仓：都健康 → 不调整", () => {
   const slots = [slot({ sku_id: "A", qty: 40, sold: 20 }), slot({ sku_id: "B", qty: 40, sold: 10 })];
   const { items, groups } = planOverseas({ warehouses: [whPH], slots, stock: stock("QY-PH", { "AR140-B2": 200 }), overrides: new Map(), params: P });
   eq(items.length, 0);
   eq(groups[0].triggered, false);
-});
-
-Deno.test("海外仓：数量 < 5 也触发（即使无销量）", () => {
-  const slots = [slot({ sku_id: "A", qty: 2, sold: 0 }), slot({ sku_id: "B", qty: 30, sold: 10 })];
-  const { items } = planOverseas({ warehouses: [whPH], slots, stock: stock("QY-PH", { "AR140-B2": 45 }), overrides: new Map(), params: P });
-  // 池子 40；无销量 A 拿 min(5, 40*0.2=8)=5，B 拿 35
-  eq(items.map((i) => [i.sku_id, i.proposed_qty]), [["A", 5], ["B", 35]]);
 });
 
 Deno.test("海外仓：包装不同（SKU 编码不同）不合并；人工映射覆盖生效", () => {
@@ -82,29 +69,10 @@ Deno.test("海外仓：包装不同（SKU 编码不同）不合并；人工映�
   eq(r2.items.map((i) => [i.sku_id, i.proposed_qty]).sort(), [["A", 10], ["C", 10]]);
 });
 
-Deno.test("海外仓：仓库可用 ≤ 预留 → 目标 0 并给出警告", () => {
-  const slots = [slot({ sku_id: "A", qty: 3, sold: 10 })];
-  const { items } = planOverseas({ warehouses: [whPH], slots, stock: stock("QY-PH", { "AR140-B2": 4 }), overrides: new Map(), params: P });
-  eq(items[0].proposed_qty, 0);
-  eq(items[0].warnings.length, 1);
-});
-
 Deno.test("海外仓：listing 合计超过可分配量（超卖风险）→ 即使天数够也压回", () => {
   const slots = [slot({ sku_id: "A", qty: 60, sold: 10 }), slot({ sku_id: "B", qty: 60, sold: 10 })];
   const { items } = planOverseas({ warehouses: [whPH], slots, stock: stock("QY-PH", { "AR140-B2": 65 }), overrides: new Map(), params: P });
   eq(items.map((i) => i.proposed_qty), [30, 30]);
-});
-
-Deno.test("新仓 onboarding：listing 未挂新仓 → 生成首次设置项，用 listing 合计销量", () => {
-  const th1: Warehouse = { code: "DM-TH1", name: "顶妙 TH1", kind: "overseas", status: "phasing_out", region: "TH", links: [{ shop_id: "TH1", tts_warehouse_id: "W_OLD" }] };
-  const th2: Warehouse = { code: "TH2", name: "泰国新仓", kind: "overseas", status: "onboarding", region: "TH", links: [{ shop_id: "TH1", tts_warehouse_id: "W_NEW" }] };
-  const slots = [slot({ shop_id: "TH1", region: "TH", sku_id: "A", tts_warehouse_id: "W_OLD", qty: 30, sold: 10 })];
-  const st = new Map([["DM-TH1", new Map([["AR140-B2", 40]])], ["TH2", new Map([["AR140-B2", 105]])]]);
-  const { items } = planOverseas({ warehouses: [th1, th2], slots, stock: st, overrides: new Map(), params: P });
-  const n = items.find((i) => i.warehouse_code === "TH2")!;
-  eq([n.new_link, n.current_qty, n.proposed_qty, n.tts_warehouse_id], [true, 0, 100, "W_NEW"]);
-  // 旧仓：30 天够，但合计 30 ≤ 池子 35 → 不调
-  eq(items.filter((i) => i.warehouse_code === "DM-TH1").length, 0);
 });
 
 Deno.test("国内仓：只补可售 < 10 天，补到 20 天；无销量不补", () => {
@@ -148,7 +116,6 @@ Deno.test("紧急度排序", () => {
 });
 
 // ── 临时组合款（2026-11-18 负责人：AR108+B4 这类临时组合也要分配，按单品库存） ──
-import { parseCombo } from "./sea-inventory.ts";
 
 Deno.test("组合解析：空格、(组合) 后缀、同单品两件、*n", () => {
   const m = (s: string) => [...(parseCombo(s) ?? new Map()).entries()];
@@ -164,26 +131,6 @@ const whTH: Warehouse = { code: "BS-TH", name: "BigSeller TH 新仓", kind: "ove
 const th = (o: Partial<Slot>) => slot({ shop_id: "TH1", region: "TH", tts_warehouse_id: "W", ...o });
 const run = (slots: Slot[], st: Record<string, number>) =>
   planOverseas({ warehouses: [whTH], slots, stock: stock("BS-TH", st), overrides: new Map(), params: P });
-
-Deno.test("组合款与单品共用库存：按日销×用量占比分，单品消耗合计不超过可分配", () => {
-  // AR108 可分配 100、B4 可分配 50；单品 AR108 日销 2、组合 AR108+B4 日销 2
-  const r = run([
-    th({ sku_id: "S", seller_sku: "AR108", qty: 5, sold: 20 }),
-    th({ sku_id: "C", seller_sku: "AR108+B4", qty: 10, sold: 20 }),
-  ], { AR108: 105, B4: 55 });
-  // 组合：AR108 份额 100×2/4=50、B4 份额 50 → 50；单品拿 AR108 剩余 50
-  eq(r.items.map((i) => [i.sku_id, i.proposed_qty]).sort(), [["C", 50], ["S", 50]]);
-  eq(r.groups[0].note.includes("临时组合"), true);
-});
-
-Deno.test("同单品两件的组合：AR372-2+AR372-2 每套用 2 件", () => {
-  const r = run([
-    th({ sku_id: "S", seller_sku: "AR372-2", qty: 1, sold: 10 }),
-    th({ sku_id: "C", seller_sku: "AR372-2+ AR372-2", qty: 1, sold: 10 }),
-  ], { "AR372-2": 145 });
-  // 可分配 140；分母 1×1+1×2=3；组合份额 140×2/3=93.3 → 46 套（92 件）；单品拿 48
-  eq(r.items.map((i) => [i.sku_id, i.proposed_qty]).sort(), [["C", 46], ["S", 48]]);
-});
 
 Deno.test("包装 B4 被多个组合共用：B4 按组合销量分，没有单品 listing 的剩余补给天数最短的组合", () => {
   const r = run([
@@ -209,39 +156,6 @@ Deno.test("预组装到货后：仓库有同名实物 SKU 时按实物分配，�
   eq(r.items.map((i) => [i.sku_id, i.proposed_qty, i.reason?.includes("组合") ?? false]), [["C", 20, false]]);
 });
 
-Deno.test("预组装实物：有可分配只按实物（不叠加单品）；没货（≤ 预留）→ 直接用单品组套；单品凑不齐才按实物", () => {
-  // 实物 10、单品可组 20 套：只按实物，可上 10 − 5 = 5
-  const a = run([th({ sku_id: "C", seller_sku: "AR108+B4", qty: 0, sold: 10 })], { "AR108+B4": 10, AR108: 25, B4: 25 });
-  eq(a.items.map((i) => [i.proposed_qty, i.reason?.includes("单品组套") ?? false]), [[5, false]]);
-  // 实物只剩 3（预留不自动突破）→ 单品组套：min(100, 40) = 40
-  const b = run([th({ sku_id: "C", seller_sku: "AR108+B4", qty: 2, sold: 10 })], { "AR108+B4": 3, AR108: 105, B4: 45 });
-  eq(b.items.map((i) => [i.proposed_qty, i.reason?.includes("单品组套") ?? false]), [[40, true]]);
-  // 单品凑不齐：只按实物（压到 0）
-  const d = run([th({ sku_id: "C", seller_sku: "AR108+B4", qty: 2, sold: 10 })], { "AR108+B4": 3, AR108: 105 });
-  eq(d.items.map((i) => i.proposed_qty), [0]);
-});
-
-Deno.test("跨店铺多个 listing 共用单品：合计不超卖", () => {
-  const two: Warehouse = { ...whTH, links: [{ shop_id: "TH1", tts_warehouse_id: "W" }, { shop_id: "TH2", tts_warehouse_id: "W2" }] };
-  const r = planOverseas({
-    warehouses: [two],
-    slots: [
-      th({ sku_id: "A", seller_sku: "AR141", qty: 900, sold: 50 }),
-      th({ shop_id: "TH2", tts_warehouse_id: "W2", sku_id: "B", seller_sku: "AR141+AR371", qty: 900, sold: 50 }),
-      th({ shop_id: "TH2", tts_warehouse_id: "W2", sku_id: "C", seller_sku: "AR141+AR223-2", qty: 900, sold: 50 }),
-    ],
-    stock: stock("BS-TH", { AR141: 1005, AR371: 205, "AR223-2": 105 }), overrides: new Map(), params: P,
-  });
-  const q = Object.fromEntries(r.items.map((i) => [i.sku_id, i.proposed_qty]));
-  // AR141 消耗 = A + B + C ≤ 1000；AR371 ≤ 200；AR223-2 ≤ 100
-  eq(q.A + q.B + q.C <= 1000 && q.B <= 200 && q.C <= 100, true);
-  eq([q.B, q.C], [200, 100]);
-  eq(q.A, 700);
-});
-
-// ── 每日销量滚动 ──
-import { addDays, dayStartSec, localDay, salesPullStart, windowSold } from "./sea-inventory.ts";
-
 Deno.test("本地日期：PH UTC+8 / TH UTC+7 跨日边界", () => {
   const t = Date.parse("2026-11-17T16:30:00Z") / 1000; // PH 11-18 00:30，TH 11-17 23:30
   eq([localDay(t, 8), localDay(t, 7)], ["2026-11-18", "2026-11-17"]);
@@ -265,4 +179,114 @@ Deno.test("窗口销量只取昨天往前 N 个完整日，不含今天", () => 
     { sku_id: "A", warehouse_id: "", day: "2026-11-10", units: 1 },
   ];
   eq([...windowSold(rows, "2026-11-18", 14).entries()].sort(), [["A|", 1], ["A|W", 8]]);
+});
+
+// ── 最少改动分配（负责人 2026-11-18：全部 ≥ 预警天数不动；要动也尽量少动，先用仓库未分配，再从可售最多的挪） ──
+// P：window_days=10、预警 min_days=10、目标 target_days=30、预留 5、min_qty 5、zero_sale_qty 5
+
+Deno.test("全部 listing ≥ 预警天数：即使分布不均也一条都不改", () => {
+  const slots = [slot({ sku_id: "A", qty: 12, sold: 10 }), slot({ shop_id: "PH2", tts_warehouse_id: "W_PH2", sku_id: "B", qty: 500, sold: 10 })]; // 12 天 / 500 天
+  const { items, groups } = planOverseas({ warehouses: [whPH], slots, stock: stock("QY-PH", { "AR140-B2": 600 }), overrides: new Map(), params: P });
+  eq(items.length, 0);
+  eq(groups[0].triggered, false);
+});
+
+Deno.test("低于预警：先用仓库未分配补到目标天数，不动其他 listing", () => {
+  const slots = [slot({ sku_id: "A", qty: 5, sold: 20 }), slot({ shop_id: "PH2", tts_warehouse_id: "W_PH2", sku_id: "B", qty: 40, sold: 20 })];
+  // 可分配 195，已占 45，未分配 150 → A 补到 30 天 × 2 = 60
+  const { items } = planOverseas({ warehouses: [whPH], slots, stock: stock("QY-PH", { "AR140-B2": 200 }), overrides: new Map(), params: P });
+  eq(items.map((i) => [i.sku_id, i.current_qty, i.proposed_qty]), [["A", 5, 60]]);
+  eq(items[0].reason?.includes("仓库未分配 55 件"), true);
+});
+
+Deno.test("未分配不够：从可售天数最多的 listing 调，且只动它一条（不动中间的）", () => {
+  const slots = [
+    slot({ sku_id: "A", qty: 2, sold: 10 }),                                            // 1/天，2 天 → 低
+    slot({ shop_id: "PH2", tts_warehouse_id: "W_PH2", sku_id: "B", qty: 100, sold: 10 }), // 100 天
+    slot({ shop_id: "PH2", tts_warehouse_id: "W_PH2", sku_id: "C", qty: 40, sold: 10 }),  // 40 天
+  ];
+  // 可分配 142 = 已占满 → A 补到 30：全部从 B 调 28 件，C 不动
+  const { items } = planOverseas({ warehouses: [whPH], slots, stock: stock("QY-PH", { "AR140-B2": 147 }), overrides: new Map(), params: P });
+  eq(items.map((i) => [i.sku_id, i.proposed_qty]).sort(), [["A", 30], ["B", 72]]);
+  eq(items.find((i) => i.sku_id === "B")!.reason?.includes("调出 28 件"), true);
+});
+
+Deno.test("库存紧张：从高于预警的部分调，双方天数拉平，不把对方压到比自己低", () => {
+  const slots = [slot({ sku_id: "A", qty: 5, sold: 20 }), slot({ shop_id: "PH2", tts_warehouse_id: "W_PH2", sku_id: "B", qty: 80, sold: 20 })];
+  // 可分配 100：未分配 15；B 目标线 60 → 先调 20；再从预警以上部分调到两边接近（A 49 = 24.5 天、B 51 = 25.5 天）
+  const { items } = planOverseas({ warehouses: [whPH], slots, stock: stock("QY-PH", { "AR140-B2": 105 }), overrides: new Map(), params: P });
+  eq(items.map((i) => [i.sku_id, i.current_qty, i.proposed_qty]), [["A", 5, 49], ["B", 80, 51]]);
+});
+
+Deno.test("无销量且 < 5 件：补到 zero_sale_qty，其他不动", () => {
+  const slots = [slot({ sku_id: "A", qty: 2, sold: 0 }), slot({ sku_id: "B", qty: 30, sold: 10 })];
+  const { items } = planOverseas({ warehouses: [whPH], slots, stock: stock("QY-PH", { "AR140-B2": 45 }), overrides: new Map(), params: P });
+  eq(items.map((i) => [i.sku_id, i.proposed_qty]), [["A", 5]]);
+});
+
+Deno.test("仓库可用 ≤ 预留：压到 0，并提示目标 0 与需补货", () => {
+  const { items } = planOverseas({ warehouses: [whPH], slots: [slot({ sku_id: "A", qty: 3, sold: 10 })], stock: stock("QY-PH", { "AR140-B2": 4 }), overrides: new Map(), params: P });
+  eq(items[0].proposed_qty, 0);
+  eq(items[0].warnings.length, 2);
+});
+
+Deno.test("新仓 onboarding：listing 未挂新仓 → 首次设置到目标天数（listing 合计销量）", () => {
+  const th1: Warehouse = { code: "DM-TH1", name: "顶妙 TH1", kind: "overseas", status: "phasing_out", region: "TH", links: [{ shop_id: "TH1", tts_warehouse_id: "W_OLD" }] };
+  const th2: Warehouse = { code: "TH2", name: "泰国新仓", kind: "overseas", status: "onboarding", region: "TH", links: [{ shop_id: "TH1", tts_warehouse_id: "W_NEW" }] };
+  const slots = [slot({ shop_id: "TH1", region: "TH", sku_id: "A", tts_warehouse_id: "W_OLD", qty: 30, sold: 10 })];
+  const st = new Map([["DM-TH1", new Map([["AR140-B2", 40]])], ["TH2", new Map([["AR140-B2", 105]])]]);
+  const { items } = planOverseas({ warehouses: [th1, th2], slots, stock: st, overrides: new Map(), params: P });
+  eq(items.map((i) => [i.warehouse_code, i.new_link, i.current_qty, i.proposed_qty, i.tts_warehouse_id]), [["TH2", true, 0, 30, "W_NEW"]]);
+});
+
+Deno.test("组合款与单品共用库存：两者都低时按天数拉平，单品合计不超可分配", () => {
+  const r = run([
+    th({ sku_id: "S", seller_sku: "AR108", qty: 5, sold: 20 }),
+    th({ sku_id: "C", seller_sku: "AR108+B4", qty: 10, sold: 20 }),
+  ], { AR108: 105, B4: 55 });
+  const q = Object.fromEntries(r.items.map((i) => [i.sku_id, i.proposed_qty]));
+  eq(q.S + q.C, 100);
+  eq(Math.abs(q.S - q.C) <= 1, true);
+  eq(r.groups[0].note.includes("单品组套"), true);
+});
+
+Deno.test("同单品两件的组合：每套占 2 件，库存够时两者都补到目标", () => {
+  const r = run([
+    th({ sku_id: "S", seller_sku: "AR372-2", qty: 1, sold: 10 }),
+    th({ sku_id: "C", seller_sku: "AR372-2+ AR372-2", qty: 1, sold: 10 }),
+  ], { "AR372-2": 145 });
+  eq(r.items.map((i) => [i.sku_id, i.proposed_qty]).sort(), [["C", 30], ["S", 30]]); // 30 + 30×2 = 90 ≤ 140
+});
+
+Deno.test("组合款调货：某单品凑不齐时不白调别人（回滚）", () => {
+  // C=AR1+B4 低；AR1 只能从 S 调，B4 没有任何来源 → C 加不上，S 也不应被改
+  const r = run([
+    th({ sku_id: "S", seller_sku: "AR1", qty: 200, sold: 10 }),
+    th({ sku_id: "C", seller_sku: "AR1+B4", qty: 0, sold: 10 }),
+  ], { AR1: 205, B4: 5 });
+  eq(r.items.map((i) => i.sku_id), []);
+});
+
+Deno.test("预组装实物：有可分配只按实物（不叠加单品）；没货 → 单品组套；单品凑不齐 → 只按实物", () => {
+  const a = run([th({ sku_id: "C", seller_sku: "AR108+B4", qty: 0, sold: 10 })], { "AR108+B4": 10, AR108: 25, B4: 25 });
+  eq(a.items.map((i) => [i.proposed_qty, i.warnings.some((w) => w.includes("单品组套"))]), [[5, false]]);
+  const b = run([th({ sku_id: "C", seller_sku: "AR108+B4", qty: 2, sold: 10 })], { "AR108+B4": 3, AR108: 105, B4: 45 });
+  eq(b.items.map((i) => [i.proposed_qty, i.warnings.some((w) => w.includes("单品组套"))]), [[30, true]]);
+  const d = run([th({ sku_id: "C", seller_sku: "AR108+B4", qty: 2, sold: 10 })], { "AR108+B4": 3, AR108: 105 });
+  eq(d.items.map((i) => i.proposed_qty), [0]);
+});
+
+Deno.test("跨店铺多个 listing 共用单品：超卖时从天数最多的减，结果不超卖", () => {
+  const two: Warehouse = { ...whTH, links: [{ shop_id: "TH1", tts_warehouse_id: "W" }, { shop_id: "TH2", tts_warehouse_id: "W2" }] };
+  const r = planOverseas({
+    warehouses: [two],
+    slots: [
+      th({ sku_id: "A", seller_sku: "AR141", qty: 900, sold: 50 }),
+      th({ shop_id: "TH2", tts_warehouse_id: "W2", sku_id: "B", seller_sku: "AR141+AR371", qty: 900, sold: 50 }),
+      th({ shop_id: "TH2", tts_warehouse_id: "W2", sku_id: "C", seller_sku: "AR141+AR223-2", qty: 900, sold: 50 }),
+    ],
+    stock: stock("BS-TH", { AR141: 1005, AR371: 205, "AR223-2": 105 }), overrides: new Map(), params: P,
+  });
+  const q = Object.fromEntries(r.items.map((i) => [i.sku_id, i.proposed_qty]));
+  eq([q.A + q.B + q.C <= 1000, q.B <= 200, q.C <= 100], [true, true, true]);
 });

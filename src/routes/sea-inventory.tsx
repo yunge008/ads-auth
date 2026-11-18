@@ -455,7 +455,11 @@ function WarehouseCard({ w, shops, reload }: { w: SeaWarehouse; shops: SeaShop[]
   const loadTts = async (sid: string) => {
     setShopId(sid); setTtsWhs([]); setTtsWh("");
     if (!sid) return;
-    try { setTtsWhs((await seaApi.shopWarehouses(sid)).warehouses); } catch (e) { toast.error((e as Error).message); }
+    try {
+      const r = await seaApi.shopWarehouses(sid);
+      setTtsWhs(r.warehouses);
+      if (r.fallback) toast.warning(r.error ?? "读不到仓库名称，已改为从在售商品汇总仓库 ID", { duration: 10000 });
+    } catch (e) { toast.error((e as Error).message); }
   };
   const doImport = async () => {
     if (!parsed?.rows.length) return;
@@ -510,7 +514,7 @@ function WarehouseCard({ w, shops, reload }: { w: SeaWarehouse; shops: SeaShop[]
             </select>
             <select className="h-8 rounded-md border px-2" value={ttsWh} onChange={(e) => setTtsWh(e.target.value)} disabled={!ttsWhs.length}>
               <option value="">选择 TikTok 仓库…</option>
-              {ttsWhs.map((x) => <option key={x.id} value={x.id}>{x.name ?? x.id}（{x.type ?? ""}）</option>)}
+              {ttsWhs.map((x) => <option key={x.id} value={x.id}>{x.name ?? x.id}{x.type ? `（${x.type}）` : ""}</option>)}
             </select>
             <Button size="sm" variant="outline" disabled={busy || !shopId || !ttsWh}
               onClick={() => save({ links: [...w.links.filter((l) => l.shop_id !== shopId || l.tts_warehouse_id !== ttsWh), { shop_id: shopId, tts_warehouse_id: ttsWh }] })}>添加绑定</Button>
@@ -689,10 +693,11 @@ function MapPanel({ ov }: { ov: Overview }) {
 // ═══ 参数 ═══════════════════════════════════════════════════════════════════
 const FIELDS: Array<[keyof Overview["settings"], string, string]> = [
   ["window_days", "销量统计窗口（天）", "近 N 天订单算日均销量（待确认：默认 14）"],
-  ["min_days", "海外仓触发：可售天数 <", "负责人口径 10"],
-  ["min_qty", "海外仓触发：listing 数量 <", "负责人口径 5"],
+  ["min_days", "预警天数（海外仓）", "listing 可售天数全部 ≥ 此值就不调整；低于才调"],
+  ["target_days", "补到目标天数（海外仓）", "低于预警的补到这么多天销量；先用仓库未分配，再从可售最多的调（待确认：默认 30）"],
+  ["min_qty", "listing 数量低于（件）", "少于此件数也算预警（含无销量的），负责人口径 5"],
   ["reserve_per_sku", "每 SKU 海外仓预留", "负责人口径 5，不分配给 listing"],
-  ["zero_sale_qty", "无销量 listing 保底数量", "待确认：默认 5，合计不超过可分配量 20%"],
+  ["zero_sale_qty", "无销量 listing 补到（件）", "近 N 天没卖出的 listing，少于 5 件时补到这个数（待确认：默认 5）"],
   ["cn_min_days", "国内仓触发：可售天数 <", "负责人口径 10"],
   ["cn_target_days", "国内仓补到（天销量）", "待确认：默认 20"],
   ["stock_max_age_hours", "海外仓库存最长有效（小时）", "超过则该仓本次不调整"],

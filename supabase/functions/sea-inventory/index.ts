@@ -84,7 +84,7 @@ async function loadParams(): Promise<Params & { stock_max_age_hours: number }> {
   const n = (k: keyof Params) => (d[k] === undefined || d[k] === null ? DEFAULT_PARAMS[k] : Number(d[k]));
   return {
     window_days: n("window_days"), min_days: n("min_days"), min_qty: n("min_qty"), reserve_per_sku: n("reserve_per_sku"),
-    zero_sale_qty: n("zero_sale_qty"), cn_min_days: n("cn_min_days"), cn_target_days: n("cn_target_days"),
+    zero_sale_qty: n("zero_sale_qty"), cn_min_days: n("cn_min_days"), cn_target_days: n("cn_target_days"), target_days: n("target_days"),
     stock_max_age_hours: Number(d.stock_max_age_hours ?? 26),
   };
 }
@@ -732,7 +732,7 @@ Deno.serve(async (req) => {
     switch (action) {
       case "overview": return json(await overview());
       case "save_settings": {
-        const keys = ["window_days", "min_days", "min_qty", "reserve_per_sku", "zero_sale_qty", "cn_min_days", "cn_target_days", "stock_max_age_hours"];
+        const keys = ["window_days", "min_days", "target_days", "min_qty", "reserve_per_sku", "zero_sale_qty", "cn_min_days", "cn_target_days", "stock_max_age_hours"];
         const patch: Record<string, unknown> = { updated_at: nowIso() };
         for (const k of keys) if (b[k] !== undefined && b[k] !== "") {
           const v = Number(b[k]);
@@ -765,8 +765,29 @@ Deno.serve(async (req) => {
       case "shop_warehouses": {
         const shop = await loadShop(String(b.shop_id ?? ""));
         const r = await ttsCall<{ warehouses?: unknown[] }>({ method: "GET", path: "/logistics/202309/warehouses", accessToken: shop.access_token, shopCipher: shop.shop_cipher });
-        if (r.code !== 0) bad(apiErr("warehouses", r));
-        return json({ warehouses: r.data?.warehouses ?? [] });
+        if (r.code === 0) return json({ warehouses: r.data?.warehouses ?? [] });
+        // 读仓库列表需要 Logistics Basic 权限（105005 = token 缺该 scope）。兜底：从在售商品里汇总出现过的 warehouse_id
+        //（Search Products 只要 Product Basic），附 SKU 数、库存合计、示例 SKU，供人工辨认是哪个仓。
+        const agg = new Map<string, { skus: number; qty: number; samples: string[] }>();
+        let tok: string | undefined;
+        for (let page = 0; page < 10; page++) {
+          const pr = await ttsCall<SearchProducts>({ method: "POST", path: "/product/202502/products/search", accessToken: shop.access_token, shopCipher: shop.shop_cipher, query: { page_size: 100, page_token: tok }, body: { status: "ACTIVATE" } });
+          if (pr.code !== 0) bad(`${apiErr("warehouses", r)}；兜底读商品也失败：${apiErr("products/search", pr)}`);
+          for (const p of pr.data?.products ?? []) for (const sk of p.skus ?? []) for (const inv of sk.inventory ?? []) {
+            if (!inv.warehouse_id) continue;
+            const a = agg.get(inv.warehouse_id) ?? { skus: 0, qty: 0, samples: [] };
+            a.skus++; a.qty += Number(inv.quantity ?? 0);
+            if (a.samples.length < 3 && sk.seller_sku) a.samples.push(String(sk.seller_sku));
+            agg.set(inv.warehouse_id, a);
+          }
+          tok = pr.data?.next_page_token || undefined;
+          if (!tok) break;
+        }
+        return json({
+          fallback: true,
+          error: `${r.code === 105005 ? "店铺授权缺 Logistics Basic 权限，读不到仓库名称" : apiErr("warehouses", r)}；已改为从在售商品里汇总仓库 ID（前 1000 个商品）`,
+          warehouses: [...agg].sort((a, b) => b[1].skus - a[1].skus).map(([id, a]) => ({ id, name: `仓库 …${id.slice(-6)}：${a.skus} 个 SKU、库存合计 ${a.qty}，如 ${a.samples.join("、")}` })),
+        });
       }
       case "import_stock": {
         // 页面上传：as_of = 文件导出时间（BigSeller 文件名带时间戳），只接受 7 天内且不晚于现在，否则按当前时间

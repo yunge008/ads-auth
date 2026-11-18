@@ -19,7 +19,7 @@ export type DrivePreview = {
 };
 export type SeaSettings = {
   window_days: number; min_days: number; min_qty: number; reserve_per_sku: number; zero_sale_qty: number;
-  cn_min_days: number; cn_target_days: number; stock_max_age_hours: number; last_run_at: string | null; map_refreshed_at: string | null;
+  cn_min_days: number; cn_target_days: number; stock_max_age_hours: number; target_days: number; last_run_at: string | null; map_refreshed_at: string | null;
 };
 export type SeaShop = { shop_id: string; shop_name: string | null; region: string | null; seller_type: string | null; access_expires_at: string | null };
 export type ShopSync = { shop_id: string; listings_at: string | null; orders_at: string | null; orders_count: number | null; slots_count: number | null; error: string | null; sales_synced_day: string | null };
@@ -54,7 +54,7 @@ export const seaApi = {
   saveSettings: (s: Partial<SeaSettings>) => fn<{ ok: true }>("save_settings", s),
   drivePreview: (code: string, cfg: { drive_folder?: string; drive_name_pattern?: string; file_config?: FileConfig }) => fn<DrivePreview>("drive_preview", { code, ...cfg }),
   saveWarehouse: (w: Partial<SeaWarehouse> & { code: string }) => fn<{ ok: true }>("save_warehouse", w),
-  shopWarehouses: (shop_id: string) => fn<{ warehouses: Array<{ id: string; name?: string; type?: string; sub_type?: string; is_default?: boolean; effect_status?: string; address?: { region_code?: string } }> }>("shop_warehouses", { shop_id }),
+  shopWarehouses: (shop_id: string) => fn<{ fallback?: boolean; error?: string; warehouses: Array<{ id: string; name?: string; type?: string; sub_type?: string; is_default?: boolean; effect_status?: string; address?: { region_code?: string } }> }>("shop_warehouses", { shop_id }),
   importStock: (warehouse_code: string, rows: Array<{ wh_sku: string; available: number; on_hand?: number | null; product_name?: string | null }>, opts: { as_of?: string | null; file_name?: string } = {}) =>
     fn<{ ok: true; rows: number; total_available: number; errors: string[] }>("import_stock", { warehouse_code, rows, ...opts }),
   syncWarehouse: (code: string, force = false) => fn<{ ok: boolean; error?: string; message?: string; rows?: number; total_available?: number; notes?: string[]; errors?: string[]; file?: string; unchanged?: boolean }>("sync_warehouse", { code, force }),
