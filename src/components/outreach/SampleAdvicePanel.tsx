@@ -39,6 +39,7 @@ export function SampleAdvicePanel({ shops }: { shops: TtsShop[] }) {
   const [shopId, setShopId] = React.useState("");
   const [raws, setRaws] = React.useState<SampleRaw[]>([]);
   const [errors, setErrors] = React.useState<string[]>([]);
+  const [diag, setDiag] = React.useState<{ stale: boolean; missing: string[] }>({ stale: false, missing: [] });
   const [loading, setLoading] = React.useState(false);
   const [prog, setProg] = React.useState<{ done: number; total: number | null }>({ done: 0, total: null });
   const [fetchedAt, setFetchedAt] = React.useState<number | null>(null);
@@ -55,6 +56,7 @@ export function SampleAdvicePanel({ shops }: { shops: TtsShop[] }) {
   const showCache = (id: string) => {
     const c = cached(id);
     setRaws(c?.raws ?? []); setErrors(c?.errors ?? []); setFetchedAt(c?.complete ? c.fetchedAt : null);
+    setDiag({ stale: !!c?.staleBackend, missing: c?.missingCurrencies ?? [] });
     setProg(c ? { done: c.raws.length, total: c.raws.length } : { done: 0, total: null });
   };
   const load = async (id: string, force: boolean) => {
@@ -62,7 +64,11 @@ export function SampleAdvicePanel({ shops }: { shops: TtsShop[] }) {
     if (!force && isFresh(cached(id))) { showCache(id); return; }
     setLoading(true); setRaws([]); setErrors([]); setProg({ done: 0, total: null }); setFetchedAt(null);
     try {
-      const e = await fetchSamples(id, (all, p, errs) => { setRaws([...all]); setErrors([...errs]); setProg(p); });
+      const e = await fetchSamples(id, (all, p, errs) => {
+        setRaws([...all]); setErrors([...errs]); setProg(p);
+        const c = cached(id);
+        setDiag({ stale: !!c?.staleBackend, missing: [...(c?.missingCurrencies ?? [])] });
+      });
       setFetchedAt(e.fetchedAt);
       setProg({ done: e.raws.length, total: e.raws.length });
     } catch (e) {
@@ -149,6 +155,8 @@ export function SampleAdvicePanel({ shops }: { shops: TtsShop[] }) {
           </div>
         </div>
 
+        {diag.stale && <p className="text-xs text-red-600">后台函数 tts-export 还是旧版本（没有 GMV 美元、建联表、商家 SKU 等新列），请让 Lovable 重新部署 tts-export 后再「重新读取」。</p>}
+        {diag.missing.length > 0 && <p className="text-xs text-red-600">「设置 → 汇率设置」缺少或未启用这些币种的汇率：{diag.missing.join("、")}，对应达人的 GMV 无法折美元（表里显示本币，标黄）。</p>}
         {errors.length > 0 && <p className="text-xs text-red-600">有 {errors.length} 处读取失败，首条：{errors[0]}</p>}
 
         <div className="overflow-auto rounded-md border max-h-[70vh]">
@@ -170,7 +178,9 @@ export function SampleAdvicePanel({ shops }: { shops: TtsShop[] }) {
                     </div>
                   </td>
                   <td className={`px-2 py-1.5 whitespace-nowrap ${MARK_STYLE[r.marks.followers]}`}>{fmt(r.followers)}</td>
-                  <td className={`px-2 py-1.5 whitespace-nowrap ${MARK_STYLE[r.marks.gmv]}`} title={r.gmvLocal !== null ? `${fmt(r.gmvLocal, 2)} ${r.currency}` : ""}>{r.gmvUsd === null ? "—" : `$${fmt(r.gmvUsd)}`}</td>
+                  <td className={`px-2 py-1.5 whitespace-nowrap ${MARK_STYLE[r.marks.gmv]}`} title={r.gmvLocal !== null ? `${fmt(r.gmvLocal, 2)} ${r.currency}` : "接口未返回 GMV"}>
+                    {r.gmvUsd !== null ? `$${fmt(r.gmvUsd)}` : r.gmvLocal !== null ? <span className="rounded bg-amber-100 px-1 text-amber-800">{fmt(r.gmvLocal)} {r.currency || "本币"}</span> : "—"}
+                  </td>
                   <td className={`px-2 py-1.5 ${MARK_STYLE[r.marks.units]}`}>{fmt(r.units)}</td>
                   <td className={`px-2 py-1.5 ${MARK_STYLE[r.marks.fulfill]}`}>{r.fulfill === null ? "无" : `${r.fulfill}%`}</td>
                   <td className={`px-2 py-1.5 whitespace-nowrap ${MARK_STYLE[r.marks.unfulfilled]}`} title={r.regStaff ? `建联同事：${r.regStaff}；最近发样 ${r.regLast}` : "建联表无记录"}>

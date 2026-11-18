@@ -46,7 +46,10 @@ export type Classified = SampleRaw & { advice: string; reasons: string; marks: M
 export type SampleCreatorRow = Classified & { skus: string[]; appIds: string[]; apps: Classified[] };
 
 type Cell = string | number | null;
-type Chunk = { columns: string[]; rows: Cell[][]; next_cursor: Record<string, unknown> | null; progress: { done: number; total: number | null }; errors: string[] };
+type Chunk = {
+  columns: string[]; rows: Cell[][]; next_cursor: Record<string, unknown> | null; progress: { done: number; total: number | null }; errors: string[];
+  meta?: { missing_currencies?: string[] };
+};
 
 const n = (v: Cell) => (v === null || v === "" || v === undefined ? null : Number(v));
 function parse(columns: string[], rows: Cell[][]): SampleRaw[] {
@@ -56,7 +59,7 @@ function parse(columns: string[], rows: Cell[][]): SampleRaw[] {
     const s = (c: string) => String(g(c) ?? "");
     return {
       appId: s("申样单 ID"), status: s("申请状态"), username: s("达人用户名"), nickname: s("达人昵称"), ttUid: s("TikTok用户ID"),
-      openId: s("creator_open_id"), avatar: s("头像"), followers: n(g("粉丝数")), gmvLocal: n(g("达人GMV(本币)")), currency: s("GMV币种"),
+      openId: s("creator_open_id"), avatar: s("头像"), followers: n(g("粉丝数")), gmvLocal: n(g("达人GMV(本币)") ?? g("达人GMV")), currency: s("GMV币种"),
       gmvUsd: n(g("达人GMV(USD)")), units: n(g("达人销量(件)")), contentCount: n(g("带货内容数")), fulfill: n(g("平台履约率(%)")),
       postRate: n(g("带货率(post_rate)")), plays: n(g("电商视频平均播放")), videos30: n(g("近30天发视频数(中位)")),
       regSamples: Number(g("建联表发样次数") ?? 0), regVid: Number(g("建联表有VID次数") ?? 0), regOpen: Number(g("建联表未出素材次数") ?? 0),
@@ -121,20 +124,26 @@ export function groupByCreator(raws: SampleRaw[], k: SampleRules): SampleCreator
 }
 
 // 同一店铺的原始数据缓存（页面内切换 TAB 不丢）
-type CacheEntry = { raws: SampleRaw[]; errors: string[]; fetchedAt: number; complete: boolean };
+type CacheEntry = {
+  raws: SampleRaw[]; errors: string[]; fetchedAt: number; complete: boolean;
+  /** 诊断：后台未部署新版（没有 USD 列）/ 汇率设置缺少的币种 */
+  staleBackend: boolean; missingCurrencies: string[];
+};
 const cache = new Map<string, CacheEntry>();
 export function cached(shopId: string): CacheEntry | undefined { return cache.get(shopId); }
 export function isFresh(e?: CacheEntry): boolean { return !!e && e.complete && Date.now() - e.fetchedAt < CACHE_MINUTES * 60_000; }
 
 /** 分片读取，每片读完回调一次（边读边显示） */
 export async function fetchSamples(shopId: string, onChunk: (all: SampleRaw[], p: { done: number; total: number | null }, errors: string[]) => void): Promise<CacheEntry> {
-  const entry: CacheEntry = { raws: [], errors: [], fetchedAt: Date.now(), complete: false };
+  const entry: CacheEntry = { raws: [], errors: [], fetchedAt: Date.now(), complete: false, staleBackend: false, missingCurrencies: [] };
   cache.set(shopId, entry);
   let cursor: Record<string, unknown> | null = null;
   let lastKey = "";
   do {
     const c: Chunk = await invokeFn<Chunk>("tts-export", { kind: "samples", shop_id: shopId, cursor }, { timeout: 150000 });
     entry.raws.push(...parse(c.columns, c.rows));
+    if (!c.columns.includes("达人GMV(USD)")) entry.staleBackend = true;
+    for (const m of c.meta?.missing_currencies ?? []) if (!entry.missingCurrencies.includes(m)) entry.missingCurrencies.push(m);
     entry.errors.push(...c.errors);
     onChunk(entry.raws, c.progress, entry.errors);
     cursor = c.next_cursor;

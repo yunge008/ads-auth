@@ -694,6 +694,7 @@ async function exportSamples(shop: Shop, b: Record<string, unknown>, started: nu
   const region = (shop.region ?? "").toUpperCase();
   const pool = region.startsWith("PH") ? ["PH", "PH2", "PHL"] : [region];
   const rates = await usdRates();
+  const missingCur = new Set<string>(); // GMV 有值但「汇率设置」里没有该币种（或未启用）
   const cutoff = new Date(Date.now() - UNFULFILLED_AFTER_DAYS * 86400_000).toISOString().slice(0, 10);
   do {
     const r = await ttsCall<{ sample_applications?: SampleApp[]; next_page_token?: string; total_count?: number }>({
@@ -747,6 +748,7 @@ async function exportSamples(shop: Shop, b: Record<string, unknown>, started: nu
       const gmv = c.gmv?.amount === undefined || c.gmv?.amount === "" ? null : Number(c.gmv.amount);
       const cur = (c.gmv?.currency || REGION_CURRENCY[region] || "").toUpperCase();
       const rate = cur === "USD" ? 1 : rates.get(cur);
+      if (gmv !== null && !rate && cur) missingCur.add(cur);
       const ttUid = (pf?.profile_tt_uri ?? "").match(/profile\/(\d+)/)?.[1] ?? "";
       rows.push([
         a.id ?? "", a.status ?? "", c.username ?? "", c.nickname ?? "", ttUid, c.creator_open_id ?? "", c.avatar_url ?? "",
@@ -766,7 +768,7 @@ async function exportSamples(shop: Shop, b: Record<string, unknown>, started: nu
     kind: "samples", columns: SAMPLE_COLUMNS, rows,
     next_cursor: pageToken && !errors.some((e) => e.startsWith("sample_applications")) ? { page_token: pageToken, done } : null,
     progress: { done, total, unit: "条申样" },
-    meta: { status, unfulfilled_after_days: UNFULFILLED_AFTER_DAYS, missing_rate: rates.size ? null : "汇率表为空" }, errors,
+    meta: { status, unfulfilled_after_days: UNFULFILLED_AFTER_DAYS, missing_currencies: [...missingCur], rate_currencies: [...rates.keys()] }, errors,
   };
 }
 const normHandle = (h: string) => String(h ?? "").trim().replace(/^@+/, "").replace(/\s+/g, "").toLowerCase();
