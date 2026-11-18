@@ -35,10 +35,12 @@ export type SampleRaw = {
   appId: string; status: string; username: string; nickname: string; ttUid: string; openId: string; avatar: string;
   followers: number | null; gmvLocal: number | null; currency: string; gmvUsd: number | null; units: number | null;
   contentCount: number | null; fulfill: number | null; postRate: number | null; plays: number | null; videos30: number | null;
-  regSamples: number; regVid: number; regOpen: number; regLast: string; regStaff: string;
+  regSamples: number; regVid: number; regOpen: number; regLast: string; regStaff: string; regItems: RegItem[];
   productId: string; product: string; skuId: string; sku: string; merchantSku: string; commission: string;
   approvable: boolean | null; disReasons: string; partner: string; deadline: string;
 };
+/** 飞书建联表的一条发样记录（悬停展示） */
+export type RegItem = { d: string; sku: string; staff: string; vid: string; post: string; st: string };
 /** 每个指标对当前条件的判定：pass 满足（绿）/ fail 不满足或命中不批准（红）/ none 未勾选相关条件 */
 export type Mark = "pass" | "fail" | "none";
 export type Marks = { approvable: Mark; fulfill: Mark; unfulfilled: Mark; gmv: Mark; followers: Mark; units: Mark };
@@ -51,6 +53,9 @@ type Chunk = {
   meta?: { missing_currencies?: string[] };
 };
 
+function parseItems(raw: string): RegItem[] {
+  try { const v = JSON.parse(raw || "[]"); return Array.isArray(v) ? v : []; } catch { return []; }
+}
 const n = (v: Cell) => (v === null || v === "" || v === undefined ? null : Number(v));
 function parse(columns: string[], rows: Cell[][]): SampleRaw[] {
   const ix = new Map(columns.map((c, i) => [c, i]));
@@ -63,7 +68,7 @@ function parse(columns: string[], rows: Cell[][]): SampleRaw[] {
       gmvUsd: n(g("达人GMV(USD)")), units: n(g("达人销量(件)")), contentCount: n(g("带货内容数")), fulfill: n(g("平台履约率(%)")),
       postRate: n(g("带货率(post_rate)")), plays: n(g("电商视频平均播放")), videos30: n(g("近30天发视频数(中位)")),
       regSamples: Number(g("建联表发样次数") ?? 0), regVid: Number(g("建联表有VID次数") ?? 0), regOpen: Number(g("建联表未出素材次数") ?? 0),
-      regLast: s("最近发样日"), regStaff: s("建联同事"), productId: s("商品 ID"), product: s("商品名称"), skuId: s("SKU ID"),
+      regLast: s("最近发样日"), regStaff: s("建联同事"), regItems: parseItems(s("建联表明细")), productId: s("商品 ID"), product: s("商品名称"), skuId: s("SKU ID"),
       sku: s("SKU 名称"), merchantSku: s("商家SKU"), commission: s("申请佣金率"),
       approvable: g("平台可审批") === "是" ? true : g("平台可审批") === "否" ? false : null,
       disReasons: s("不可审批原因"), partner: s("服务商"), deadline: s("审核截止时间"),

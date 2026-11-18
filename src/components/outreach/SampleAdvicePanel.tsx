@@ -5,12 +5,13 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import type { TtsShop } from "@/lib/ttsApi";
 import {
   CACHE_MINUTES, cached, type Cond, DEFAULT_RULES, downloadSampleXlsx, fetchSamples, groupByCreator, isFresh,
-  type Mark, type SampleRaw, type SampleRules,
+  type Mark, type RegItem, type SampleRaw, type SampleRules,
 } from "@/lib/sampleAdvice";
 
 const ADVICE_STYLE: Record<string, string> = {
@@ -183,8 +184,15 @@ export function SampleAdvicePanel({ shops }: { shops: TtsShop[] }) {
                   </td>
                   <td className={`px-2 py-1.5 ${MARK_STYLE[r.marks.units]}`}>{fmt(r.units)}</td>
                   <td className={`px-2 py-1.5 ${MARK_STYLE[r.marks.fulfill]}`}>{r.fulfill === null ? "无" : `${r.fulfill}%`}</td>
-                  <td className={`px-2 py-1.5 whitespace-nowrap ${MARK_STYLE[r.marks.unfulfilled]}`} title={r.regStaff ? `建联同事：${r.regStaff}；最近发样 ${r.regLast}` : "建联表无记录"}>
-                    {r.regSamples} / {r.regVid} / {r.regOpen}{r.regStaff ? <div className="text-muted-foreground font-normal">{r.regStaff}</div> : null}
+                  <td className={`px-2 py-1.5 whitespace-nowrap ${MARK_STYLE[r.marks.unfulfilled]}`}>
+                    <HoverCard openDelay={150}>
+                      <HoverCardTrigger asChild>
+                        <span className="cursor-help underline decoration-dotted underline-offset-2">
+                          {r.regSamples} / {r.regVid} / {r.regOpen}{r.regStaff ? <div className="text-muted-foreground font-normal no-underline">{r.regStaff}</div> : null}
+                        </span>
+                      </HoverCardTrigger>
+                      <HoverCardContent align="start" className="w-auto max-w-[640px] p-2"><RegHistory items={r.regItems} /></HoverCardContent>
+                    </HoverCard>
                   </td>
                   <td className="px-2 py-1.5">{fmt(r.postRate, 2)}</td>
                   <td className="px-2 py-1.5">{fmt(r.plays)}</td>
@@ -198,5 +206,33 @@ export function SampleAdvicePanel({ shops }: { shops: TtsShop[] }) {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+const ST_STYLE: Record<string, string> = { "已出素材": "text-green-700", "未出素材": "text-red-700", "拍摄中": "text-amber-700" };
+/** 悬停：飞书建联表发样明细，固定 6 列，按发样日期倒序 */
+function RegHistory({ items }: { items: RegItem[] }) {
+  if (!items.length) return <div className="text-xs text-muted-foreground px-1">飞书建联表（同站点池）没有该达人的发样记录</div>;
+  return (
+    <div className="max-h-72 overflow-auto">
+      <table className="text-xs">
+        <thead className="text-muted-foreground sticky top-0 bg-popover">
+          <tr>{["发样日期", "SKU", "同事", "状态", "VID", "视频发布"].map((h) => <th key={h} className="px-2 py-1 text-left font-medium whitespace-nowrap">{h}</th>)}</tr>
+        </thead>
+        <tbody>
+          {items.map((x, i) => (
+            <tr key={i} className="border-t">
+              <td className="px-2 py-1 whitespace-nowrap tabular-nums">{x.d}</td>
+              <td className="px-2 py-1 whitespace-nowrap">{x.sku || "—"}</td>
+              <td className="px-2 py-1 whitespace-nowrap">{x.staff}</td>
+              <td className={`px-2 py-1 whitespace-nowrap font-medium ${ST_STYLE[x.st] ?? ""}`}>{x.st}</td>
+              <td className="px-2 py-1 whitespace-nowrap tabular-nums">{x.vid ? <a className="underline" href={`https://www.tiktok.com/@artphro/video/${x.vid}`} target="_blank" rel="noreferrer">{x.vid}</a> : "—"}</td>
+              <td className="px-2 py-1 whitespace-nowrap tabular-nums">{x.post || "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="px-2 pt-1 text-[10px] text-muted-foreground">发样超过 14 天仍无 VID 记为「未出素材」，14 天内为「拍摄中」。</div>
+    </div>
   );
 }

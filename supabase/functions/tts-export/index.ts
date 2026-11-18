@@ -670,7 +670,7 @@ type SampleApp = {
 export const SAMPLE_COLUMNS = [
   "申样单 ID", "申请状态", "达人用户名", "达人昵称", "TikTok用户ID", "creator_open_id", "头像", "粉丝数", "达人GMV(本币)", "GMV币种", "达人GMV(USD)",
   "达人销量(件)", "带货内容数", "平台履约率(%)", "带货率(post_rate)", "电商视频平均播放", "近30天发视频数(中位)",
-  "建联表发样次数", "建联表有VID次数", "建联表未出素材次数", "最近发样日", "建联同事",
+  "建联表发样次数", "建联表有VID次数", "建联表未出素材次数", "最近发样日", "建联同事", "建联表明细",
   "商品 ID", "商品名称", "SKU ID", "SKU 名称", "商家SKU", "申请佣金率", "平台可审批", "不可审批原因", "服务商", "审核截止时间",
 ];
 type Perf = { units_sold?: number; post_rate?: number | string; avg_ec_video_play_count?: number; profile_tt_uri?: string; creator_profile?: { video_publish_cnt_30d_med?: number } };
@@ -707,21 +707,24 @@ async function exportSamples(shop: Shop, b: Record<string, unknown>, started: nu
     const handles = [...new Set(apps.map((a) => normHandle(a.creator?.username ?? "")).filter(Boolean))];
     const skuIds = [...new Set(apps.map((a) => a.product?.sku_id ?? "").filter(Boolean))];
     // 建联表历史（同站点池）：handle 大小写/@ 不敏感
-    const hist = new Map<string, { n: number; vid: number; open: number; last: string; staff: Set<string> }>();
+    type HistItem = { d: string; sku: string; staff: string; vid: string; post: string; st: "已出素材" | "未出素材" | "拍摄中" };
+    const hist = new Map<string, { n: number; vid: number; open: number; last: string; staff: Set<string>; items: HistItem[] }>();
     if (handles.length) {
       const { data, error } = await admin().from("connection_material_registry")
-        .select("handle,country,sample_date,vid,staff_name,source_type").eq("source_type", "BD").in("country", pool)
+        .select("handle,country,sample_date,vid,staff_name,source_type,sku,post_date").eq("source_type", "BD").in("country", pool)
         // 大小写不敏感精确匹配（ilike 不带通配符），兼容表里带 @ 的写法
         .or(handles.flatMap((h) => [`handle.ilike."${h}"`, `handle.ilike."@${h}"`]).join(","))
         .limit(10000);
       if (error) errors.push(`建联表缓存：${error.message}`);
       const want = new Set(handles);
-      for (const x of (data ?? []) as Array<{ handle: string; sample_date: string | null; vid: string; staff_name: string }>) {
+      for (const x of (data ?? []) as Array<{ handle: string; sample_date: string | null; vid: string; staff_name: string; sku: string | null; post_date: string | null }>) {
         const h = normHandle(x.handle);
         if (!want.has(h) || !x.sample_date) continue;
-        const a = hist.get(h) ?? { n: 0, vid: 0, open: 0, last: "", staff: new Set<string>() };
+        const a = hist.get(h) ?? { n: 0, vid: 0, open: 0, last: "", staff: new Set<string>(), items: [] };
         a.n++;
+        const st = x.vid ? "已出素材" : x.sample_date <= cutoff ? "未出素材" : "拍摄中";
         if (x.vid) a.vid++; else if (x.sample_date <= cutoff) a.open++;
+        a.items.push({ d: x.sample_date, sku: x.sku ?? "", staff: x.staff_name, vid: x.vid ?? "", post: x.post_date ?? "", st });
         if (x.sample_date > a.last) a.last = x.sample_date;
         a.staff.add(x.staff_name);
         hist.set(h, a);
@@ -757,6 +760,7 @@ async function exportSamples(shop: Shop, b: Record<string, unknown>, started: nu
         c.fulfillment_percentage === undefined || c.fulfillment_percentage === "" ? null : Number(c.fulfillment_percentage),
         num(pf?.post_rate), num(pf?.avg_ec_video_play_count), num(pf?.creator_profile?.video_publish_cnt_30d_med),
         h?.n ?? 0, h?.vid ?? 0, h?.open ?? 0, h?.last ?? "", h ? [...h.staff].join("/") : "",
+        h ? JSON.stringify(h.items.sort((p, q) => (p.d < q.d ? 1 : -1))) : "[]",
         a.product?.id ?? "", a.product?.title ?? "", a.product?.sku_id ?? "", a.product?.sku_name ?? "", skuMap.get(a.product?.sku_id ?? "") ?? "",
         a.commission_rate === undefined ? "" : String(a.commission_rate), a.is_approvable === undefined ? "" : a.is_approvable ? "是" : "否",
         (a.disapprovable_reasons ?? []).join("/"), a.partner_name ?? "", fmtTime(a.approve_expiration_time, shop),
