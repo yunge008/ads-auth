@@ -2037,6 +2037,7 @@ export type Database = {
       }
       sea_inv_plan_items: {
         Row: {
+          advisory: boolean
           current_qty: number
           daily_sales: number | null
           days_after: number | null
@@ -2068,6 +2069,7 @@ export type Database = {
           wh_sku: string
         }
         Insert: {
+          advisory?: boolean
           current_qty: number
           daily_sales?: number | null
           days_after?: number | null
@@ -2099,6 +2101,7 @@ export type Database = {
           wh_sku: string
         }
         Update: {
+          advisory?: boolean
           current_qty?: number
           daily_sales?: number | null
           days_after?: number | null
@@ -2181,6 +2184,33 @@ export type Database = {
         }
         Relationships: []
       }
+      sea_inv_sales_daily: {
+        Row: {
+          day: string
+          shop_id: string
+          sku_id: string
+          units: number
+          updated_at: string
+          warehouse_id: string
+        }
+        Insert: {
+          day: string
+          shop_id: string
+          sku_id: string
+          units: number
+          updated_at?: string
+          warehouse_id?: string
+        }
+        Update: {
+          day?: string
+          shop_id?: string
+          sku_id?: string
+          units?: number
+          updated_at?: string
+          warehouse_id?: string
+        }
+        Relationships: []
+      }
       sea_inv_settings: {
         Row: {
           cn_min_days: number
@@ -2236,6 +2266,7 @@ export type Database = {
           orders_at: string | null
           orders_count: number | null
           orders_from: string | null
+          sales_synced_day: string | null
           shop_id: string
           slots_count: number | null
           updated_at: string
@@ -2246,6 +2277,7 @@ export type Database = {
           orders_at?: string | null
           orders_count?: number | null
           orders_from?: string | null
+          sales_synced_day?: string | null
           shop_id: string
           slots_count?: number | null
           updated_at?: string
@@ -2256,6 +2288,7 @@ export type Database = {
           orders_at?: string | null
           orders_count?: number | null
           orders_from?: string | null
+          sales_synced_day?: string | null
           shop_id?: string
           slots_count?: number | null
           updated_at?: string
@@ -2265,6 +2298,9 @@ export type Database = {
       sea_inv_sku_map: {
         Row: {
           active: boolean
+          assemble_ok: boolean
+          assemble_ok_at: string | null
+          assemble_ok_by: string | null
           changed_at: string | null
           first_seen_at: string
           last_seen_at: string
@@ -2277,6 +2313,9 @@ export type Database = {
         }
         Insert: {
           active?: boolean
+          assemble_ok?: boolean
+          assemble_ok_at?: string | null
+          assemble_ok_by?: string | null
           changed_at?: string | null
           first_seen_at?: string
           last_seen_at?: string
@@ -2289,6 +2328,9 @@ export type Database = {
         }
         Update: {
           active?: boolean
+          assemble_ok?: boolean
+          assemble_ok_at?: string | null
+          assemble_ok_by?: string | null
           changed_at?: string | null
           first_seen_at?: string
           last_seen_at?: string
