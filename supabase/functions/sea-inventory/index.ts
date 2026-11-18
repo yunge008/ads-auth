@@ -9,13 +9,12 @@
 //   sync_warehouse {code, force?}     配了云盘文件夹 → 取最新 RPA 导出文件（库存时间 = 文件修改时间，同一文件不重复导入）；否则从仓库系统 API 拉库存整仓覆盖（千易 QUERY_SIMPLE_LIST_INVENTORY_V2 / 顶妙 goods_sku_warehouse/search_page，见 _shared/wh-providers.ts）
 //   drive_preview {code, drive_folder?, drive_name_pattern?, file_config?}  云盘：列文件 + 预览解析（不写库）
 //   provider_warehouses {code}        仓库系统里的仓库列表（绑定 provider_ref 用：千易=仓库名称，顶妙=warehouseId）
-//   sync_shop {shop_id, cursor?}      分片续跑：listings（Search Products）→ orders（近 N 天）→ 写 sea_inv_slots
+//   sync_shop {shop_id, cursor?}      分片续跑：listings（Search Products）→ orders（按店铺本地日逐日拉，写 sea_inv_sales_daily；首次 60 天，之后只拉上次同步日−2 天起）→ 窗口销量回填 sea_inv_slots
 //   refresh_map                       用最新 listing 重建映射表，返回新增 / 下架 / SKU 变化
 //   build_plan {source?}              生成调整计划（旧的未执行计划标 SUPERSEDED）
 //   plan_get {plan_id?}               计划 + 明细（默认最新一条）
 //   plan_update {plan_id, items:[{id, selected?, final_qty?}]}
 //   execute {plan_id, item_ids?, confirm:"EXECUTE"}   执行前实时读库存 → Update Inventory（INCREMENTAL）→ 逐条记结果；分片返回 remaining
-//   set_assemble {shop_id, sku_id, product_id, seller_sku, ok?}  人工确认已在仓库系统做好单品组合映射
 //   build_message {plan_id?}          飞书卡片（由服务端路由发送）
 import { admin, verifyPasscode } from "../_shared/auth.ts";
 import { corsHeaders } from "../_shared/feishu.ts";
@@ -39,6 +38,13 @@ import {
   type PlanItem,
   type Slot,
   sortByUrgency,
+  addDays,
+  dayStartSec,
+  localDay,
+  REGION_UTC_OFFSET,
+  SALES_KEEP_DAYS,
+  salesPullStart,
+  windowSold,
   type Warehouse,
   whSkuOf,
 } from "../_shared/sea-inventory.ts";
@@ -107,7 +113,7 @@ async function overview() {
   ]);
   return {
     settings: settings.data, warehouses, shops: shops.data ?? [], shop_sync: sync.data ?? [],
-    plans: plan.data ?? [], map_active: mapCount.count ?? 0, linked_shops: linkedShops(warehouses),
+    plans: plan.data ?? [], map_active: mapCount.count ?? 0, linked_shops: linkedShops(warehouses), exec_enabled: execEnabled(),
   };
 }
 
@@ -218,7 +224,7 @@ type SearchProducts = {
   products?: Array<{ id: string; title?: string; status?: string; skus?: Array<{ id: string; seller_sku?: string; inventory?: Array<{ warehouse_id?: string; quantity?: number }>; status_info?: { status?: string } }> }>;
   next_page_token?: string;
 };
-type Cursor = { stage: "listings" | "orders"; run_at: string; page_token?: string; counts?: Record<string, number>; orders?: number; slots?: number };
+type Cursor = { stage: "listings" | "orders"; run_at: string; page_token?: string; counts?: Record<string, number>; orders?: number; slots?: number; day?: string; today?: string; from_day?: string };
 
 async function syncShop(b: Record<string, unknown>) {
   const shopId = String(b.shop_id ?? "");
@@ -271,40 +277,79 @@ async function syncShop(b: Record<string, unknown>) {
     Object.assign(cur, { stage: "orders", page_token: undefined, counts: {}, orders: 0 });
   }
 
-  // orders：近 window_days 天下单（含当天）
-  const from = Math.floor(Date.now() / 1000) - p.window_days * 86400;
-  const counts = new Map(Object.entries(cur.counts ?? {}));
-  do {
-    const r = await ttsCall<{ orders?: OrderLite[]; next_page_token?: string }>({
-      ...T, method: "POST", path: "/order/202309/orders/search",
-      query: { page_size: 100, sort_field: "create_time", sort_order: "ASC", page_token: cur.page_token },
-      body: { create_time_ge: from },
+  // orders：按店铺本地自然日逐日拉，拉完一天就整天覆盖写入 sea_inv_sales_daily（SKU ID × 仓库 × 日）。
+  // 首次初始化拉 60 天；之后只拉「上次同步日 − 2 天」到今天。
+  const off = REGION_UTC_OFFSET[(shop.region ?? "").toUpperCase()];
+  if (off === undefined) bad(`店铺 ${shop.shop_name ?? shopId} 站点 ${shop.region} 未配置时区`);
+  if (!cur.day) {
+    const { data: ss } = await db.from("sea_inv_shop_sync").select("sales_synced_day").eq("shop_id", shopId).maybeSingle();
+    cur.today = localDay(Math.floor(Date.now() / 1000), off);
+    cur.from_day = salesPullStart(cur.today, (ss?.sales_synced_day as string | null) ?? null);
+    cur.day = cur.from_day;
+    cur.counts = {};
+  }
+  const today = cur.today!;
+  while (cur.day! <= today && Date.now() - started < SOFT_MS) {
+    const ge = dayStartSec(cur.day!, off);
+    const counts = new Map(Object.entries(cur.counts ?? {}));
+    do {
+      const r = await ttsCall<{ orders?: OrderLite[]; next_page_token?: string }>({
+        ...T, method: "POST", path: "/order/202309/orders/search",
+        query: { page_size: 100, sort_field: "create_time", sort_order: "ASC", page_token: cur.page_token },
+        body: { create_time_ge: ge, create_time_lt: ge + 86400 },
+      });
+      if (r.code !== 0) {
+        const msg = apiErr("orders/search", r);
+        await db.from("sea_inv_shop_sync").upsert({ shop_id: shopId, error: msg, updated_at: nowIso() });
+        bad(msg);
+      }
+      const orders = r.data?.orders ?? [];
+      countSold(orders, counts);
+      cur.orders = (cur.orders ?? 0) + orders.length;
+      cur.page_token = r.data?.next_page_token || undefined;
+    } while (cur.page_token && Date.now() - started < SOFT_MS);
+    cur.counts = Object.fromEntries(counts);
+    if (cur.page_token) return { done: false, cursor: cur, errors, progress: `订单 ${cur.day}` };
+    // 这一天拉完：整天覆盖
+    const { error: de } = await db.from("sea_inv_sales_daily").delete().eq("shop_id", shopId).eq("day", cur.day!);
+    if (de) throw de;
+    const rows = [...counts].map(([k, units]) => {
+      const [sku_id, warehouse_id] = k.split("|");
+      return { shop_id: shopId, sku_id, warehouse_id: warehouse_id ?? "", day: cur.day!, units, updated_at: nowIso() };
     });
-    if (r.code !== 0) {
-      const msg = apiErr("orders/search", r);
-      await db.from("sea_inv_shop_sync").upsert({ shop_id: shopId, error: msg, updated_at: nowIso() });
-      bad(msg);
+    for (let i = 0; i < rows.length; i += 500) {
+      const { error: ie } = await db.from("sea_inv_sales_daily").insert(rows.slice(i, i + 500));
+      if (ie) throw ie;
     }
-    const orders = r.data?.orders ?? [];
-    countSold(orders, counts);
-    cur.orders = (cur.orders ?? 0) + orders.length;
-    cur.page_token = r.data?.next_page_token || undefined;
-  } while (cur.page_token && Date.now() - started < SOFT_MS);
-  cur.counts = Object.fromEntries(counts);
-  if (cur.page_token) return { done: false, cursor: cur, errors };
+    cur.day = addDays(cur.day!, 1);
+    cur.counts = {};
+  }
+  if (cur.day! <= today) return { done: false, cursor: cur, errors, progress: `订单 ${cur.day}` };
 
+  // 全部拉完：清 60 天前的；记同步日；按窗口（昨天往前 N 个完整日）回填槽位销量
+  await db.from("sea_inv_sales_daily").delete().eq("shop_id", shopId).lt("day", addDays(today, -SALES_KEEP_DAYS));
+  const daily: Array<{ sku_id: string; warehouse_id: string; day: string; units: number }> = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await db.from("sea_inv_sales_daily").select("sku_id,warehouse_id,day,units")
+      .eq("shop_id", shopId).gte("day", addDays(today, -p.window_days)).range(from, from + 999);
+    if (error) throw error;
+    daily.push(...((data ?? []) as typeof daily));
+    if (!data || data.length < 1000) break;
+  }
+  const sold = windowSold(daily, today, p.window_days);
   const { data: slots, error } = await db.from("sea_inv_slots").select("*").eq("shop_id", shopId);
   if (error) throw error;
-  const withSold = applySold((slots ?? []) as Slot[], counts);
+  const withSold = applySold(((slots ?? []) as Slot[]).map((s) => ({ ...s, sold: 0 })), sold);
   for (let i = 0; i < withSold.length; i += 500) {
     const chunk = withSold.slice(i, i + 500).map((s) => ({ shop_id: s.shop_id, sku_id: s.sku_id, tts_warehouse_id: s.tts_warehouse_id, product_id: s.product_id, sold: s.sold }));
     const { error: e2 } = await db.from("sea_inv_slots").upsert(chunk, { onConflict: "shop_id,sku_id,tts_warehouse_id" });
     if (e2) throw e2;
   }
   await db.from("sea_inv_shop_sync").upsert({
-    shop_id: shopId, orders_at: nowIso(), orders_from: new Date(from * 1000).toISOString(), orders_count: cur.orders ?? 0, error: null, updated_at: nowIso(),
+    shop_id: shopId, orders_at: nowIso(), orders_from: new Date(dayStartSec(cur.from_day!, off) * 1000).toISOString(),
+    orders_count: cur.orders ?? 0, sales_synced_day: today, error: null, updated_at: nowIso(),
   });
-  return { done: true, cursor: null, slots: withSold.length, orders: cur.orders ?? 0, errors };
+  return { done: true, cursor: null, slots: withSold.length, orders: cur.orders ?? 0, pulled_from: cur.from_day, errors };
 }
 
 // ── 映射表 ─────────────────────────────────────────────────────────────────
@@ -413,13 +458,12 @@ async function buildPlan(b: Record<string, unknown>, who: string) {
   const okSlots = slots.filter((s) => !badShops.has(s.shop_id));
   const map = await allMap();
   const overrides = new Map(map.filter((r) => r.wh_sku_override).map((r) => [`${r.shop_id}|${r.sku_id}`, r.wh_sku_override!]));
-  const assembleOk = new Set(map.filter((r) => (r as { assemble_ok?: boolean }).assemble_ok).map((r) => `${r.shop_id}|${r.sku_id}`));
-  const ov = planOverseas({ warehouses: usable, slots: okSlots, stock, overrides, assembleOk, params: p });
+  const ov = planOverseas({ warehouses: usable, slots: okSlots, stock, overrides, params: p });
   const cn = planCn(usable, okSlots, p);
   const items = sortByUrgency([...ov.items, ...cn]);
   const missing = ov.groups.filter((g) => g.wh_available === null);
   const summary = {
-    overseas: ov.items.filter((i) => !i.advisory).length, advisory: ov.items.filter((i) => i.advisory).length, cn: cn.length, groups_checked: ov.groups.length, groups_triggered: ov.groups.filter((g) => g.triggered).length,
+    overseas: ov.items.length, cn: cn.length, groups_checked: ov.groups.length, groups_triggered: ov.groups.filter((g) => g.triggered).length,
     missing_in_warehouse: missing.length, missing_sample: missing.slice(0, 50),
     min_days_overseas: minDays(ov.items), min_days_cn: minDays(cn), slots: okSlots.length,
   };
@@ -429,7 +473,7 @@ async function buildPlan(b: Record<string, unknown>, who: string) {
     source: String(b.source ?? "MANUAL"), created_by: who, params: p, summary, data_warnings: warnings, map_diff: b.map_diff ?? null,
   }).select("id").single();
   if (error) throw error;
-  const rows = items.map((i) => ({ ...i, advisory: !!i.advisory, selected: !i.advisory, plan_id: plan.id }));
+  const rows = items.map((i) => ({ ...i, plan_id: plan.id }));
   for (let k = 0; k < rows.length; k += 500) {
     const { error: e2 } = await db.from("sea_inv_plan_items").insert(rows.slice(k, k + 500));
     if (e2) throw e2;
@@ -483,7 +527,7 @@ async function planUpdate(b: Record<string, unknown>) {
       }
     }
     if (Object.keys(patch).length) {
-      const { error } = await db.from("sea_inv_plan_items").update(patch).eq("id", Number(it.id)).eq("plan_id", id).eq("exec_status", "PENDING").eq("advisory", false);
+      const { error } = await db.from("sea_inv_plan_items").update(patch).eq("id", Number(it.id)).eq("plan_id", id).eq("exec_status", "PENDING");
       if (error) throw error;
     }
   }
@@ -508,7 +552,15 @@ async function liveQty(shop: Shop, skuIds: string[]): Promise<Map<string, number
   return out;
 }
 
+/** 一键改库存总开关（负责人 2026-11-18：初期只出建议、人工改，确认后再开）。Supabase secret SEA_INV_EXEC_ENABLED=true 才放行。 */
+const execEnabled = () => (Deno.env.get("SEA_INV_EXEC_ENABLED") ?? "").trim().toLowerCase() === "true";
+
 async function execute(b: Record<string, unknown>, who: string) {
+  if (!execEnabled()) {
+    const e = new Error("一键改库存尚未启用（初期只给调整建议、人工修改）。负责人确认后在 Supabase secrets 设 SEA_INV_EXEC_ENABLED=true") as Error & { status: number };
+    e.status = 403;
+    throw e;
+  }
   if (b.confirm !== "EXECUTE") bad('执行需要 confirm:"EXECUTE"');
   const id = String(b.plan_id ?? "");
   const db = admin();
@@ -517,7 +569,7 @@ async function execute(b: Record<string, unknown>, who: string) {
   if (!["PENDING", "PARTIAL", "EXECUTING"].includes(plan.status)) bad(`计划状态 ${plan.status}，不能执行（已被新计划替代或已执行）`);
   const ageH = (Date.now() - Date.parse(plan.created_at)) / 3600_000;
   if (ageH > 14) bad(`计划生成于 ${Math.floor(ageH)} 小时前，数据已旧，请先重新生成`);
-  let q = db.from("sea_inv_plan_items").select("*").eq("plan_id", id).eq("exec_status", "PENDING").eq("selected", true).eq("advisory", false);
+  let q = db.from("sea_inv_plan_items").select("*").eq("plan_id", id).eq("exec_status", "PENDING").eq("selected", true);
   const ids = Array.isArray(b.item_ids) ? (b.item_ids as unknown[]).map(Number) : null;
   if (ids) q = q.in("id", ids);
   const { data: items, error } = await q;
@@ -589,7 +641,7 @@ async function execute(b: Record<string, unknown>, who: string) {
       }
     }
   }
-  const { count: pending } = await db.from("sea_inv_plan_items").select("id", { count: "exact", head: true }).eq("plan_id", id).eq("exec_status", "PENDING").eq("selected", true).eq("advisory", false);
+  const { count: pending } = await db.from("sea_inv_plan_items").select("id", { count: "exact", head: true }).eq("plan_id", id).eq("exec_status", "PENDING").eq("selected", true);
   const { count: bad_ } = await db.from("sea_inv_plan_items").select("id", { count: "exact", head: true }).eq("plan_id", id).eq("exec_status", "FAILED");
   const status = remaining ? "EXECUTING" : (pending ?? 0) > 0 || (bad_ ?? 0) > 0 ? "PARTIAL" : "DONE";
   await db.from("sea_inv_plans").update({ status, executed_at: nowIso(), executed_by: who }).eq("id", id);
@@ -609,9 +661,8 @@ async function buildMessage(b: Record<string, unknown>) {
   const { plan, items, shops } = await planGet(b) as { plan: Record<string, unknown>; items: ItemRow[]; shops: Array<{ shop_id: string; shop_name: string | null; region: string | null }> };
   const shopName = new Map(shops.map((s) => [s.shop_id, s.shop_name ?? s.region ?? s.shop_id]));
   const whs = new Map((await loadWarehouses()).map((w) => [w.code, w.name]));
-  const ov = items.filter((i) => i.kind === "overseas" && !i.advisory);
+  const ov = items.filter((i) => i.kind === "overseas");
   const cn = items.filter((i) => i.kind === "cn");
-  const adv = items.filter((i) => i.advisory);
   const warnings = (plan.data_warnings as string[] | null) ?? [];
   const md = (plan.map_diff as { counts?: { added: number; removed: number; changed: number } } | null)?.counts;
   const all = [...ov, ...cn].filter((i) => !i.new_link && i.days_before !== null);
@@ -653,21 +704,16 @@ async function buildMessage(b: Record<string, unknown>) {
     ].filter(Boolean).join("\n"),
   });
   if (ov.length) elements.push({ tag: "markdown", content: "**海外仓（按紧急度，前 15 条）**" }, table(ov, true));
-  if (adv.length) {
-    elements.push({ tag: "markdown", content: `**需人工映射（只提醒，不改库存）：${adv.length} 条**\n` + adv.slice(0, 10).map((i) => `- ${i.seller_sku}（${shopName.get(i.shop_id) ?? i.shop_id}）：预组装件没货，单品可组 ${i.proposed_qty} 套，当前可售 ${fmtDays(i.days_before)} 天`).join("\n") + "\n<font color='grey'>先在仓库系统把这些 SKU 映射为单品组合，再到网页点「已做映射」</font>" });
-  }
   if (cn.length) elements.push({ tag: "markdown", content: "**国内仓（按紧急度，前 15 条）**\n<font color='grey'>国内仓实物未接入，确认前请核对仓库有货</font>" }, table(cn, false));
-  elements.push({ tag: "markdown", content: items.length ? "请到网页「SEA库存监控」核对并点「确认执行」，**未确认不会改任何库存**。" : "本次没有需要调整的 listing。" });
+  elements.push({ tag: "markdown", content: items.length ? (execEnabled() ? "请到网页「SEA库存监控」核对并点「确认执行」，**未确认不会改任何库存**。" : "请到网页「SEA库存监控」核对，**导出调整清单后人工修改**（系统不会自动改库存）。") : "本次没有需要调整的 listing。" });
 
-  const actionable = ov.length + cn.length;
-  const title = actionable || adv.length
-    ? `SEA 库存调整计划：海外仓 ${skuCount(ov)} 个 SKU / 国内仓 ${skuCount(cn)} 个 SKU 待确认${adv.length ? ` / ${adv.length} 条需人工映射` : ""}`
+  const title = items.length
+    ? `SEA 库存调整计划：海外仓 ${skuCount(ov)} 个 SKU / 国内仓 ${skuCount(cn)} 个 SKU 待确认`
     : warnings.length ? "SEA 库存监控：无调整，但有数据异常" : "SEA 库存监控：本次无需调整";
   const card = { config: { wide_screen_mode: true }, header: { template, title: { tag: "plain_text", content: title } }, elements };
   // 纯文本兜底（卡片表格组件被拒时由路由改发这个）
   const lines = [
     title, `生成时间：${bjTime}`, ...warnings.map((w) => `⚠ ${w}`),
-    ...adv.slice(0, 10).map((i) => `[需人工映射] ${i.seller_sku} ${shopName.get(i.shop_id) ?? ""}：预组装件没货，单品可组 ${i.proposed_qty} 套`),
     ...[...ov.slice(0, 10), ...cn.slice(0, 10)].map((i) => `[${i.kind === "cn" ? "国内仓" : whs.get(i.warehouse_code) ?? i.warehouse_code}] ${i.seller_sku} ${shopName.get(i.shop_id) ?? ""}：${i.current_qty}→${i.proposed_qty}，可售 ${fmtDays(i.days_before)}→${fmtDays(i.days_after)} 天`),
   ];
   return { send: true, title, card, lines, plan_id: plan.id, items: items.length };
@@ -739,18 +785,6 @@ Deno.serve(async (req) => {
       case "set_override": {
         const { error } = await db.from("sea_inv_sku_map").update({ wh_sku_override: normSku(b.wh_sku as string) || null, changed_at: nowIso() })
           .eq("shop_id", String(b.shop_id ?? "")).eq("sku_id", String(b.sku_id ?? ""));
-        if (error) throw error;
-        return json({ ok: true });
-      }
-      case "set_assemble": {
-        // 人工确认：该 listing 已在仓库系统映射为单品组合（预组装件没货时自动按单品组套）
-        const shopId = String(b.shop_id ?? ""), skuId = String(b.sku_id ?? "");
-        if (!shopId || !skuId) bad("shop_id / sku_id 必填");
-        const ok = b.ok !== false;
-        const { error } = await db.from("sea_inv_sku_map").upsert({
-          shop_id: shopId, sku_id: skuId, product_id: String(b.product_id ?? ""), seller_sku: normSku(b.seller_sku as string),
-          assemble_ok: ok, assemble_ok_by: ok ? who : null, assemble_ok_at: ok ? nowIso() : null,
-        }, { onConflict: "shop_id,sku_id" });
         if (error) throw error;
         return json({ ok: true });
       }

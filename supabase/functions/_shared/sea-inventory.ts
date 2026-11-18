@@ -81,8 +81,6 @@ export type PlanItem = {
   reason: string;
   warnings: string[];
   new_link: boolean;
-  /** 只提醒、不执行（预组装件没货、需先在仓库系统做单品组合映射） */
-  advisory?: boolean;
 };
 
 export type GroupStatus = {
@@ -162,8 +160,6 @@ export type OverseasInput = {
   stock: Map<string, Map<string, number>>;
   /** `${shop_id}|${sku_id}` → 人工指定的仓库 SKU */
   overrides: Map<string, string>;
-  /** `${shop_id}|${sku_id}`：人工确认已在仓库系统做好「单品组合」映射的 listing（预组装件没货时可自动按单品组套） */
-  assembleOk?: Set<string>;
   params: Params;
 };
 
@@ -295,7 +291,7 @@ export function planCluster(w: Warehouse, cs: Consumer[], stock: Map<string, num
     const avail = combo ? cap(c, stock) : stock.get(c.whSku) ?? 0;
     const pl = combo ? cap(c, pool) : pool.get(c.whSku)!;
     const why = s.virtual ? `新仓首次设置库存（listing 尚未关联 ${w.name}）`
-      : combo ? `临时组合款（${compText}），与单品共用库存，按销量占比分配`
+      : combo ? `单品组套（${compText}），与单品共用库存，按销量占比分配；ERP 需有该组合映射才能发货`
       : `单品与临时组合款共用库存（${label}），按销量占比分配`;
     items.push({
       kind: "overseas", warehouse_code: w.code, wh_sku: c.whSku, shop_id: s.shop_id, region: s.region,
@@ -390,38 +386,11 @@ export function planOverseas(input: OverseasInput): { items: PlanItem[]; groups:
     for (const [whSku, g] of byWhSku) {
       const comps = parseCombo(whSku);
       const hasPhysical = !!stockMap?.has(whSku);
-      // 有现成预组装实物（可用 − 预留 > 0）→ 只按实物，不叠加单品；实物没货 → 见下（提醒 / 已映射才自动组套）
+      // 有现成预组装实物（可用 − 预留 > 0）→ 只按实物，不叠加单品；实物没货 → 直接用单品组套（ERP 没映射会报错，由同事处理；负责人 2026-11-18）
       if (hasPhysical && (!comps || stockMap!.get(whSku)! - p.reserve_per_sku > 0)) { physical.set(whSku, g); continue; }
       const real = g.filter((s) => !s.virtual);
       if (comps) {
         const miss = [...comps.keys()].filter((k) => !stockMap?.has(k));
-        if (!miss.length && hasPhysical) {
-          // 预组装件可分配为 0（预留不自动突破）：已确认做好组合映射的 listing → 自动按单品组套；
-          // 其余 → 仍按实物（压到 0）+ 一条「需人工映射」提醒，不改库存（负责人 2026-11-18）
-          const ok = g.filter((s) => input.assembleOk?.has(`${s.shop_id}|${s.sku_id}`));
-          const rest = g.filter((s) => !input.assembleOk?.has(`${s.shop_id}|${s.sku_id}`));
-          if (ok.length) combos.set(whSku, { comps, slots: ok });
-          if (rest.length) {
-            physical.set(whSku, rest);
-            const pl = new Map([...comps.keys()].map((k) => [k, Math.max(0, stockMap!.get(k)! - p.reserve_per_sku)]));
-            const sets = Math.min(...[...comps].map(([k, q]) => Math.floor(pl.get(k)! / q)));
-            const avail = stockMap!.get(whSku)!;
-            const compText = [...comps].map(([k, q]) => (q > 1 ? `${k}×${q}` : k)).join(" + ");
-            for (const s of rest) {
-              if (s.virtual || sets <= 0) continue;
-              const d = dailyOf(s);
-              items.push({
-                kind: "overseas", warehouse_code: w.code, wh_sku: whSku, shop_id: s.shop_id, region: s.region,
-                product_id: s.product_id, sku_id: s.sku_id, seller_sku: s.seller_sku, title: s.title, tts_warehouse_id: s.tts_warehouse_id,
-                current_qty: s.qty, proposed_qty: sets, daily_sales: Math.round(d * 100) / 100,
-                days_before: r1(daysOf(s.qty, d)), days_after: r1(daysOf(sets, d)), wh_available: avail, pool: 0,
-                reason: `预组装实物可用 ${avail} 件（预留 ${p.reserve_per_sku} 件不自动动用），单品（${compText}）最多可组 ${sets} 套。需先在仓库系统把该 SKU 映射为单品组合才能发货；做好后点「已做映射」，之后自动按单品组套`,
-                warnings: ["只提醒，不改库存", "可组套数未扣除其他 listing 共用的单品，实际以下次计划为准"], new_link: false, advisory: true,
-              });
-            }
-          }
-          continue;
-        }
         if (!miss.length) { combos.set(whSku, { comps, slots: g }); continue; }
         if (hasPhysical) { physical.set(whSku, g); continue; } // 实物为 0 且单品凑不齐 → 按实物（会压到 0 并提示）
         if (real.length) groups.push({ warehouse_code: w.code, wh_sku: whSku, wh_available: null, pool: null, slots: real.length, triggered: false, note: `组合款单品在仓库库存里找不到：${miss.join("、")}，未调整` });
@@ -548,4 +517,48 @@ export function execQty(item: Pick<PlanItem, "kind" | "current_qty" | "proposed_
   if (liveQty === null || item.kind === "cn") return item.proposed_qty;
   const soldSince = Math.max(0, item.current_qty - liveQty);
   return Math.max(0, item.proposed_qty - soldSince);
+}
+
+// ── 每日销量（sea_inv_sales_daily：店铺 × SKU ID × 仓库 × 店铺本地日期）──────────────────
+// 2026-11-18 负责人：不要每次重拉整个窗口的订单；云端存近 60 天按 SKU ID 的日销量，每次只补拉最近几天。
+
+/** 站点 → UTC 偏移（小时），与 tts-export 一致 */
+export const REGION_UTC_OFFSET: Record<string, number> = { PH: 8, MY: 8, SG: 8, TH: 7, VN: 7, ID: 7, JP: 9, GB: 0, US: -8, MX: -6, BR: -3 };
+export const SALES_KEEP_DAYS = 60;
+export const SALES_OVERLAP_DAYS = 2; // 每次重拉上次同步日往前 2 天（补订单取消、延迟入单）
+
+/** 秒级时间戳 → 店铺本地日期 YYYY-MM-DD */
+export function localDay(tsSec: number, offsetH: number): string {
+  return new Date((tsSec + offsetH * 3600) * 1000).toISOString().slice(0, 10);
+}
+/** 本地日期 0 点 → 秒级时间戳 */
+export function dayStartSec(day: string, offsetH: number): number {
+  return Date.parse(`${day}T00:00:00Z`) / 1000 - offsetH * 3600;
+}
+export function addDays(day: string, n: number): string {
+  return new Date(Date.parse(`${day}T00:00:00Z`) + n * 86400_000).toISOString().slice(0, 10);
+}
+/**
+ * 本次要（重）拉订单的起始日：首次 = 今天往前 60 天（初始化）；
+ * 之后 = 上次同步日 − 2 天（不早于 60 天前）。终点永远是今天（今天的数据不完整，下次会重拉）。
+ */
+export function salesPullStart(today: string, lastSyncedDay: string | null): string {
+  const floor = addDays(today, -SALES_KEEP_DAYS);
+  if (!lastSyncedDay) return floor;
+  const s = addDays(lastSyncedDay, -SALES_OVERLAP_DAYS);
+  return s < floor ? floor : s;
+}
+/**
+ * 窗口销量：最近 windowDays 个**完整**自然日（昨天往前），按 `${sku_id}|${warehouse_id}` 合计。
+ * 不含今天（今天不完整会把日均拉低）。
+ */
+export function windowSold(rows: Array<{ sku_id: string; warehouse_id: string; day: string; units: number }>, today: string, windowDays: number): Map<string, number> {
+  const from = addDays(today, -windowDays), to = addDays(today, -1);
+  const out = new Map<string, number>();
+  for (const r of rows) {
+    if (r.day < from || r.day > to) continue;
+    const k = `${r.sku_id}|${r.warehouse_id ?? ""}`;
+    out.set(k, (out.get(k) ?? 0) + Number(r.units));
+  }
+  return out;
 }

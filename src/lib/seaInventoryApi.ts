@@ -22,7 +22,7 @@ export type SeaSettings = {
   cn_min_days: number; cn_target_days: number; stock_max_age_hours: number; last_run_at: string | null; map_refreshed_at: string | null;
 };
 export type SeaShop = { shop_id: string; shop_name: string | null; region: string | null; seller_type: string | null; access_expires_at: string | null };
-export type ShopSync = { shop_id: string; listings_at: string | null; orders_at: string | null; orders_count: number | null; slots_count: number | null; error: string | null };
+export type ShopSync = { shop_id: string; listings_at: string | null; orders_at: string | null; orders_count: number | null; slots_count: number | null; error: string | null; sales_synced_day: string | null };
 export type PlanRow = {
   id: string; created_at: string; source: string; status: string; executed_at: string | null; executed_by: string | null;
   summary: Record<string, unknown> | null; data_warnings?: string[] | null; map_diff?: { counts?: Record<string, number> } | null;
@@ -34,11 +34,10 @@ export type PlanItem = {
   wh_available: number | null; pool: number | null; reason: string | null; warnings: string[]; new_link: boolean;
   selected: boolean; final_qty: number | null; live_qty: number | null; exec_qty: number | null;
   exec_status: "PENDING" | "OK" | "FAILED" | "SKIPPED"; exec_message: string | null;
-  advisory: boolean;
 };
 export type Overview = {
   settings: SeaSettings; warehouses: SeaWarehouse[]; shops: SeaShop[]; shop_sync: ShopSync[]; plans: PlanRow[];
-  map_active: number; linked_shops: string[];
+  map_active: number; linked_shops: string[]; exec_enabled: boolean;
 };
 export type MapRow = {
   shop_id: string; sku_id: string; product_id: string; seller_sku: string; wh_sku: string; wh_sku_override: string | null;
@@ -63,8 +62,6 @@ export const seaApi = {
   syncShop: (shop_id: string, cursor: unknown) => fn<{ done: boolean; cursor: unknown; slots?: number; orders?: number }>("sync_shop", { shop_id, cursor }),
   refreshMap: () => fn<{ total: number; multi_listing_skus: number; counts: Record<string, number> }>("refresh_map"),
   mapList: () => fn<{ rows: MapRow[] }>("map_list"),
-  setAssemble: (it: { shop_id: string; sku_id: string; product_id: string; seller_sku: string | null }, ok = true) =>
-    fn<{ ok: true }>("set_assemble", { shop_id: it.shop_id, sku_id: it.sku_id, product_id: it.product_id, seller_sku: it.seller_sku ?? "", ok }),
   setOverride: (shop_id: string, sku_id: string, wh_sku: string) => fn<{ ok: true }>("set_override", { shop_id, sku_id, wh_sku }),
   stockList: (warehouse_code: string) => fn<{ rows: StockRow[] }>("stock_list", { warehouse_code }),
   buildPlan: (map_diff?: unknown) => fn<{ plan_id: string; summary: Record<string, unknown>; warnings: string[] }>("build_plan", { map_diff }),

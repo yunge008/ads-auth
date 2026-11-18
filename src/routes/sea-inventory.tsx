@@ -1,7 +1,8 @@
 import * as React from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { Loader2, Play, RefreshCw, Send, Upload } from "lucide-react";
+import { Download, Loader2, Play, RefreshCw, Send, Upload } from "lucide-react";
+import * as XLSX from "xlsx";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -47,7 +48,7 @@ function SeaInventoryPage() {
       <div>
         <h2 className="text-xl font-semibold tracking-tight">SEA库存监控</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          海外仓库存按销量分配到各 listing，国内仓按可售天数补货。每天北京 09:10 / 21:10 自动生成计划并推送飞书，<b>只有在本页确认执行后才会改 TikTok 库存</b>。
+          海外仓库存按销量分配到各 listing，国内仓按可售天数补货。每天北京 09:10 / 21:10 自动生成计划并推送飞书。<b>目前只给调整建议，导出清单后人工修改，系统不会自动改库存</b>。
         </p>
       </div>
       <Tabs defaultValue="plan">
@@ -104,7 +105,7 @@ function PlanPanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }
       }
       setBusy("生成计划…");
       const r = await seaApi.buildPlan();
-      toast.success(`已生成：海外仓 ${r.summary.overseas} 条、国内仓 ${r.summary.cn} 条${Number(r.summary.advisory ?? 0) ? `、需人工映射 ${r.summary.advisory} 条` : ""}${r.warnings.length ? `，${r.warnings.length} 条数据提示` : ""}`);
+      toast.success(`已生成：海外仓 ${r.summary.overseas} 条、国内仓 ${r.summary.cn} 条${r.warnings.length ? `，${r.warnings.length} 条数据提示` : ""}`);
       await reload();
       setPlanId(r.plan_id);
       await loadPlan(r.plan_id);
@@ -118,12 +119,12 @@ function PlanPanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }
   }
   async function setAll(kind: "overseas" | "cn", selected: boolean) {
     if (!plan) return;
-    const ids = items.filter((i) => i.kind === kind && !i.advisory && i.exec_status === "PENDING").map((i) => i.id);
+    const ids = items.filter((i) => i.kind === kind && i.exec_status === "PENDING").map((i) => i.id);
     setItems((xs) => xs.map((x) => (ids.includes(x.id) ? { ...x, selected } : x)));
     try { await seaApi.planUpdate(plan.id, ids.map((id) => ({ id, selected }))); } catch (e) { toast.error((e as Error).message); }
   }
 
-  const toRun = items.filter((i) => i.selected && !i.advisory && i.exec_status === "PENDING");
+  const toRun = items.filter((i) => i.selected && i.exec_status === "PENDING");
   async function run() {
     if (!plan) return;
     setConfirmOpen(false);
@@ -142,6 +143,22 @@ function PlanPanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }
     }
   }
 
+  function exportPlan() {
+    if (!plan) return;
+    const head = ["类型", "店铺", "仓库", "商家SKU", "SKU ID", "商品ID", "TikTok仓库ID", "日销", "当前可售", "建议数量", "可售天数(前)", "可售天数(后)", "仓库可用", "可分配", "原因", "提示", "勾选"];
+    const rows = items.map((i) => [
+      i.kind === "cn" ? "国内仓" : "海外仓", shopName(i.shop_id), whName(i.warehouse_code), i.seller_sku ?? "", i.sku_id, i.product_id, i.tts_warehouse_id,
+      i.daily_sales, i.current_qty, i.final_qty ?? i.proposed_qty, i.days_before ?? "无销量", i.days_after ?? "无销量",
+      i.wh_available ?? "", i.pool ?? "", i.reason ?? "", (i.warnings ?? []).join("；"), i.selected ? "是" : "否",
+    ]);
+    const ws = XLSX.utils.aoa_to_sheet([head, ...rows]);
+    ws["!cols"] = head.map((h) => ({ wch: ["原因", "提示"].includes(h) ? 50 : ["SKU ID", "商品ID", "TikTok仓库ID"].includes(h) ? 22 : 12 }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "调整清单");
+    const t = new Date(plan.created_at).toLocaleString("sv-SE", { timeZone: "Asia/Shanghai" }).replace(/[-: ]/g, "").slice(0, 12);
+    XLSX.writeFile(wb, `SEA库存调整清单_${t}.xlsx`);
+  }
+
   async function feishu() {
     if (!plan) return;
     setBusy("发送飞书…");
@@ -149,14 +166,7 @@ function PlanPanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }
     catch (e) { toast.error((e as Error).message); } finally { setBusy(""); }
   }
 
-  const ovItems = items.filter((i) => i.kind === "overseas" && !i.advisory);
-  const advItems = items.filter((i) => i.advisory);
-  async function markAssembled(it: PlanItem) {
-    try {
-      await seaApi.setAssemble(it);
-      toast.success(`${it.seller_sku}：已记为「已做映射」，下次生成计划起预组装件没货时自动按单品组套`);
-    } catch (e) { toast.error((e as Error).message); }
-  }
+  const ovItems = items.filter((i) => i.kind === "overseas");
   const cnItems = items.filter((i) => i.kind === "cn");
   const notConfigured = !ov.linked_shops.length;
 
@@ -174,9 +184,13 @@ function PlanPanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }
           {!ov.plans.length && <option value="">暂无计划</option>}
         </select>
         <Button variant="outline" onClick={feishu} disabled={!!busy || !plan}><Send className="h-4 w-4 mr-1" />发送到飞书</Button>
-        <Button onClick={() => setConfirmOpen(true)} disabled={!!busy || !editable || !toRun.length} className="bg-red-600 hover:bg-red-700">
-          <Play className="h-4 w-4 mr-1" />确认执行所选（{toRun.length}）
-        </Button>
+        <Button variant="outline" onClick={exportPlan} disabled={!!busy || !items.length}><Download className="h-4 w-4 mr-1" />导出调整清单</Button>
+        {/* 一键改库存：初期隐藏，负责人确认后在 Supabase secrets 设 SEA_INV_EXEC_ENABLED=true 才显示 */}
+        {ov.exec_enabled && (
+          <Button onClick={() => setConfirmOpen(true)} disabled={!!busy || !editable || !toRun.length} className="bg-red-600 hover:bg-red-700">
+            <Play className="h-4 w-4 mr-1" />确认执行所选（{toRun.length}）
+          </Button>
+        )}
         {busy && <span className="flex items-center gap-1 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />{busy}</span>}
       </div>
 
@@ -204,34 +218,6 @@ function PlanPanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }
       )}
 
       <ItemTable title="海外仓" items={ovItems} editable={!!editable} shopName={shopName} whName={whName} onPatch={patch} onAll={(v) => setAll("overseas", v)} />
-      {!!advItems.length && (
-        <Card className="border-amber-300">
-          <CardHeader className="py-3"><CardTitle className="text-base">需人工映射（只提醒，不改库存）：{advItems.length} 条</CardTitle></CardHeader>
-          <CardContent className="p-0 overflow-x-auto">
-            <div className="px-4 pb-2 text-xs text-muted-foreground">预组装件扣完预留后已没货，单品可以组套顶上，但要先在仓库系统把该 SKU 映射为单品组合，否则无法发货。映射做好后点「已做映射」，之后自动按单品组套并参与防超卖分配。</div>
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50 text-xs text-muted-foreground"><tr className="[&>th]:px-2 [&>th]:py-2 [&>th]:text-left">
-                <th>SKU</th><th>店铺</th><th>仓</th><th className="text-right">日销</th><th className="text-right">当前</th><th className="text-right">单品可组</th><th className="text-right">可售天数</th><th>说明</th><th></th>
-              </tr></thead>
-              <tbody>
-                {advItems.map((it) => (
-                  <tr key={it.id} className="border-t align-top [&>td]:px-2 [&>td]:py-1.5">
-                    <td className="font-mono whitespace-nowrap" title={it.title ?? ""}>{it.seller_sku || it.sku_id}</td>
-                    <td className="whitespace-nowrap">{shopName(it.shop_id)}</td>
-                    <td className="whitespace-nowrap">{whName(it.warehouse_code)}</td>
-                    <td className="text-right">{it.daily_sales}</td>
-                    <td className="text-right">{it.current_qty}</td>
-                    <td className="text-right">{it.proposed_qty} 套</td>
-                    <td className="text-right whitespace-nowrap"><span className={dayCls(it.days_before)}>{fmtDays(it.days_before)}</span></td>
-                    <td className="text-xs max-w-[360px]">{it.reason}</td>
-                    <td><Button size="sm" variant="outline" onClick={() => markAssembled(it)}>已做映射</Button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
-      )}
       <ItemTable title="国内仓" hint="国内仓实物库存未接入，勾选前请确认仓库确有货" items={cnItems} editable={!!editable} shopName={shopName} whName={whName} onPatch={patch} onAll={(v) => setAll("cn", v)} />
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
@@ -442,7 +428,7 @@ function ShopSyncCard({ ov }: { ov: Overview }) {
       <div className="font-medium">店铺同步状态</div>
       {ov.shop_sync.map((s) => (
         <div key={s.shop_id} className={s.error ? "text-red-600" : ""}>
-          {name(s.shop_id)}：listing {bj(s.listings_at)}（{s.slots_count ?? 0} 个槽位），订单 {bj(s.orders_at)}（{s.orders_count ?? 0} 单）{s.error && ` ⚠ ${s.error}`}
+          {name(s.shop_id)}：listing {bj(s.listings_at)}（{s.slots_count ?? 0} 个槽位），订单 {bj(s.orders_at)}（本次拉 {s.orders_count ?? 0} 单，日销量已存到 {s.sales_synced_day ?? "—"}）{s.error && ` ⚠ ${s.error}`}
         </div>
       ))}
     </CardContent></Card>

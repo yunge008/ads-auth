@@ -209,20 +209,16 @@ Deno.test("预组装到货后：仓库有同名实物 SKU 时按实物分配，�
   eq(r.items.map((i) => [i.sku_id, i.proposed_qty, i.reason?.includes("组合") ?? false]), [["C", 20, false]]);
 });
 
-Deno.test("预组装实物：有可分配只按实物（不叠加单品）；没货 → 只提醒需人工映射，不改库存；已做映射 → 自动按单品组套", () => {
+Deno.test("预组装实物：有可分配只按实物（不叠加单品）；没货（≤ 预留）→ 直接用单品组套；单品凑不齐才按实物", () => {
   // 实物 10、单品可组 20 套：只按实物，可上 10 − 5 = 5
   const a = run([th({ sku_id: "C", seller_sku: "AR108+B4", qty: 0, sold: 10 })], { "AR108+B4": 10, AR108: 25, B4: 25 });
-  eq(a.items.map((i) => [i.proposed_qty, !!i.advisory]), [[5, false]]);
-  // 实物只剩 3（≤ 预留）：listing 当前 2 件 → 按实物压到 0（执行时会跳过 0）+ 一条提醒（单品可组 min(100, 40) = 40 套）
+  eq(a.items.map((i) => [i.proposed_qty, i.reason?.includes("单品组套") ?? false]), [[5, false]]);
+  // 实物只剩 3（预留不自动突破）→ 单品组套：min(100, 40) = 40
   const b = run([th({ sku_id: "C", seller_sku: "AR108+B4", qty: 2, sold: 10 })], { "AR108+B4": 3, AR108: 105, B4: 45 });
-  eq(b.items.map((i) => [i.proposed_qty, !!i.advisory]).sort(), [[0, false], [40, true]]);
-  eq(b.items.find((i) => i.advisory)!.warnings.includes("只提醒，不改库存"), true);
-  // 已在仓库系统做好映射：自动按单品组套，不再提醒
-  const c = planOverseas({ warehouses: [whTH], slots: [th({ sku_id: "C", seller_sku: "AR108+B4", qty: 2, sold: 10 })], stock: stock("BS-TH", { "AR108+B4": 3, AR108: 105, B4: 45 }), overrides: new Map(), assembleOk: new Set(["TH1|C"]), params: P });
-  eq(c.items.map((i) => [i.proposed_qty, !!i.advisory, i.reason?.includes("临时组合") ?? false]), [[40, false, true]]);
-  // 单品凑不齐：只按实物，不提醒
+  eq(b.items.map((i) => [i.proposed_qty, i.reason?.includes("单品组套") ?? false]), [[40, true]]);
+  // 单品凑不齐：只按实物（压到 0）
   const d = run([th({ sku_id: "C", seller_sku: "AR108+B4", qty: 2, sold: 10 })], { "AR108+B4": 3, AR108: 105 });
-  eq(d.items.map((i) => [i.proposed_qty, !!i.advisory]), [[0, false]]);
+  eq(d.items.map((i) => i.proposed_qty), [0]);
 });
 
 Deno.test("跨店铺多个 listing 共用单品：合计不超卖", () => {
@@ -241,4 +237,32 @@ Deno.test("跨店铺多个 listing 共用单品：合计不超卖", () => {
   eq(q.A + q.B + q.C <= 1000 && q.B <= 200 && q.C <= 100, true);
   eq([q.B, q.C], [200, 100]);
   eq(q.A, 700);
+});
+
+// ── 每日销量滚动 ──
+import { addDays, dayStartSec, localDay, salesPullStart, windowSold } from "./sea-inventory.ts";
+
+Deno.test("本地日期：PH UTC+8 / TH UTC+7 跨日边界", () => {
+  const t = Date.parse("2026-11-17T16:30:00Z") / 1000; // PH 11-18 00:30，TH 11-17 23:30
+  eq([localDay(t, 8), localDay(t, 7)], ["2026-11-18", "2026-11-17"]);
+  eq(dayStartSec("2026-11-18", 8), Date.parse("2026-11-17T16:00:00Z") / 1000);
+  eq(addDays("2026-03-01", -1), "2026-02-28");
+});
+
+Deno.test("滚动拉取起点：首次 60 天；之后上次同步日 − 2；断档太久不早于 60 天", () => {
+  eq(salesPullStart("2026-11-18", null), "2026-09-19");
+  eq(salesPullStart("2026-11-18", "2026-11-18"), "2026-11-16");
+  eq(salesPullStart("2026-11-18", "2026-11-17"), "2026-11-15");
+  eq(salesPullStart("2026-11-18", "2026-08-01"), "2026-09-19");
+});
+
+Deno.test("窗口销量只取昨天往前 N 个完整日，不含今天", () => {
+  const rows = [
+    { sku_id: "A", warehouse_id: "W", day: "2026-11-18", units: 99 }, // 今天，不计
+    { sku_id: "A", warehouse_id: "W", day: "2026-11-17", units: 3 },
+    { sku_id: "A", warehouse_id: "W", day: "2026-11-04", units: 5 },  // 第 14 天，计入
+    { sku_id: "A", warehouse_id: "W", day: "2026-11-03", units: 7 },  // 第 15 天，不计
+    { sku_id: "A", warehouse_id: "", day: "2026-11-10", units: 1 },
+  ];
+  eq([...windowSold(rows, "2026-11-18", 14).entries()].sort(), [["A|", 1], ["A|W", 8]]);
 });
