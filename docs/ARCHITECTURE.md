@@ -180,5 +180,8 @@
   - **千易**（MY `ARTPHRO-MY` / PH `ARTPHRO.PH`，`_shared/wh-providers.ts`）：`POST https://asia.qianyierp.com/api/v1/inventory` form-data，serviceType `QUERY_SIMPLE_LIST_INVENTORY_V2`，sign=md5(appId=…bizParam=…serviceType=…timestamp=…+appSecret)；`provider_ref`=千易仓库名称，取 `available`。2026-11-18 实测通过。
   - **顶妙WMS / TOPWMS**（TH1）：`POST https://gogo.topwms.com/api/open/erp/goods_sku_warehouse/search_page`，header AppKey + Signature=md5(md5(body)+appSecret)，body 带 requestTimestamp（`source` 可不传，传错报错），cursor 翻页（`data.total` 恒为 0），`provider_ref`=warehouseId `147`，取 `availableStockNum`。2026-11-18 实测通过（124 个 SKU）。
   - **云盘（RPA 导出 Excel）**：BigSeller（VN）API 收费，RPA 每天导出库存表到 Google 云盘文件夹；`_shared/gdrive.ts` 用服务账号 JWT（RS256）换 token，Drive v3 列文件夹取最新表格（可按文件名过滤，Google 表格导出 xlsx），`_shared/stock-file.ts` 解析（自动识别表头或按 `file_config` 指定列名，可按仓库列过滤，同 SKU 合计）。库存时间 = 文件修改时间，同一文件同一修改时间不重复导入；解析 0 行不覆盖。任何仓配了 `drive_folder` 都走这条路。
+  - **页面批量上传**（`src/lib/stockUpload.ts`，浏览器解析）：一次多选 BigSeller / 顶妙 TOPWMS / 千易导出文件，按文件「仓库」列自动分仓（匹配 `file_config.warehouse_value` → `provider_ref` → 仓库名），整仓覆盖；有 API 的仓默认不勾选只做核对；BigSeller 文件名时间戳作为库存时间（`import_stock.as_of`）。各仓文件仓库名：QY-MY `ARTPHRO-MY`、QY-PH `ARTPHRO.PH`、DM-TH1 `GOGO云仓`、BS-VN `artphro -vn`、TH-NEW `AR thailand 泰国`（BigSeller）。
+  - **BigSeller 组合 SKU 默认不导入**（前后端解析器一致）：2026-11-18 核对，组合 SKU 的整仓可用 = 各单品可用的最小值（如 AR108+ B4 = min(AR108 363, B4 269) = 269），与单品共用实物，一起导入会重复分配；挂组合 SKU 的 listing 目前会显示「仓库无此 SKU」、不调整。
+  - 2026-11-18 对账：千易 MY API 与导出逐 SKU 一致（2992）；PH 8 个 SKU 差 1–2 件（API 更低，导出更早，合计 38335 vs 38344）；API 多出的 SKU 均为 0 库存；顶妙 API 与导出逐 SKU 一致（124 SKU / 575）。
   - 接口返回 0 个 SKU 时不覆盖。Secrets：`QIANYI_ACCESS_ID`/`QIANYI_SECRET_KEY`、`DINGMIAO_BASE_URL`/`DINGMIAO_APP_KEY`/`DINGMIAO_APP_SECRET`（`DINGMIAO_SOURCE` 可选）、`GDRIVE_SERVICE_ACCOUNT_JSON`。
 

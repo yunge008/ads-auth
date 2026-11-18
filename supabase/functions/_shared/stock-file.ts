@@ -10,13 +10,15 @@ export type FileConfig = {
   name_col?: string;        // 商品名称列表头（可选）
   warehouse_col?: string;   // 仓库列表头（文件含多个仓时用）
   warehouse_value?: string; // 只取该仓库（与仓库列完全一致，去首尾空格）
+  include_combo?: boolean;  // BigSeller 组合 SKU 库存由单品推算，默认跳过以免重复计算
 };
 export type ParsedRow = { wh_sku: string; available: number; on_hand: number | null; product_name: string | null };
 export type ParseResult = { rows: ParsedRow[]; notes: string[]; sheet: string | null; header_row: number | null };
 
-const SKU = /^(sku|商品sku|仓库sku|产品sku|seller\s*sku|商家sku|sku编码|商品sku编码|商品编码|产品编码|编码|商品sku码)$/i;
-const AVAIL = /^(可用|可用库存|可用数量|可用量|可用库存数|可售|可售库存|可售数量|可销售库存|available|available\s*(qty|stock|quantity))$/i;
-const ONHAND = /^(在库|在库库存|实物库存|总库存|总量|库存|库存总量|on\s*hand|现有库存)$/i;
+const SKU = /^(sku|sku编号|商品sku|仓库sku|产品sku|seller\s*sku|商家sku|sku编码|商品sku编码|商品编码|产品编码|编码|商品sku码)$/i;
+const AVAIL = /^(整仓可用|可用|可用库存|可用数量|可用量|可用库存数|可售|可售库存|可售数量|可销售库存|available|available\s*(qty|stock|quantity))$/i;
+const ONHAND = /^(现有库存|在库量|在库|在库库存|实物库存|总库存|总量|库存|库存总量|on\s*hand)$/i;
+const TYPE = /^(sku类型|商品类型)$/i;
 const NAME = /^(商品名称|名称|品名|产品名称|product\s*name|name|title|商品标题)$/i;
 
 const norm = (s: unknown) => String(s ?? "").replace(/\s+/g, "").toLowerCase();
@@ -32,9 +34,9 @@ function findCol(row: string[], name: string | undefined, re: RegExp): number {
   return row.findIndex((c) => re.test(String(c ?? "").trim()));
 }
 
-export function parseStockTable(table: unknown[][], cfg: FileConfig = {}): Omit<ParseResult, "sheet"> {
+export function parseStockTable(table: unknown[][], cfg: FileConfig & { sheet_is_combo?: boolean } = {}): Omit<ParseResult, "sheet"> {
   const notes: string[] = [];
-  let hi = -1, cSku = -1, cAv = -1, cOn = -1, cName = -1, cWh = -1;
+  let hi = -1, cSku = -1, cAv = -1, cOn = -1, cName = -1, cWh = -1, cType = -1;
   for (let i = 0; i < Math.min(20, table.length); i++) {
     const row = (table[i] ?? []).map((c) => String(c ?? "").trim());
     const s = findCol(row, cfg.sku_col, SKU);
@@ -43,7 +45,8 @@ export function parseStockTable(table: unknown[][], cfg: FileConfig = {}): Omit<
       hi = i; cSku = s; cAv = a;
       cOn = findCol(row, cfg.onhand_col, ONHAND);
       cName = findCol(row, cfg.name_col, NAME);
-      cWh = cfg.warehouse_col ? findCol(row, cfg.warehouse_col, /$^/) : -1;
+      cWh = findCol(row, cfg.warehouse_col, /^(仓库|仓库名称|warehouse)$/i);
+      cType = findCol(row, undefined, TYPE);
       break;
     }
   }
@@ -55,12 +58,13 @@ export function parseStockTable(table: unknown[][], cfg: FileConfig = {}): Omit<
   if (cfg.warehouse_col && cWh < 0) notes.push(`找不到仓库列「${cfg.warehouse_col}」，未按仓库过滤`);
   const wantWh = (cfg.warehouse_value ?? "").trim();
   const map = new Map<string, ParsedRow>();
-  let skipped = 0, otherWh = 0, dup = 0, neg = 0;
+  let skipped = 0, otherWh = 0, dup = 0, neg = 0, combos = 0;
   for (let i = hi + 1; i < table.length; i++) {
     const r = table[i] ?? [];
     const sku = String(r[cSku] ?? "").trim();
     const av = num(r[cAv]);
     if (!sku && av === null) continue;
+    if (!cfg.include_combo && (cfg.sheet_is_combo || (cType >= 0 && /combination|组合/i.test(String(r[cType] ?? ""))))) { combos++; continue; }
     if (!sku || av === null) { skipped++; continue; }
     if (cWh >= 0 && wantWh && String(r[cWh] ?? "").trim() !== wantWh) { otherWh++; continue; }
     if (av < 0) neg++;
@@ -74,6 +78,7 @@ export function parseStockTable(table: unknown[][], cfg: FileConfig = {}): Omit<
       map.set(sku, { wh_sku: sku, available: Math.max(0, Math.trunc(av)), on_hand: on === null ? null : Math.trunc(on), product_name: cName >= 0 ? String(r[cName] ?? "").trim() || null : null });
     }
   }
+  if (combos) notes.push(`跳过 ${combos} 个组合 SKU（库存由单品推算，导入会重复计算）`);
   if (skipped) notes.push(`${skipped} 行 SKU 为空或可用数量不是数字，已跳过`);
   if (otherWh) notes.push(`${otherWh} 行属于其他仓库，已跳过`);
   if (dup) notes.push(`${dup} 行 SKU 重复，已按 SKU 合计（如果文件含多个仓，请在配置里填仓库列与仓库名）`);
@@ -83,18 +88,34 @@ export function parseStockTable(table: unknown[][], cfg: FileConfig = {}): Omit<
 
 export function parseStockWorkbook(bytes: Uint8Array, cfg: FileConfig = {}): ParseResult {
   const wb = XLSX.read(bytes, { type: "array" });
-  const names = cfg.sheet ? [cfg.sheet] : wb.SheetNames;
   if (cfg.sheet && !wb.Sheets[cfg.sheet]) return { rows: [], notes: [`文件里没有 sheet「${cfg.sheet}」（有：${wb.SheetNames.join("、")}）`], sheet: null, header_row: null };
-  let first: ParseResult | null = null;
+  const names = cfg.sheet ? [cfg.sheet] : wb.SheetNames;
+  // 所有能识别表头的 sheet 合并（BigSeller 分「单个SKU」「组合SKU」两个 sheet）；组合 sheet 默认整张跳过
+  const merged = new Map<string, ParsedRow>();
+  const notes: string[] = [];
+  const used: string[] = [];
+  let header: number | null = null;
   for (const name of names) {
-    const table = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[name], { header: 1, raw: false, defval: "" });
-    const p = parseStockTable(table, cfg);
-    const res = { ...p, sheet: name };
-    if (p.header_row !== null) {
-      if (wb.SheetNames.length > 1 && !cfg.sheet) res.notes = [`文件有 ${wb.SheetNames.length} 个 sheet，用的是「${name}」`, ...res.notes];
-      return res;
+    const ws = wb.Sheets[name];
+    // 有些导出文件 dimension 元数据错误（只标 A1），按实际单元格重算范围
+    const cells = Object.keys(ws).filter((k) => !k.startsWith("!"));
+    if (cells.length) {
+      let r0 = Infinity, c0 = Infinity, r1 = 0, c1 = 0;
+      for (const k of cells) { const a = XLSX.utils.decode_cell(k); r0 = Math.min(r0, a.r); c0 = Math.min(c0, a.c); r1 = Math.max(r1, a.r); c1 = Math.max(c1, a.c); }
+      ws["!ref"] = XLSX.utils.encode_range({ s: { r: r0, c: c0 }, e: { r: r1, c: c1 } });
     }
-    first ??= res;
+    const table = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: true, defval: "" });
+    const p = parseStockTable(table, { ...cfg, sheet_is_combo: /组合|combo/i.test(name) });
+    if (p.header_row === null) continue;
+    header ??= p.header_row;
+    used.push(name);
+    notes.push(...p.notes.map((n) => `[${name}] ${n}`));
+    for (const r of p.rows) {
+      const prev = merged.get(r.wh_sku);
+      if (prev) { prev.available += r.available; notes.push(`[${name}] SKU ${r.wh_sku} 与其他 sheet 重复，已合计`); }
+      else merged.set(r.wh_sku, { ...r });
+    }
   }
-  return first ?? { rows: [], notes: ["文件没有 sheet"], sheet: null, header_row: null };
+  if (!used.length) return { rows: [], notes: ["所有 sheet 前 20 行都找不到表头（需要 SKU 列和可用库存列）"], sheet: null, header_row: null };
+  return { rows: [...merged.values()], notes, sheet: used.join("、"), header_row: header };
 }

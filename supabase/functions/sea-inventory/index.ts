@@ -5,7 +5,7 @@
 //   save_settings {…参数}
 //   save_warehouse {code, name?, status?, links?, provider_ref?, note?}
 //   shop_warehouses {shop_id}         只读：店铺在 TikTok 里的仓库列表（绑定仓库用）
-//   import_stock {warehouse_code, rows:[{wh_sku, available, on_hand?, product_name?}], replace?=true}
+//   import_stock {warehouse_code, rows:[{wh_sku, available, on_hand?, product_name?}], replace?=true, as_of?, file_name?}  页面上传（整仓覆盖）
 //   sync_warehouse {code, force?}     配了云盘文件夹 → 取最新 RPA 导出文件（库存时间 = 文件修改时间，同一文件不重复导入）；否则从仓库系统 API 拉库存整仓覆盖（千易 QUERY_SIMPLE_LIST_INVENTORY_V2 / 顶妙 goods_sku_warehouse/search_page，见 _shared/wh-providers.ts）
 //   drive_preview {code, drive_folder?, drive_name_pattern?, file_config?}  云盘：列文件 + 预览解析（不写库）
 //   provider_warehouses {code}        仓库系统里的仓库列表（绑定 provider_ref 用：千易=仓库名称，顶妙=warehouseId）
@@ -714,7 +714,15 @@ Deno.serve(async (req) => {
         if (r.code !== 0) bad(apiErr("warehouses", r));
         return json({ warehouses: r.data?.warehouses ?? [] });
       }
-      case "import_stock": return json(await importStock(b));
+      case "import_stock": {
+        // 页面上传：as_of = 文件导出时间（BigSeller 文件名带时间戳），只接受 7 天内且不晚于现在，否则按当前时间
+        let asOf: string | undefined;
+        if (b.as_of) {
+          const t = Date.parse(String(b.as_of));
+          if (Number.isFinite(t) && t <= Date.now() + 10 * 60_000 && t >= Date.now() - 7 * 86400_000) asOf = new Date(t).toISOString();
+        }
+        return json(await importStock(b, "manual", asOf, { stock_file_name: b.file_name ? String(b.file_name).slice(0, 200) : null }));
+      }
       case "sync_warehouse": return json(await syncWarehouse(String(b.code ?? ""), !!b.force));
       case "drive_preview": return json(await drivePreview(b));
       case "provider_warehouses": return json(await providerWarehouses(String(b.code ?? "")));

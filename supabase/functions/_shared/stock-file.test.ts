@@ -86,3 +86,16 @@ Deno.test("云盘：服务账号 JWT（RS256）签名可被公钥验证、声明
   const ok = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", kp.publicKey, sig, new TextEncoder().encode(`${h}.${c}`));
   eq(ok, true);
 });
+
+Deno.test("BigSeller 导出：单个SKU + 组合SKU 两个 sheet，组合默认跳过；整仓可用列；按仓库过滤", () => {
+  const head = ["SKU编号", "仓库", "现有库存", "订单已锁", "整仓可用", "活动预留", "SKU类型"];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([head, ["AR108", "artphro -vn", 365, 2, 363, 0, "Single SKU"], ["B4", "artphro -vn", 269, 0, 269, 0, "Single SKU"]]), "单个SKU");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([head, ["AR108+ B4", "artphro -vn", 269, 0, 269, 0, "Combination SKU"]]), "组合SKU");
+  const bytes = new Uint8Array(XLSX.write(wb, { type: "array", bookType: "xlsx" }));
+  const r = parseStockWorkbook(bytes, { warehouse_value: "artphro -vn" });
+  eq(r.rows.map((x) => [x.wh_sku, x.available, x.on_hand]), [["AR108", 363, 365], ["B4", 269, 269]]);
+  eq(r.notes.some((n) => n.includes("跳过 1 个组合")), true);
+  const r2 = parseStockWorkbook(bytes, { warehouse_value: "artphro -vn", include_combo: true });
+  eq(r2.rows.length, 3);
+});

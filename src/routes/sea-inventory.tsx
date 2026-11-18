@@ -13,8 +13,9 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { getAdminName, getPasscode } from "@/lib/api";
+import { matchWarehouse, parseUploadFile, type UpGroup } from "@/lib/stockUpload";
 import {
-  type MapRow, type Overview, parseStockFile, parseStockPaste, type ParsedStock, type PlanItem, type PlanRow,
+  type MapRow, type Overview, parseStockPaste, type ParsedStock, type PlanItem, type PlanRow,
   type SeaShop, type SeaWarehouse, seaApi, type DrivePreview, type FileConfig, sendPlanToFeishu, type StockRow,
 } from "@/lib/seaInventoryApi";
 
@@ -286,9 +287,118 @@ function WarehousePanel({ ov, reload }: { ov: Overview; reload: () => Promise<vo
         每个实体仓绑定各店铺在 TikTok 里对应的仓库（一个店铺一个 warehouse_id）。海外仓库存超过 {ov.settings.stock_max_age_hours} 小时未更新的仓本次不参与调整。
         泰国新仓启用时把状态改为「新仓接入中」：listing 还没挂新仓的会生成「新仓首次」设置项；顶妙 TH1 设为「逐步退出」。
       </div>
+      <BatchUploadCard ov={ov} reload={reload} />
       <ShopSyncCard ov={ov} />
       {ov.warehouses.map((w) => <WarehouseCard key={w.code} w={w} shops={ov.shops} reload={reload} />)}
     </div>
+  );
+}
+
+type Pick = { include: boolean; target: string };
+/** 批量上传：一次选多个导出文件（BigSeller / 顶妙 / 千易），按文件里的「仓库」列自动分到对应仓，预览后导入（整仓覆盖） */
+function BatchUploadCard({ ov, reload }: { ov: Overview; reload: () => Promise<void> }) {
+  const [groups, setGroups] = React.useState<UpGroup[]>([]);
+  const [picks, setPicks] = React.useState<Record<string, Pick>>({});
+  const [includeCombo, setIncludeCombo] = React.useState(false);
+  const [files, setFiles] = React.useState<File[]>([]);
+  const [busy, setBusy] = React.useState(false);
+  const overseas = ov.warehouses.filter((w) => w.kind === "overseas");
+  const isApi = (code: string) => ["qianyi", "dingmiao"].includes(ov.warehouses.find((w) => w.code === code)?.provider ?? "");
+
+  const parse = async (fs: File[], combo: boolean) => {
+    setBusy(true);
+    try {
+      const all: UpGroup[] = [];
+      for (const f of fs) all.push(...(await parseUploadFile(f, combo)));
+      const p: Record<string, Pick> = {};
+      for (const g of all) {
+        const w = matchWarehouse(g.whValue, overseas);
+        // 能走 API 的仓默认不导入（以 API 为准），只做核对
+        p[g.key] = { target: w?.code ?? "", include: !!w && g.rows.length > 0 && !isApi(w.code) };
+      }
+      setGroups(all); setPicks(p);
+    } catch (e) { toast.error(`解析失败：${(e as Error).message}`); } finally { setBusy(false); }
+  };
+
+  const doImport = async () => {
+    // 同一目标仓的多个分组合并（如含组合 SKU 时单品表 + 组合表）
+    const byWh = new Map<string, { rows: Map<string, UpGroup["rows"][number]>; asOf: string | null; files: Set<string> }>();
+    for (const g of groups) {
+      const pk = picks[g.key];
+      if (!pk?.include || !pk.target) continue;
+      const cur = byWh.get(pk.target) ?? { rows: new Map(), asOf: null, files: new Set<string>() };
+      for (const r of g.rows) {
+        const prev = cur.rows.get(r.wh_sku);
+        cur.rows.set(r.wh_sku, prev ? { ...prev, available: prev.available + r.available } : { ...r });
+      }
+      // 库存时间取各文件里最早的导出时间（保守）
+      if (g.exportTime && (!cur.asOf || g.exportTime < cur.asOf)) cur.asOf = g.exportTime;
+      cur.files.add(g.file);
+      byWh.set(pk.target, cur);
+    }
+    if (!byWh.size) { toast.error("没有勾选要导入的仓"); return; }
+    setBusy(true);
+    try {
+      for (const [code, x] of byWh) {
+        const r = await seaApi.importStock(code, [...x.rows.values()], { as_of: x.asOf, file_name: [...x.files].join("、") });
+        toast.success(`${ov.warehouses.find((w) => w.code === code)?.name ?? code}：导入 ${r.rows} 个 SKU，可用合计 ${r.total_available}`);
+        r.errors.forEach((e) => toast.warning(e));
+      }
+      setGroups([]); setPicks({}); setFiles([]);
+      await reload();
+    } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
+  };
+
+  return (
+    <Card><CardContent className="p-3 space-y-2 text-sm">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="font-medium">上传库存表</span>
+        <label className="inline-flex">
+          <input type="file" multiple accept=".xlsx,.xls,.csv" className="hidden" onChange={(e) => {
+            const fs = [...(e.target.files ?? [])]; e.target.value = "";
+            if (fs.length) { setFiles(fs); void parse(fs, includeCombo); }
+          }} />
+          <span className="inline-flex items-center h-8 px-3 rounded-md border cursor-pointer hover:bg-muted"><Upload className="h-4 w-4 mr-1" />选择文件（可多选）</span>
+        </label>
+        <label className="flex items-center gap-1"><Checkbox checked={includeCombo} onCheckedChange={(v) => { setIncludeCombo(v === true); if (files.length) void parse(files, v === true); }} />含组合 SKU</label>
+        <span className="text-xs text-muted-foreground">支持 BigSeller、顶妙 TOPWMS、千易导出；按文件里的「仓库」列自动分仓，<b>导入会整仓覆盖</b>。千易 / 顶妙有 API 的仓默认不勾选，只用来核对。</span>
+      </div>
+      {busy && <div className="flex items-center gap-1 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />处理中…</div>}
+      {!!groups.length && (
+        <>
+          <table className="w-full text-xs">
+            <thead className="text-muted-foreground"><tr className="[&>th]:text-left [&>th]:px-1">
+              <th>导入</th><th>文件 / sheet</th><th>文件里的仓库</th><th>导入到</th><th className="text-right">SKU</th><th className="text-right">有货</th><th className="text-right">可用合计</th><th>导出时间</th><th>说明</th>
+            </tr></thead>
+            <tbody>
+              {groups.map((g) => {
+                const pk = picks[g.key] ?? { include: false, target: "" };
+                return (
+                  <tr key={g.key} className="border-t align-top [&>td]:px-1 [&>td]:py-1">
+                    <td><Checkbox checked={pk.include} disabled={!pk.target || !g.rows.length} onCheckedChange={(v) => setPicks({ ...picks, [g.key]: { ...pk, include: v === true } })} /></td>
+                    <td className="max-w-[220px] break-all">{g.file}<div className="text-muted-foreground">{g.sheet}</div></td>
+                    <td>{g.whValue ?? "（无仓库列）"}</td>
+                    <td>
+                      <select className="h-7 rounded border px-1" value={pk.target} onChange={(e) => setPicks({ ...picks, [g.key]: { target: e.target.value, include: !!e.target.value && g.rows.length > 0 } })}>
+                        <option value="">选择仓库…</option>
+                        {overseas.map((w) => <option key={w.code} value={w.code}>{w.name}</option>)}
+                      </select>
+                      {pk.target && isApi(pk.target) && <div className="text-amber-700">该仓有 API，导入会覆盖 API 数据</div>}
+                    </td>
+                    <td className="text-right">{g.rows.length}</td>
+                    <td className="text-right">{g.rows.filter((r) => r.available > 0).length}</td>
+                    <td className="text-right">{g.rows.reduce((t, r) => t + r.available, 0)}</td>
+                    <td>{g.exportTime ? bj(g.exportTime) : "—"}</td>
+                    <td className="max-w-[260px]">{g.notes.join("；")}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <Button size="sm" disabled={busy || !Object.values(picks).some((p) => p.include)} onClick={doImport}>导入勾选的仓</Button>
+        </>
+      )}
+    </CardContent></Card>
   );
 }
 
@@ -417,16 +527,9 @@ function WarehouseCard({ w, shops, reload }: { w: SeaWarehouse; shops: SeaShop[]
                   <RefreshCw className="h-4 w-4 mr-1" />{w.drive_folder ? "从云盘同步" : "API 同步"}
                 </Button>
               )}
-              <label className="inline-flex">
-                <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={async (e) => {
-                  const f = e.target.files?.[0]; e.target.value = "";
-                  if (f) try { setParsed(await parseStockFile(f)); } catch (err) { toast.error(`解析失败：${(err as Error).message}`); }
-                }} />
-                <span className="inline-flex items-center h-8 px-3 rounded-md border cursor-pointer hover:bg-muted"><Upload className="h-4 w-4 mr-1" />上传库存表</span>
-              </label>
               <Button size="sm" variant="ghost" onClick={async () => { try { setStock((await seaApi.stockList(w.code)).rows); } catch (e) { toast.error((e as Error).message); } }}>查看当前库存</Button>
             </div>
-            <Textarea rows={2} placeholder="或粘贴两列：SKU ⇥ 可用库存（可带表头，Excel 直接复制）" value={paste}
+            <Textarea rows={2} placeholder="粘贴两列：SKU ⇥ 可用库存（可带表头，Excel 直接复制）；整份文件请用上方「上传库存表」" value={paste}
               onChange={(e) => { setPaste(e.target.value); setParsed(e.target.value.trim() ? parseStockPaste(e.target.value) : null); }} />
             {parsed && (
               <div className="rounded border p-2 space-y-1">

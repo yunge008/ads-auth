@@ -1,5 +1,4 @@
 // SEA 库存监控前端调用，全部走 Edge Function `sea-inventory`（tab 权限 sea-inventory）。
-import * as XLSX from "xlsx";
 import { invokeFn } from "@/lib/api";
 
 export type WhLink = { shop_id: string; tts_warehouse_id: string };
@@ -56,8 +55,8 @@ export const seaApi = {
   drivePreview: (code: string, cfg: { drive_folder?: string; drive_name_pattern?: string; file_config?: FileConfig }) => fn<DrivePreview>("drive_preview", { code, ...cfg }),
   saveWarehouse: (w: Partial<SeaWarehouse> & { code: string }) => fn<{ ok: true }>("save_warehouse", w),
   shopWarehouses: (shop_id: string) => fn<{ warehouses: Array<{ id: string; name?: string; type?: string; sub_type?: string; is_default?: boolean; effect_status?: string; address?: { region_code?: string } }> }>("shop_warehouses", { shop_id }),
-  importStock: (warehouse_code: string, rows: Array<{ wh_sku: string; available: number; on_hand?: number | null; product_name?: string | null }>) =>
-    fn<{ ok: true; rows: number; total_available: number; errors: string[] }>("import_stock", { warehouse_code, rows }),
+  importStock: (warehouse_code: string, rows: Array<{ wh_sku: string; available: number; on_hand?: number | null; product_name?: string | null }>, opts: { as_of?: string | null; file_name?: string } = {}) =>
+    fn<{ ok: true; rows: number; total_available: number; errors: string[] }>("import_stock", { warehouse_code, rows, ...opts }),
   syncWarehouse: (code: string, force = false) => fn<{ ok: boolean; error?: string; message?: string; rows?: number; total_available?: number; notes?: string[]; errors?: string[]; file?: string; unchanged?: boolean }>("sync_warehouse", { code, force }),
   providerWarehouses: (code: string) => fn<{ provider: string; warehouses: Array<{ ref: string; name: string; code: string | null; country: string | null; status: string | null }> }>("provider_warehouses", { code }),
   syncShop: (shop_id: string, cursor: unknown) => fn<{ done: boolean; cursor: unknown; slots?: number; orders?: number }>("sync_shop", { shop_id, cursor }),
@@ -124,15 +123,6 @@ export function parseStockTable(table: unknown[][]): ParsedStock {
   }
   if (skipped) notes.push(`${skipped} 行 SKU 为空或可用数量不是数字，已跳过`);
   return { rows, notes };
-}
-
-export async function parseStockFile(file: File): Promise<ParsedStock> {
-  const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
-  const notes: string[] = [];
-  if (wb.SheetNames.length > 1) notes.push(`文件有 ${wb.SheetNames.length} 个 sheet，只读第一个「${wb.SheetNames[0]}」`);
-  const table = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: "" });
-  const p = parseStockTable(table);
-  return { rows: p.rows, notes: [...notes, ...p.notes] };
 }
 
 export function parseStockPaste(text: string): ParsedStock {
