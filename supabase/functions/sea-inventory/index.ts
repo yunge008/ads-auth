@@ -15,6 +15,7 @@
 //   plan_get {plan_id?}               计划 + 明细（默认最新一条）
 //   plan_update {plan_id, items:[{id, selected?, final_qty?}]}
 //   execute {plan_id, item_ids?, confirm:"EXECUTE"}   执行前实时读库存 → Update Inventory（INCREMENTAL）→ 逐条记结果；分片返回 remaining
+//   set_assemble {shop_id, sku_id, product_id, seller_sku, ok?}  人工确认已在仓库系统做好单品组合映射
 //   build_message {plan_id?}          飞书卡片（由服务端路由发送）
 import { admin, verifyPasscode } from "../_shared/auth.ts";
 import { corsHeaders } from "../_shared/feishu.ts";
@@ -412,12 +413,13 @@ async function buildPlan(b: Record<string, unknown>, who: string) {
   const okSlots = slots.filter((s) => !badShops.has(s.shop_id));
   const map = await allMap();
   const overrides = new Map(map.filter((r) => r.wh_sku_override).map((r) => [`${r.shop_id}|${r.sku_id}`, r.wh_sku_override!]));
-  const ov = planOverseas({ warehouses: usable, slots: okSlots, stock, overrides, params: p });
+  const assembleOk = new Set(map.filter((r) => (r as { assemble_ok?: boolean }).assemble_ok).map((r) => `${r.shop_id}|${r.sku_id}`));
+  const ov = planOverseas({ warehouses: usable, slots: okSlots, stock, overrides, assembleOk, params: p });
   const cn = planCn(usable, okSlots, p);
   const items = sortByUrgency([...ov.items, ...cn]);
   const missing = ov.groups.filter((g) => g.wh_available === null);
   const summary = {
-    overseas: ov.items.length, cn: cn.length, groups_checked: ov.groups.length, groups_triggered: ov.groups.filter((g) => g.triggered).length,
+    overseas: ov.items.filter((i) => !i.advisory).length, advisory: ov.items.filter((i) => i.advisory).length, cn: cn.length, groups_checked: ov.groups.length, groups_triggered: ov.groups.filter((g) => g.triggered).length,
     missing_in_warehouse: missing.length, missing_sample: missing.slice(0, 50),
     min_days_overseas: minDays(ov.items), min_days_cn: minDays(cn), slots: okSlots.length,
   };
@@ -427,7 +429,7 @@ async function buildPlan(b: Record<string, unknown>, who: string) {
     source: String(b.source ?? "MANUAL"), created_by: who, params: p, summary, data_warnings: warnings, map_diff: b.map_diff ?? null,
   }).select("id").single();
   if (error) throw error;
-  const rows = items.map((i) => ({ ...i, plan_id: plan.id }));
+  const rows = items.map((i) => ({ ...i, advisory: !!i.advisory, selected: !i.advisory, plan_id: plan.id }));
   for (let k = 0; k < rows.length; k += 500) {
     const { error: e2 } = await db.from("sea_inv_plan_items").insert(rows.slice(k, k + 500));
     if (e2) throw e2;
@@ -481,7 +483,7 @@ async function planUpdate(b: Record<string, unknown>) {
       }
     }
     if (Object.keys(patch).length) {
-      const { error } = await db.from("sea_inv_plan_items").update(patch).eq("id", Number(it.id)).eq("plan_id", id).eq("exec_status", "PENDING");
+      const { error } = await db.from("sea_inv_plan_items").update(patch).eq("id", Number(it.id)).eq("plan_id", id).eq("exec_status", "PENDING").eq("advisory", false);
       if (error) throw error;
     }
   }
@@ -515,7 +517,7 @@ async function execute(b: Record<string, unknown>, who: string) {
   if (!["PENDING", "PARTIAL", "EXECUTING"].includes(plan.status)) bad(`计划状态 ${plan.status}，不能执行（已被新计划替代或已执行）`);
   const ageH = (Date.now() - Date.parse(plan.created_at)) / 3600_000;
   if (ageH > 14) bad(`计划生成于 ${Math.floor(ageH)} 小时前，数据已旧，请先重新生成`);
-  let q = db.from("sea_inv_plan_items").select("*").eq("plan_id", id).eq("exec_status", "PENDING").eq("selected", true);
+  let q = db.from("sea_inv_plan_items").select("*").eq("plan_id", id).eq("exec_status", "PENDING").eq("selected", true).eq("advisory", false);
   const ids = Array.isArray(b.item_ids) ? (b.item_ids as unknown[]).map(Number) : null;
   if (ids) q = q.in("id", ids);
   const { data: items, error } = await q;
@@ -587,7 +589,7 @@ async function execute(b: Record<string, unknown>, who: string) {
       }
     }
   }
-  const { count: pending } = await db.from("sea_inv_plan_items").select("id", { count: "exact", head: true }).eq("plan_id", id).eq("exec_status", "PENDING").eq("selected", true);
+  const { count: pending } = await db.from("sea_inv_plan_items").select("id", { count: "exact", head: true }).eq("plan_id", id).eq("exec_status", "PENDING").eq("selected", true).eq("advisory", false);
   const { count: bad_ } = await db.from("sea_inv_plan_items").select("id", { count: "exact", head: true }).eq("plan_id", id).eq("exec_status", "FAILED");
   const status = remaining ? "EXECUTING" : (pending ?? 0) > 0 || (bad_ ?? 0) > 0 ? "PARTIAL" : "DONE";
   await db.from("sea_inv_plans").update({ status, executed_at: nowIso(), executed_by: who }).eq("id", id);
@@ -607,8 +609,9 @@ async function buildMessage(b: Record<string, unknown>) {
   const { plan, items, shops } = await planGet(b) as { plan: Record<string, unknown>; items: ItemRow[]; shops: Array<{ shop_id: string; shop_name: string | null; region: string | null }> };
   const shopName = new Map(shops.map((s) => [s.shop_id, s.shop_name ?? s.region ?? s.shop_id]));
   const whs = new Map((await loadWarehouses()).map((w) => [w.code, w.name]));
-  const ov = items.filter((i) => i.kind === "overseas");
+  const ov = items.filter((i) => i.kind === "overseas" && !i.advisory);
   const cn = items.filter((i) => i.kind === "cn");
+  const adv = items.filter((i) => i.advisory);
   const warnings = (plan.data_warnings as string[] | null) ?? [];
   const md = (plan.map_diff as { counts?: { added: number; removed: number; changed: number } } | null)?.counts;
   const all = [...ov, ...cn].filter((i) => !i.new_link && i.days_before !== null);
@@ -650,16 +653,21 @@ async function buildMessage(b: Record<string, unknown>) {
     ].filter(Boolean).join("\n"),
   });
   if (ov.length) elements.push({ tag: "markdown", content: "**海外仓（按紧急度，前 15 条）**" }, table(ov, true));
+  if (adv.length) {
+    elements.push({ tag: "markdown", content: `**需人工映射（只提醒，不改库存）：${adv.length} 条**\n` + adv.slice(0, 10).map((i) => `- ${i.seller_sku}（${shopName.get(i.shop_id) ?? i.shop_id}）：预组装件没货，单品可组 ${i.proposed_qty} 套，当前可售 ${fmtDays(i.days_before)} 天`).join("\n") + "\n<font color='grey'>先在仓库系统把这些 SKU 映射为单品组合，再到网页点「已做映射」</font>" });
+  }
   if (cn.length) elements.push({ tag: "markdown", content: "**国内仓（按紧急度，前 15 条）**\n<font color='grey'>国内仓实物未接入，确认前请核对仓库有货</font>" }, table(cn, false));
   elements.push({ tag: "markdown", content: items.length ? "请到网页「SEA库存监控」核对并点「确认执行」，**未确认不会改任何库存**。" : "本次没有需要调整的 listing。" });
 
-  const title = items.length
-    ? `SEA 库存调整计划：海外仓 ${skuCount(ov)} 个 SKU / 国内仓 ${skuCount(cn)} 个 SKU 待确认`
+  const actionable = ov.length + cn.length;
+  const title = actionable || adv.length
+    ? `SEA 库存调整计划：海外仓 ${skuCount(ov)} 个 SKU / 国内仓 ${skuCount(cn)} 个 SKU 待确认${adv.length ? ` / ${adv.length} 条需人工映射` : ""}`
     : warnings.length ? "SEA 库存监控：无调整，但有数据异常" : "SEA 库存监控：本次无需调整";
   const card = { config: { wide_screen_mode: true }, header: { template, title: { tag: "plain_text", content: title } }, elements };
   // 纯文本兜底（卡片表格组件被拒时由路由改发这个）
   const lines = [
     title, `生成时间：${bjTime}`, ...warnings.map((w) => `⚠ ${w}`),
+    ...adv.slice(0, 10).map((i) => `[需人工映射] ${i.seller_sku} ${shopName.get(i.shop_id) ?? ""}：预组装件没货，单品可组 ${i.proposed_qty} 套`),
     ...[...ov.slice(0, 10), ...cn.slice(0, 10)].map((i) => `[${i.kind === "cn" ? "国内仓" : whs.get(i.warehouse_code) ?? i.warehouse_code}] ${i.seller_sku} ${shopName.get(i.shop_id) ?? ""}：${i.current_qty}→${i.proposed_qty}，可售 ${fmtDays(i.days_before)}→${fmtDays(i.days_after)} 天`),
   ];
   return { send: true, title, card, lines, plan_id: plan.id, items: items.length };
@@ -731,6 +739,18 @@ Deno.serve(async (req) => {
       case "set_override": {
         const { error } = await db.from("sea_inv_sku_map").update({ wh_sku_override: normSku(b.wh_sku as string) || null, changed_at: nowIso() })
           .eq("shop_id", String(b.shop_id ?? "")).eq("sku_id", String(b.sku_id ?? ""));
+        if (error) throw error;
+        return json({ ok: true });
+      }
+      case "set_assemble": {
+        // 人工确认：该 listing 已在仓库系统映射为单品组合（预组装件没货时自动按单品组套）
+        const shopId = String(b.shop_id ?? ""), skuId = String(b.sku_id ?? "");
+        if (!shopId || !skuId) bad("shop_id / sku_id 必填");
+        const ok = b.ok !== false;
+        const { error } = await db.from("sea_inv_sku_map").upsert({
+          shop_id: shopId, sku_id: skuId, product_id: String(b.product_id ?? ""), seller_sku: normSku(b.seller_sku as string),
+          assemble_ok: ok, assemble_ok_by: ok ? who : null, assemble_ok_at: ok ? nowIso() : null,
+        }, { onConflict: "shop_id,sku_id" });
         if (error) throw error;
         return json({ ok: true });
       }

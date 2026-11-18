@@ -81,6 +81,8 @@ export type PlanItem = {
   reason: string;
   warnings: string[];
   new_link: boolean;
+  /** 只提醒、不执行（预组装件没货、需先在仓库系统做单品组合映射） */
+  advisory?: boolean;
 };
 
 export type GroupStatus = {
@@ -160,6 +162,8 @@ export type OverseasInput = {
   stock: Map<string, Map<string, number>>;
   /** `${shop_id}|${sku_id}` → 人工指定的仓库 SKU */
   overrides: Map<string, string>;
+  /** `${shop_id}|${sku_id}`：人工确认已在仓库系统做好「单品组合」映射的 listing（预组装件没货时可自动按单品组套） */
+  assembleOk?: Set<string>;
   params: Params;
 };
 
@@ -386,11 +390,38 @@ export function planOverseas(input: OverseasInput): { items: PlanItem[]; groups:
     for (const [whSku, g] of byWhSku) {
       const comps = parseCombo(whSku);
       const hasPhysical = !!stockMap?.has(whSku);
-      // 有现成预组装实物（可用 − 预留 > 0）→ 按实物；实物没货 → 用单品组套（负责人 2026-11-18）
+      // 有现成预组装实物（可用 − 预留 > 0）→ 只按实物，不叠加单品；实物没货 → 见下（提醒 / 已映射才自动组套）
       if (hasPhysical && (!comps || stockMap!.get(whSku)! - p.reserve_per_sku > 0)) { physical.set(whSku, g); continue; }
       const real = g.filter((s) => !s.virtual);
       if (comps) {
         const miss = [...comps.keys()].filter((k) => !stockMap?.has(k));
+        if (!miss.length && hasPhysical) {
+          // 预组装件可分配为 0（预留不自动突破）：已确认做好组合映射的 listing → 自动按单品组套；
+          // 其余 → 仍按实物（压到 0）+ 一条「需人工映射」提醒，不改库存（负责人 2026-11-18）
+          const ok = g.filter((s) => input.assembleOk?.has(`${s.shop_id}|${s.sku_id}`));
+          const rest = g.filter((s) => !input.assembleOk?.has(`${s.shop_id}|${s.sku_id}`));
+          if (ok.length) combos.set(whSku, { comps, slots: ok });
+          if (rest.length) {
+            physical.set(whSku, rest);
+            const pl = new Map([...comps.keys()].map((k) => [k, Math.max(0, stockMap!.get(k)! - p.reserve_per_sku)]));
+            const sets = Math.min(...[...comps].map(([k, q]) => Math.floor(pl.get(k)! / q)));
+            const avail = stockMap!.get(whSku)!;
+            const compText = [...comps].map(([k, q]) => (q > 1 ? `${k}×${q}` : k)).join(" + ");
+            for (const s of rest) {
+              if (s.virtual || sets <= 0) continue;
+              const d = dailyOf(s);
+              items.push({
+                kind: "overseas", warehouse_code: w.code, wh_sku: whSku, shop_id: s.shop_id, region: s.region,
+                product_id: s.product_id, sku_id: s.sku_id, seller_sku: s.seller_sku, title: s.title, tts_warehouse_id: s.tts_warehouse_id,
+                current_qty: s.qty, proposed_qty: sets, daily_sales: Math.round(d * 100) / 100,
+                days_before: r1(daysOf(s.qty, d)), days_after: r1(daysOf(sets, d)), wh_available: avail, pool: 0,
+                reason: `预组装实物可用 ${avail} 件（预留 ${p.reserve_per_sku} 件不自动动用），单品（${compText}）最多可组 ${sets} 套。需先在仓库系统把该 SKU 映射为单品组合才能发货；做好后点「已做映射」，之后自动按单品组套`,
+                warnings: ["只提醒，不改库存", "可组套数未扣除其他 listing 共用的单品，实际以下次计划为准"], new_link: false, advisory: true,
+              });
+            }
+          }
+          continue;
+        }
         if (!miss.length) { combos.set(whSku, { comps, slots: g }); continue; }
         if (hasPhysical) { physical.set(whSku, g); continue; } // 实物为 0 且单品凑不齐 → 按实物（会压到 0 并提示）
         if (real.length) groups.push({ warehouse_code: w.code, wh_sku: whSku, wh_available: null, pool: null, slots: real.length, triggered: false, note: `组合款单品在仓库库存里找不到：${miss.join("、")}，未调整` });

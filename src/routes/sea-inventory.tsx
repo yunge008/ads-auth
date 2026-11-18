@@ -104,7 +104,7 @@ function PlanPanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }
       }
       setBusy("生成计划…");
       const r = await seaApi.buildPlan();
-      toast.success(`已生成：海外仓 ${r.summary.overseas} 条、国内仓 ${r.summary.cn} 条${r.warnings.length ? `，${r.warnings.length} 条数据提示` : ""}`);
+      toast.success(`已生成：海外仓 ${r.summary.overseas} 条、国内仓 ${r.summary.cn} 条${Number(r.summary.advisory ?? 0) ? `、需人工映射 ${r.summary.advisory} 条` : ""}${r.warnings.length ? `，${r.warnings.length} 条数据提示` : ""}`);
       await reload();
       setPlanId(r.plan_id);
       await loadPlan(r.plan_id);
@@ -118,12 +118,12 @@ function PlanPanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }
   }
   async function setAll(kind: "overseas" | "cn", selected: boolean) {
     if (!plan) return;
-    const ids = items.filter((i) => i.kind === kind && i.exec_status === "PENDING").map((i) => i.id);
+    const ids = items.filter((i) => i.kind === kind && !i.advisory && i.exec_status === "PENDING").map((i) => i.id);
     setItems((xs) => xs.map((x) => (ids.includes(x.id) ? { ...x, selected } : x)));
     try { await seaApi.planUpdate(plan.id, ids.map((id) => ({ id, selected }))); } catch (e) { toast.error((e as Error).message); }
   }
 
-  const toRun = items.filter((i) => i.selected && i.exec_status === "PENDING");
+  const toRun = items.filter((i) => i.selected && !i.advisory && i.exec_status === "PENDING");
   async function run() {
     if (!plan) return;
     setConfirmOpen(false);
@@ -149,7 +149,14 @@ function PlanPanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }
     catch (e) { toast.error((e as Error).message); } finally { setBusy(""); }
   }
 
-  const ovItems = items.filter((i) => i.kind === "overseas");
+  const ovItems = items.filter((i) => i.kind === "overseas" && !i.advisory);
+  const advItems = items.filter((i) => i.advisory);
+  async function markAssembled(it: PlanItem) {
+    try {
+      await seaApi.setAssemble(it);
+      toast.success(`${it.seller_sku}：已记为「已做映射」，下次生成计划起预组装件没货时自动按单品组套`);
+    } catch (e) { toast.error((e as Error).message); }
+  }
   const cnItems = items.filter((i) => i.kind === "cn");
   const notConfigured = !ov.linked_shops.length;
 
@@ -197,6 +204,34 @@ function PlanPanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }
       )}
 
       <ItemTable title="海外仓" items={ovItems} editable={!!editable} shopName={shopName} whName={whName} onPatch={patch} onAll={(v) => setAll("overseas", v)} />
+      {!!advItems.length && (
+        <Card className="border-amber-300">
+          <CardHeader className="py-3"><CardTitle className="text-base">需人工映射（只提醒，不改库存）：{advItems.length} 条</CardTitle></CardHeader>
+          <CardContent className="p-0 overflow-x-auto">
+            <div className="px-4 pb-2 text-xs text-muted-foreground">预组装件扣完预留后已没货，单品可以组套顶上，但要先在仓库系统把该 SKU 映射为单品组合，否则无法发货。映射做好后点「已做映射」，之后自动按单品组套并参与防超卖分配。</div>
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-xs text-muted-foreground"><tr className="[&>th]:px-2 [&>th]:py-2 [&>th]:text-left">
+                <th>SKU</th><th>店铺</th><th>仓</th><th className="text-right">日销</th><th className="text-right">当前</th><th className="text-right">单品可组</th><th className="text-right">可售天数</th><th>说明</th><th></th>
+              </tr></thead>
+              <tbody>
+                {advItems.map((it) => (
+                  <tr key={it.id} className="border-t align-top [&>td]:px-2 [&>td]:py-1.5">
+                    <td className="font-mono whitespace-nowrap" title={it.title ?? ""}>{it.seller_sku || it.sku_id}</td>
+                    <td className="whitespace-nowrap">{shopName(it.shop_id)}</td>
+                    <td className="whitespace-nowrap">{whName(it.warehouse_code)}</td>
+                    <td className="text-right">{it.daily_sales}</td>
+                    <td className="text-right">{it.current_qty}</td>
+                    <td className="text-right">{it.proposed_qty} 套</td>
+                    <td className="text-right whitespace-nowrap"><span className={dayCls(it.days_before)}>{fmtDays(it.days_before)}</span></td>
+                    <td className="text-xs max-w-[360px]">{it.reason}</td>
+                    <td><Button size="sm" variant="outline" onClick={() => markAssembled(it)}>已做映射</Button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
       <ItemTable title="国内仓" hint="国内仓实物库存未接入，勾选前请确认仓库确有货" items={cnItems} editable={!!editable} shopName={shopName} whName={whName} onPatch={patch} onAll={(v) => setAll("cn", v)} />
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>

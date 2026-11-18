@@ -209,12 +209,20 @@ Deno.test("预组装到货后：仓库有同名实物 SKU 时按实物分配，�
   eq(r.items.map((i) => [i.sku_id, i.proposed_qty, i.reason?.includes("组合") ?? false]), [["C", 20, false]]);
 });
 
-Deno.test("预组装实物没货（可用 ≤ 预留）→ 改用单品组套；单品凑不齐才按实物", () => {
-  const r = run([th({ sku_id: "C", seller_sku: "AR108+B4", qty: 0, sold: 10 })], { "AR108+B4": 3, AR108: 105, B4: 45 });
-  // 实物可分配 0 → 单品组套：min(100, 40) = 40
-  eq(r.items.map((i) => [i.sku_id, i.proposed_qty, i.reason?.includes("临时组合") ?? false]), [["C", 40, true]]);
-  const r2 = run([th({ sku_id: "C", seller_sku: "AR108+B4", qty: 2, sold: 10 })], { "AR108+B4": 3, AR108: 105 });
-  eq(r2.items.map((i) => [i.sku_id, i.proposed_qty]), [["C", 0]]);
+Deno.test("预组装实物：有可分配只按实物（不叠加单品）；没货 → 只提醒需人工映射，不改库存；已做映射 → 自动按单品组套", () => {
+  // 实物 10、单品可组 20 套：只按实物，可上 10 − 5 = 5
+  const a = run([th({ sku_id: "C", seller_sku: "AR108+B4", qty: 0, sold: 10 })], { "AR108+B4": 10, AR108: 25, B4: 25 });
+  eq(a.items.map((i) => [i.proposed_qty, !!i.advisory]), [[5, false]]);
+  // 实物只剩 3（≤ 预留）：listing 当前 2 件 → 按实物压到 0（执行时会跳过 0）+ 一条提醒（单品可组 min(100, 40) = 40 套）
+  const b = run([th({ sku_id: "C", seller_sku: "AR108+B4", qty: 2, sold: 10 })], { "AR108+B4": 3, AR108: 105, B4: 45 });
+  eq(b.items.map((i) => [i.proposed_qty, !!i.advisory]).sort(), [[0, false], [40, true]]);
+  eq(b.items.find((i) => i.advisory)!.warnings.includes("只提醒，不改库存"), true);
+  // 已在仓库系统做好映射：自动按单品组套，不再提醒
+  const c = planOverseas({ warehouses: [whTH], slots: [th({ sku_id: "C", seller_sku: "AR108+B4", qty: 2, sold: 10 })], stock: stock("BS-TH", { "AR108+B4": 3, AR108: 105, B4: 45 }), overrides: new Map(), assembleOk: new Set(["TH1|C"]), params: P });
+  eq(c.items.map((i) => [i.proposed_qty, !!i.advisory, i.reason?.includes("临时组合") ?? false]), [[40, false, true]]);
+  // 单品凑不齐：只按实物，不提醒
+  const d = run([th({ sku_id: "C", seller_sku: "AR108+B4", qty: 2, sold: 10 })], { "AR108+B4": 3, AR108: 105 });
+  eq(d.items.map((i) => [i.proposed_qty, !!i.advisory]), [[0, false]]);
 });
 
 Deno.test("跨店铺多个 listing 共用单品：合计不超卖", () => {

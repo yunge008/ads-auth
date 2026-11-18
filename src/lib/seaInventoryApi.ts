@@ -34,6 +34,7 @@ export type PlanItem = {
   wh_available: number | null; pool: number | null; reason: string | null; warnings: string[]; new_link: boolean;
   selected: boolean; final_qty: number | null; live_qty: number | null; exec_qty: number | null;
   exec_status: "PENDING" | "OK" | "FAILED" | "SKIPPED"; exec_message: string | null;
+  advisory: boolean;
 };
 export type Overview = {
   settings: SeaSettings; warehouses: SeaWarehouse[]; shops: SeaShop[]; shop_sync: ShopSync[]; plans: PlanRow[];
@@ -62,6 +63,8 @@ export const seaApi = {
   syncShop: (shop_id: string, cursor: unknown) => fn<{ done: boolean; cursor: unknown; slots?: number; orders?: number }>("sync_shop", { shop_id, cursor }),
   refreshMap: () => fn<{ total: number; multi_listing_skus: number; counts: Record<string, number> }>("refresh_map"),
   mapList: () => fn<{ rows: MapRow[] }>("map_list"),
+  setAssemble: (it: { shop_id: string; sku_id: string; product_id: string; seller_sku: string | null }, ok = true) =>
+    fn<{ ok: true }>("set_assemble", { shop_id: it.shop_id, sku_id: it.sku_id, product_id: it.product_id, seller_sku: it.seller_sku ?? "", ok }),
   setOverride: (shop_id: string, sku_id: string, wh_sku: string) => fn<{ ok: true }>("set_override", { shop_id, sku_id, wh_sku }),
   stockList: (warehouse_code: string) => fn<{ rows: StockRow[] }>("stock_list", { warehouse_code }),
   buildPlan: (map_diff?: unknown) => fn<{ plan_id: string; summary: Record<string, unknown>; warnings: string[] }>("build_plan", { map_diff }),
