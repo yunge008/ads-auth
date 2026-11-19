@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -16,7 +17,7 @@ import { getAdminName, getPasscode } from "@/lib/api";
 import { matchWarehouse, parseUploadFile, type UpGroup } from "@/lib/stockUpload";
 import {
   type MapRow, type Overview, type PlanItem, type PlanRow,
-  type SeaShop, type SeaWarehouse, seaApi, sendPlanToFeishu, type StockRow,
+  type SeaShop, type SeaWarehouse, seaApi, type WhLink, sendPlanToFeishu, type StockRow,
 } from "@/lib/seaInventoryApi";
 
 export const Route = createFileRoute("/sea-inventory")({
@@ -325,61 +326,165 @@ function ItemTable({ title, hint, items, editable, shopName, whName, onPatch, on
 }
 
 // ═══ 仓库与库存 ═════════════════════════════════════════════════════════════
-// 国内仓不在这里：不绑定、不设库存，只在调整计划里做预警（未绑定到任何海外仓的 TikTok 仓库都算国内仓）
+// 一屏看完：上面「配对总览」矩阵（海外仓 × 店铺，绿=已配对），下面仓库小卡片（库存状态 + 同步/上传）。
+// 国内仓不在这里：不绑定、不设库存，只在调整计划里预警（未绑定到海外仓的 TikTok 仓库都算国内仓）。
+const REGION_STYLE: Record<string, { bar: string; chip: string }> = {
+  PH: { bar: "bg-blue-500", chip: "bg-blue-100 text-blue-800" },
+  MY: { bar: "bg-amber-500", chip: "bg-amber-100 text-amber-800" },
+  TH: { bar: "bg-violet-500", chip: "bg-violet-100 text-violet-800" },
+  VN: { bar: "bg-emerald-500", chip: "bg-emerald-100 text-emerald-800" },
+};
+const regionStyle = (r: string | null | undefined) => REGION_STYLE[(r ?? "").toUpperCase()] ?? { bar: "bg-slate-400", chip: "bg-slate-100 text-slate-700" };
+type StockState = { tone: "ok" | "stale" | "none" | "off"; label: string };
+function stockState(w: SeaWarehouse, maxAge: number): StockState {
+  if (w.status === "disabled") return { tone: "off", label: "停用" };
+  if (!w.stock_synced_at) return { tone: "none", label: "无库存数据" };
+  if (ageH(w.stock_synced_at) > maxAge) return { tone: "stale", label: "库存过期" };
+  return { tone: "ok", label: "库存正常" };
+}
+const TONE_DOT: Record<StockState["tone"], string> = { ok: "bg-green-500", stale: "bg-red-500", none: "bg-amber-400", off: "bg-slate-300" };
+const shortTime = (iso: string | null) => (iso ? new Date(iso).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }) : "—");
+
 function WarehousePanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }) {
+  const whs = ov.warehouses.filter((w) => w.kind === "overseas");
+  const active = whs.filter((w) => w.status !== "disabled");
+  const bound = active.filter((w) => w.links.length > 0).length;
+  const stale = active.filter((w) => stockState(w, ov.settings.stock_max_age_hours).tone !== "ok").length;
   return (
     <div className="space-y-3 mt-3">
-      <div className="text-sm text-muted-foreground">
-        每个海外仓绑定各店铺在 TikTok 里对应的仓库（一个店铺一个 warehouse_id）。库存来源：千易 / 顶妙点「API 同步」，其他仓点「上传覆盖库存」上传导出表。
-        库存超过 {ov.settings.stock_max_age_hours} 小时未更新的仓本次不参与调整。国内仓不用绑定，没绑定到海外仓的 TikTok 仓库自动按国内仓预警。
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="rounded-full bg-green-100 text-green-800 px-3 py-1">已配对 {bound} 个仓</span>
+        <span className={`rounded-full px-3 py-1 ${active.length - bound ? "bg-red-100 text-red-800" : "bg-slate-100 text-slate-600"}`}>未配对 {active.length - bound}</span>
+        <span className={`rounded-full px-3 py-1 ${stale ? "bg-red-100 text-red-800" : "bg-slate-100 text-slate-600"}`}>库存过期/缺失 {stale}</span>
+        <span className="text-xs text-muted-foreground">库存超过 {ov.settings.stock_max_age_hours} 小时未更新的仓不参与调整；国内仓无需配对，只做预警</span>
       </div>
-      <ShopSyncCard ov={ov} />
-      {ov.warehouses.filter((w) => w.kind === "overseas").map((w) => <WarehouseCard key={w.code} w={w} shops={ov.shops} reload={reload} />)}
+      <BindMatrix ov={ov} whs={whs} reload={reload} />
+      <div className="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
+        {whs.map((w) => <StockTile key={w.code} w={w} maxAge={ov.settings.stock_max_age_hours} reload={reload} />)}
+      </div>
     </div>
   );
 }
 
-function ShopSyncCard({ ov }: { ov: Overview }) {
-  if (!ov.shop_sync.length) return null;
-  const name = (id: string) => { const s = ov.shops.find((x) => x.shop_id === id); return s ? `${s.region ?? ""} ${s.shop_name ?? id}` : id; };
+/** 配对总览：行 = 海外仓，列 = 店铺。同站点才可配对；点格子绑定 / 解绑 */
+function BindMatrix({ ov, whs, reload }: { ov: Overview; whs: SeaWarehouse[]; reload: () => Promise<void> }) {
+  const shops = ov.shops;
+  const sync = new Map(ov.shop_sync.map((x) => [x.shop_id, x]));
+  if (!shops.length) return <Card><CardContent className="p-3 text-sm text-amber-700">还没有授权的 TikTok 店铺，先到「设置 → TikTok Shop 授权」授权</CardContent></Card>;
   return (
-    <Card><CardContent className="p-3 text-sm space-y-1">
-      <div className="font-medium">店铺同步状态</div>
-      {ov.shop_sync.map((s) => (
-        <div key={s.shop_id} className={s.error ? "text-red-600" : ""}>
-          {name(s.shop_id)}：listing {bj(s.listings_at)}（{s.slots_count ?? 0} 个槽位），订单 {bj(s.orders_at)}（本次拉 {s.orders_count ?? 0} 单，日销量已存到 {s.sales_synced_day ?? "—"}）{s.error && ` ⚠ ${s.error}`}
-        </div>
-      ))}
+    <Card><CardContent className="p-0 overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="bg-muted/40">
+            <th className="text-left px-3 py-2 font-medium w-48">海外仓 \ 店铺</th>
+            {shops.map((sh) => {
+              const st = sync.get(sh.shop_id);
+              return (
+                <th key={sh.shop_id} className="px-2 py-2 font-normal text-center min-w-[120px]">
+                  <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${regionStyle(sh.region).chip}`}>{sh.region}</span>
+                  <div className="text-xs font-medium mt-0.5 truncate max-w-[140px] mx-auto" title={sh.shop_name ?? sh.shop_id}>{sh.shop_name ?? sh.shop_id}</div>
+                  <div className={`text-[10px] ${st?.error ? "text-red-600" : "text-muted-foreground"}`} title={st?.error ?? ""}>
+                    {st?.error ? "同步出错" : st?.orders_at ? `同步 ${shortTime(st.orders_at)}` : "未同步"}
+                  </div>
+                </th>
+              );
+            })}
+          </tr>
+        </thead>
+        <tbody>
+          {whs.map((w) => (
+            <tr key={w.code} className={`border-t ${w.status === "disabled" ? "opacity-50" : ""}`}>
+              <td className="px-3 py-1.5">
+                <div className="flex items-center gap-2">
+                  <span className={`w-1 h-8 rounded ${regionStyle(w.region).bar}`} />
+                  <div>
+                    <div className="font-medium leading-tight">{w.name}</div>
+                    <div className="text-[10px] text-muted-foreground">{STATUS_LABEL[w.status]}</div>
+                  </div>
+                </div>
+              </td>
+              {shops.map((sh) => <BindCell key={sh.shop_id} w={w} shop={sh} reload={reload} />)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </CardContent></Card>
+  );
+}
+
+function BindCell({ w, shop, reload }: { w: SeaWarehouse; shop: SeaShop; reload: () => Promise<void> }) {
+  const links = w.links.filter((l) => l.shop_id === shop.shop_id);
+  const sameRegion = !w.region || !shop.region || w.region.toUpperCase() === shop.region.toUpperCase();
+  const [open, setOpen] = React.useState(false);
+  const [opts, setOpts] = React.useState<Array<{ id: string; name?: string; type?: string }> | null>(null);
+  const [pick, setPick] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const save = async (next: WhLink[]) => {
+    setBusy(true);
+    try { await seaApi.saveWarehouse({ code: w.code, links: next }); toast.success("已保存"); setOpen(false); await reload(); }
+    catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
+  };
+  const onOpen = async (o: boolean) => {
+    setOpen(o);
+    if (!o || opts) return;
+    try {
+      const r = await seaApi.shopWarehouses(shop.shop_id);
+      setOpts(r.warehouses);
+      if (r.fallback) toast.warning(r.error ?? "读不到仓库名称，已改为从在售商品汇总仓库 ID", { duration: 10000 });
+    } catch (e) { toast.error((e as Error).message); setOpts([]); }
+  };
+  if (!sameRegion && !links.length) return <td className="text-center text-slate-300">—</td>;
+  return (
+    <td className="px-2 py-1.5 text-center">
+      <Popover open={open} onOpenChange={onOpen}>
+        <PopoverTrigger asChild>
+          {links.length ? (
+            <button className="rounded-md bg-green-100 text-green-800 hover:bg-green-200 px-2 py-1 text-xs font-medium" title={links.map((l) => l.tts_warehouse_id).join("、")}>
+              ✓ 已配对{links.length > 1 ? ` ×${links.length}` : ""} <span className="font-mono opacity-60">…{links[0].tts_warehouse_id.slice(-6)}</span>
+            </button>
+          ) : (
+            <button className="rounded-md border border-dashed border-red-300 text-red-600 hover:bg-red-50 px-2 py-1 text-xs">+ 绑定</button>
+          )}
+        </PopoverTrigger>
+        <PopoverContent className="w-80 text-sm space-y-2">
+          <div className="font-medium">{w.name} × {shop.region} {shop.shop_name}</div>
+          {links.map((l) => (
+            <div key={l.tts_warehouse_id} className="flex items-center justify-between gap-2">
+              <span className="font-mono text-xs">{l.tts_warehouse_id}</span>
+              <Button size="sm" variant="ghost" className="text-red-600" disabled={busy}
+                onClick={() => save(w.links.filter((x) => !(x.shop_id === shop.shop_id && x.tts_warehouse_id === l.tts_warehouse_id)))}>解绑</Button>
+            </div>
+          ))}
+          {opts === null ? <div className="flex items-center gap-1 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />读取店铺仓库…</div> : (
+            <div className="flex items-center gap-2">
+              <select className="h-8 flex-1 min-w-0 rounded-md border px-2 text-xs" value={pick} onChange={(e) => setPick(e.target.value)}>
+                <option value="">选择 TikTok 仓库…</option>
+                {opts.filter((x) => !links.some((l) => l.tts_warehouse_id === x.id)).map((x) => <option key={x.id} value={x.id}>{x.name ?? x.id}{x.type ? `（${x.type}）` : ""}</option>)}
+              </select>
+              <Button size="sm" disabled={busy || !pick} onClick={() => save([...w.links, { shop_id: shop.shop_id, tts_warehouse_id: pick }])}>绑定</Button>
+            </div>
+          )}
+        </PopoverContent>
+      </Popover>
+    </td>
   );
 }
 
 type UploadPreview = { file: string; rows: UpGroup["rows"]; notes: string[]; asOf: string | null; mismatch: string[] };
 
-function WarehouseCard({ w, shops, reload }: { w: SeaWarehouse; shops: SeaShop[]; reload: () => Promise<void> }) {
+/** 仓库小卡片：库存状态 + API 同步 / 上传覆盖 / 查看；状态与仓库系统设置收在「⋯」里 */
+function StockTile({ w, maxAge, reload }: { w: SeaWarehouse; maxAge: number; reload: () => Promise<void> }) {
   const [busy, setBusy] = React.useState(false);
-  const [shopId, setShopId] = React.useState("");
-  const [ttsWhs, setTtsWhs] = React.useState<Array<{ id: string; name?: string; type?: string }>>([]);
-  const [ttsWh, setTtsWh] = React.useState("");
   const [preview, setPreview] = React.useState<UploadPreview | null>(null);
   const [stock, setStock] = React.useState<StockRow[] | null>(null);
   const [provWhs, setProvWhs] = React.useState<Array<{ ref: string; name: string; code: string | null; country: string | null }> | null>(null);
   const hasApi = ["qianyi", "dingmiao"].includes(w.provider);
-  const shopLabel = (id: string) => { const s = shops.find((x) => x.shop_id === id); return s ? `${s.region ?? ""} ${s.shop_name ?? id}` : id; };
+  const st = stockState(w, maxAge);
 
   const save = async (p: Partial<SeaWarehouse>) => {
     setBusy(true);
     try { await seaApi.saveWarehouse({ code: w.code, ...p }); await reload(); toast.success("已保存"); }
     catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
-  };
-  const loadTts = async (sid: string) => {
-    setShopId(sid); setTtsWhs([]); setTtsWh("");
-    if (!sid) return;
-    try {
-      const r = await seaApi.shopWarehouses(sid);
-      setTtsWhs(r.warehouses);
-      if (r.fallback) toast.warning(r.error ?? "读不到仓库名称，已改为从在售商品汇总仓库 ID", { duration: 10000 });
-    } catch (e) { toast.error((e as Error).message); }
   };
   /** 上传导出表：只取文件里属于本仓的行（按「仓库」列匹配；文件没有仓库列则整份），多个 sheet 合并 */
   const onFile = async (f: File) => {
@@ -402,7 +507,7 @@ function WarehouseCard({ w, shops, reload }: { w: SeaWarehouse; shops: SeaShop[]
     setBusy(true);
     try {
       const r = await seaApi.importStock(w.code, preview.rows, { as_of: preview.asOf, file_name: preview.file });
-      toast.success(`已覆盖：${r.rows} 个 SKU，可用合计 ${r.total_available}`);
+      toast.success(`${w.name}：已覆盖 ${r.rows} 个 SKU，可用合计 ${r.total_available}`);
       r.errors.forEach((e) => toast.warning(e));
       setPreview(null); await reload();
     } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
@@ -412,110 +517,99 @@ function WarehouseCard({ w, shops, reload }: { w: SeaWarehouse; shops: SeaShop[]
     try {
       const r = await seaApi.syncWarehouse(w.code);
       if (!r.ok) toast.error(r.error ?? "失败");
-      else toast.success(r.message ?? `已同步 ${r.rows ?? 0} 个 SKU，可用合计 ${r.total_available ?? 0}`);
+      else toast.success(r.message ?? `${w.name}：已同步 ${r.rows ?? 0} 个 SKU，可用合计 ${r.total_available ?? 0}`);
       [...(r.notes ?? []), ...(r.errors ?? [])].forEach((n) => toast.warning(n));
       await reload();
-    }
-    catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
+    } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
   };
-  const stale = ageH(w.stock_synced_at) > 26;
 
   return (
-    <Card>
-      <CardHeader className="py-3">
-        <CardTitle className="text-base flex flex-wrap items-center gap-2">
-          {w.name}
-          <Badge variant="outline">海外仓 {w.region ?? ""}</Badge>
-          <Badge variant="secondary">{PROVIDER_LABEL[w.provider] ?? w.provider}</Badge>
-          <select className="ml-auto h-8 rounded-md border px-2 text-sm font-normal" value={w.status} disabled={busy} onChange={(e) => save({ status: e.target.value as SeaWarehouse["status"] })}>
-            {Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-          </select>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3 text-sm">
-        {w.note && <div className="text-muted-foreground">{w.note}</div>}
-        <div>
-          <div className="font-medium mb-1">绑定的 TikTok 仓库</div>
-          {!w.links.length && <div className="text-amber-700">未绑定，计划不会包含这个仓</div>}
-          {w.links.map((l, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <span>{shopLabel(l.shop_id)}</span><span className="font-mono text-xs">{l.tts_warehouse_id}</span>
-              <Button size="sm" variant="ghost" disabled={busy} onClick={() => save({ links: w.links.filter((_, k) => k !== i) })}>移除</Button>
-            </div>
-          ))}
-          <div className="flex flex-wrap items-center gap-2 mt-1">
-            <select className="h-8 rounded-md border px-2" value={shopId} onChange={(e) => loadTts(e.target.value)}>
-              <option value="">选择店铺…</option>
-              {shops.map((s) => <option key={s.shop_id} value={s.shop_id}>{s.region} {s.shop_name}</option>)}
-            </select>
-            <select className="h-8 rounded-md border px-2" value={ttsWh} onChange={(e) => setTtsWh(e.target.value)} disabled={!ttsWhs.length}>
-              <option value="">选择 TikTok 仓库…</option>
-              {ttsWhs.map((x) => <option key={x.id} value={x.id}>{x.name ?? x.id}{x.type ? `（${x.type}）` : ""}</option>)}
-            </select>
-            <Button size="sm" variant="outline" disabled={busy || !shopId || !ttsWh}
-              onClick={() => save({ links: [...w.links.filter((l) => l.shop_id !== shopId || l.tts_warehouse_id !== ttsWh), { shop_id: shopId, tts_warehouse_id: ttsWh }] })}>添加绑定</Button>
-          </div>
+    <div className={`rounded-lg border bg-card overflow-hidden ${w.status === "disabled" ? "opacity-60" : ""}`}>
+      <div className={`h-1 ${regionStyle(w.region).bar}`} />
+      <div className="p-3 space-y-2 text-sm">
+        <div className="flex items-center gap-2">
+          <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${regionStyle(w.region).chip}`}>{w.region ?? "—"}</span>
+          <span className="font-medium truncate" title={w.note ?? ""}>{w.name}</span>
+          <Popover>
+            <PopoverTrigger asChild><button className="ml-auto px-1.5 rounded hover:bg-muted text-muted-foreground" title="更多设置">⋯</button></PopoverTrigger>
+            <PopoverContent className="w-80 text-sm space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="w-20 text-muted-foreground">状态</span>
+                <select className="h-8 flex-1 rounded-md border px-2" value={w.status} disabled={busy} onChange={(e) => save({ status: e.target.value as SeaWarehouse["status"] })}>
+                  {Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
+              </div>
+              {hasApi && (
+                <div className="flex items-center gap-2">
+                  <span className="w-20 text-muted-foreground">系统仓库</span>
+                  {provWhs ? (
+                    <select className="h-8 flex-1 min-w-0 rounded-md border px-2 text-xs" value={w.provider_ref ?? ""} disabled={busy} onChange={(e) => save({ provider_ref: e.target.value })}>
+                      <option value="">选择…</option>
+                      {provWhs.map((x) => <option key={x.ref} value={x.ref}>{x.name}{x.code ? `（${x.code}）` : ""}</option>)}
+                    </select>
+                  ) : (
+                    <>
+                      <span className="font-mono text-xs flex-1">{w.provider_ref ?? "未选择"}</span>
+                      <Button size="sm" variant="ghost" onClick={async () => { try { setProvWhs((await seaApi.providerWarehouses(w.code)).warehouses); } catch (e) { toast.error((e as Error).message); } }}>修改</Button>
+                    </>
+                  )}
+                </div>
+              )}
+              {w.note && <div className="text-xs text-muted-foreground">{w.note}</div>}
+            </PopoverContent>
+          </Popover>
         </div>
-        {hasApi && (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium">仓库系统里的仓库：</span>
-            <span className="font-mono text-xs">{w.provider_ref ?? <span className="text-amber-700">未选择，API 同步会失败</span>}</span>
-            <Button size="sm" variant="ghost" disabled={busy} onClick={async () => {
-              try { setProvWhs((await seaApi.providerWarehouses(w.code)).warehouses); } catch (e) { toast.error((e as Error).message); }
-            }}>读取仓库列表</Button>
-            {provWhs && (
-              <select className="h-8 rounded-md border px-2" value={w.provider_ref ?? ""} disabled={busy} onChange={(e) => save({ provider_ref: e.target.value })}>
-                <option value="">选择…</option>
-                {provWhs.map((x) => <option key={x.ref} value={x.ref}>{x.name}{x.code ? `（${x.code}）` : ""}{x.country ? ` ${x.country}` : ""}</option>)}
-              </select>
+        <div className="flex items-center gap-2">
+          <span className={`w-2.5 h-2.5 shrink-0 rounded-full ${TONE_DOT[st.tone]}`} />
+          <span className={`whitespace-nowrap ${st.tone === "ok" ? "" : st.tone === "off" ? "text-muted-foreground" : "text-red-600 font-medium"}`}>{st.label}</span>
+          <span className="text-xs text-muted-foreground ml-auto truncate min-w-0" title={`${w.stock_rows ?? 0} 个 SKU，更新于 ${bj(w.stock_synced_at)}`}>
+            {w.stock_rows ?? 0} SKU · {shortTime(w.stock_synced_at)} · {w.stock_source === "api" ? "API" : w.stock_source === "manual" ? "上传" : "—"}
+          </span>
+        </div>
+        {!w.links.length && w.status !== "disabled" && <div className="text-xs text-red-600">未配对店铺，计划不含此仓</div>}
+        {w.stock_error && <div className="text-xs text-red-600 line-clamp-2" title={w.stock_error}>⚠ {w.stock_error}</div>}
+        <div className="flex items-center gap-1">
+          {hasApi && <Button size="sm" variant="outline" className="h-7 px-2" disabled={busy} onClick={sync}><RefreshCw className="h-3.5 w-3.5 mr-1" />同步</Button>}
+          <label className="inline-flex">
+            <input type="file" accept=".xlsx,.xls,.csv" className="hidden" disabled={busy} onChange={(e) => {
+              const f = e.target.files?.[0]; e.target.value = "";
+              if (f) void onFile(f);
+            }} />
+            <span className="inline-flex items-center h-7 px-2 rounded-md border text-xs cursor-pointer hover:bg-muted"><Upload className="h-3.5 w-3.5 mr-1" />上传覆盖</span>
+          </label>
+          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={async () => {
+            if (stock) { setStock(null); return; }
+            try { setStock((await seaApi.stockList(w.code)).rows); } catch (e) { toast.error((e as Error).message); }
+          }}>{stock ? "收起" : "查看"}</Button>
+          {busy && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+        </div>
+        {preview && (
+          <div className="rounded border p-2 space-y-1 text-xs">
+            <div className="text-muted-foreground break-all">{preview.file}{preview.asOf && `，导出 ${shortTime(preview.asOf)}`}</div>
+            {preview.mismatch.length ? (
+              <div className="text-red-600">文件里的仓库是「{preview.mismatch.join("、")}」，不是本仓，未导入</div>
+            ) : (
+              <>
+                <div>{preview.rows.length} 个 SKU（有货 {preview.rows.filter((r) => r.available > 0).length}），可用合计 {preview.rows.reduce((t, r) => t + r.available, 0)}，<b>整仓覆盖</b></div>
+                {preview.notes.map((n, i) => <div key={i} className="text-amber-700">⚠ {n}</div>)}
+                {hasApi && <div className="text-amber-700">该仓有 API，下次同步会被 API 数据替换</div>}
+              </>
             )}
+            <div className="flex gap-1">
+              <Button size="sm" className="h-7" disabled={busy || !preview.rows.length || preview.mismatch.length > 0} onClick={doImport}>确认覆盖</Button>
+              <Button size="sm" variant="ghost" className="h-7" onClick={() => setPreview(null)}>取消</Button>
+            </div>
           </div>
         )}
-        <div className="space-y-2">
-          <div className={stale ? "text-red-600" : ""}>
-            库存：{w.stock_rows ?? 0} 个 SKU，更新于 {bj(w.stock_synced_at)}（{w.stock_source === "api" ? "API" : w.stock_source === "manual" ? `上传${w.stock_file_name ? `「${w.stock_file_name}」` : ""}` : "—"}）
-            {stale && "，已过期，计划会跳过这个仓"}
-            {w.stock_error && <div className="text-red-600">⚠ {w.stock_error}</div>}
+        {stock && (
+          <div className="max-h-40 overflow-auto font-mono text-[11px] border rounded p-1.5">
+            {stock.filter((r) => r.available > 0).map((r) => <div key={r.wh_sku}>{r.wh_sku}  {r.available}</div>)}
+            {!stock.some((r) => r.available > 0) && "无可用库存"}
+            {stock.some((r) => r.available <= 0) && <div className="text-muted-foreground">另有 {stock.filter((r) => r.available <= 0).length} 个 SKU 为 0</div>}
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {hasApi && <Button size="sm" variant="outline" disabled={busy} onClick={sync}><RefreshCw className="h-4 w-4 mr-1" />API 同步</Button>}
-            <label className="inline-flex">
-              <input type="file" accept=".xlsx,.xls,.csv" className="hidden" disabled={busy} onChange={(e) => {
-                const f = e.target.files?.[0]; e.target.value = "";
-                if (f) void onFile(f);
-              }} />
-              <span className="inline-flex items-center h-8 px-3 rounded-md border cursor-pointer hover:bg-muted"><Upload className="h-4 w-4 mr-1" />上传覆盖库存</span>
-            </label>
-            <Button size="sm" variant="ghost" onClick={async () => { try { setStock((await seaApi.stockList(w.code)).rows); } catch (e) { toast.error((e as Error).message); } }}>查看当前库存</Button>
-            {busy && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
-          </div>
-          {preview && (
-            <div className="rounded border p-2 space-y-1">
-              <div className="text-xs text-muted-foreground break-all">{preview.file}{preview.asOf && `，导出时间 ${bj(preview.asOf)}`}</div>
-              {preview.mismatch.length ? (
-                <div className="text-red-600">文件里的仓库是「{preview.mismatch.join("、")}」，不是本仓（{w.file_config?.warehouse_value ?? w.provider_ref ?? w.name}），未导入。请确认选对了文件。</div>
-              ) : (
-                <>
-                  <div>识别 {preview.rows.length} 个 SKU（有货 {preview.rows.filter((r) => r.available > 0).length}），可用合计 {preview.rows.reduce((t, r) => t + r.available, 0)}。<b>会整仓覆盖</b>：表里没有的 SKU 视为无货。</div>
-                  {preview.notes.map((n, i) => <div key={i} className="text-amber-700">⚠ {n}</div>)}
-                  {hasApi && <div className="text-amber-700">该仓有 API，上传会覆盖 API 数据，下次 API 同步后又会被替换。</div>}
-                </>
-              )}
-              <div className="flex gap-2">
-                <Button size="sm" disabled={busy || !preview.rows.length || preview.mismatch.length > 0} onClick={doImport}>确认覆盖</Button>
-                <Button size="sm" variant="ghost" onClick={() => setPreview(null)}>取消</Button>
-              </div>
-            </div>
-          )}
-          {stock && (
-            <div className="max-h-60 overflow-auto font-mono text-xs border rounded p-2">
-              {stock.map((r) => <div key={r.wh_sku}>{r.wh_sku}  可用 {r.available}{r.product_name ? `  ${r.product_name}` : ""}</div>)}
-              {!stock.length && "无"}
-            </div>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+        )}
+      </div>
+    </div>
   );
 }
 
