@@ -2223,6 +2223,7 @@ export type Database = {
           min_qty: number
           reserve_per_sku: number
           stock_max_age_hours: number
+          target_days: number
           updated_at: string
           window_days: number
           zero_sale_qty: number
@@ -2238,6 +2239,7 @@ export type Database = {
           min_qty?: number
           reserve_per_sku?: number
           stock_max_age_hours?: number
+          target_days?: number
           updated_at?: string
           window_days?: number
           zero_sale_qty?: number
@@ -2253,6 +2255,7 @@ export type Database = {
           min_qty?: number
           reserve_per_sku?: number
           stock_max_age_hours?: number
+          target_days?: number
           updated_at?: string
           window_days?: number
           zero_sale_qty?: number
