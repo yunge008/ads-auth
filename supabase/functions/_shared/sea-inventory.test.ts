@@ -75,17 +75,18 @@ Deno.test("海外仓：listing 合计超过可分配量（超卖风险）→ 即
   eq(items.map((i) => i.proposed_qty), [30, 30]);
 });
 
-Deno.test("国内仓：只补可售 < 10 天，补到 20 天；无销量不补", () => {
-  const cn: Warehouse = { code: "CN", name: "国内仓", kind: "cn", status: "active", region: null, links: [{ shop_id: "PH1", tts_warehouse_id: "W_CN" }] };
+Deno.test("国内仓：不绑定，凡未绑定到海外仓的 TikTok 仓库都算国内仓；只预警可售 < 10 天的", () => {
+  const cn: Warehouse = { code: "CN", name: "国内仓", kind: "cn", status: "active", region: null, links: [] };
   const slots = [
-    slot({ sku_id: "A", tts_warehouse_id: "W_CN", qty: 10, sold: 30 }), // 3/天 → 3.3 天 → 补到 60
+    slot({ sku_id: "A", tts_warehouse_id: "W_CN", qty: 10, sold: 30 }), // 3/天 → 3.3 天 → 预警，建议补到 60
     slot({ sku_id: "B", tts_warehouse_id: "W_CN", qty: 50, sold: 30 }), // 16.7 天
-    slot({ sku_id: "C", tts_warehouse_id: "W_CN", qty: 0, sold: 0 }),
+    slot({ sku_id: "C", tts_warehouse_id: "W_CN", qty: 0, sold: 0 }),   // 无销量不预警
+    slot({ sku_id: "D", tts_warehouse_id: "W_PH", qty: 1, sold: 30 }),  // 绑定在海外仓 → 不算国内仓
   ];
-  const items = planCn([cn], slots, P);
-  eq(items.map((i) => [i.sku_id, i.proposed_qty, i.days_before]), [["A", 60, 3.3]]);
+  const items = planCn([cn, { ...whPH, status: "disabled" }], slots, P);
+  eq(items.map((i) => [i.sku_id, i.warehouse_code, i.proposed_qty, i.days_before]), [["A", "CN", 60, 3.3]]);
+  eq(items[0].warnings[0].includes("仅预警"), true);
 });
-
 Deno.test("销量：取消单不计；无仓库的按已知占比分摊", () => {
   const sold = countSold([
     { status: "COMPLETED", warehouse_id: "W1", line_items: [{ sku_id: "A" }, { sku_id: "A" }] },

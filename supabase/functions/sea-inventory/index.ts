@@ -6,8 +6,7 @@
 //   save_warehouse {code, name?, status?, links?, provider_ref?, note?}
 //   shop_warehouses {shop_id}         只读：店铺在 TikTok 里的仓库列表（绑定仓库用）
 //   import_stock {warehouse_code, rows:[{wh_sku, available, on_hand?, product_name?}], replace?=true, as_of?, file_name?}  页面上传（整仓覆盖）
-//   sync_warehouse {code, force?}     配了云盘文件夹 → 取最新 RPA 导出文件（库存时间 = 文件修改时间，同一文件不重复导入）；否则从仓库系统 API 拉库存整仓覆盖（千易 QUERY_SIMPLE_LIST_INVENTORY_V2 / 顶妙 goods_sku_warehouse/search_page，见 _shared/wh-providers.ts）
-//   drive_preview {code, drive_folder?, drive_name_pattern?, file_config?}  云盘：列文件 + 预览解析（不写库）
+//   sync_warehouse {code}             从仓库系统 API 拉库存整仓覆盖（千易 / 顶妙）；其他仓用页面「上传覆盖库存」（千易 QUERY_SIMPLE_LIST_INVENTORY_V2 / 顶妙 goods_sku_warehouse/search_page，见 _shared/wh-providers.ts）
 //   provider_warehouses {code}        仓库系统里的仓库列表（绑定 provider_ref 用：千易=仓库名称，顶妙=warehouseId）
 //   sync_shop {shop_id, cursor?}      分片续跑：listings（Search Products）→ orders（按店铺本地日逐日拉，写 sea_inv_sales_daily；首次 60 天，之后只拉上次同步日−2 天起）→ 窗口销量回填 sea_inv_slots
 //   refresh_map                       用最新 listing 重建映射表，返回新增 / 下架 / SKU 变化
@@ -20,8 +19,6 @@ import { admin, verifyPasscode } from "../_shared/auth.ts";
 import { corsHeaders } from "../_shared/feishu.ts";
 import { cronAuthed } from "../_shared/cron.ts";
 import { ttsCall, type TtsResult } from "../_shared/tts.ts";
-import { downloadFile, listFolder, pickLatest } from "../_shared/gdrive.ts";
-import { type FileConfig, parseStockWorkbook } from "../_shared/stock-file.ts";
 import { dingmiaoInventory, dingmiaoWarehouses, qianyiInventory, qianyiWarehouses } from "../_shared/wh-providers.ts";
 import {
   applySold,
@@ -151,8 +148,6 @@ async function importStock(b: Record<string, unknown>, source = "manual", asOf?:
 
 type WhRow = {
   code: string; name: string; provider: string; provider_ref: string | null;
-  drive_folder: string | null; drive_name_pattern: string | null; file_config: FileConfig | null;
-  stock_file_id: string | null; stock_file_modified: string | null;
 };
 async function loadWh(code: string): Promise<WhRow> {
   const { data: w } = await admin().from("sea_inv_warehouses").select("*").eq("code", code).maybeSingle();
@@ -160,31 +155,13 @@ async function loadWh(code: string): Promise<WhRow> {
   return w as WhRow;
 }
 
-/** 云盘：取文件夹里最新一份库存表（RPA 导出），同一文件同一修改时间不重复导入 */
-async function syncFromDrive(w: WhRow, force: boolean) {
-  const files = await listFolder(w.drive_folder!);
-  const f = pickLatest(files, w.drive_name_pattern);
-  if (!f) throw new Error(`云盘文件夹里没有${w.drive_name_pattern ? `文件名含「${w.drive_name_pattern}」的` : ""}表格文件（xlsx/xls/csv/Google 表格），共 ${files.length} 个文件`);
-  if (!force && f.id === w.stock_file_id && w.stock_file_modified && Date.parse(w.stock_file_modified) === Date.parse(f.modifiedTime)) {
-    return { ok: true, unchanged: true, file: f.name, file_time: f.modifiedTime, message: `云盘最新文件「${f.name}」已导入过，未变化` };
-  }
-  const bytes = await downloadFile(f);
-  const p = parseStockWorkbook(bytes, w.file_config ?? {});
-  if (!p.rows.length) throw new Error(`解析「${f.name}」得到 0 个 SKU，未覆盖原库存：${p.notes.join("；")}`);
-  const res = await importStock({ warehouse_code: w.code, rows: p.rows }, "drive", new Date(f.modifiedTime).toISOString(),
-    { stock_file_name: f.name, stock_file_id: f.id, stock_file_modified: f.modifiedTime });
-  return { ...res, file: f.name, file_time: f.modifiedTime, sheet: p.sheet, notes: p.notes };
-}
-
-async function syncWarehouse(code: string, force = false) {
+async function syncWarehouse(code: string) {
   const db = admin();
   const w = await loadWh(code);
-  const useDrive = !!(w.drive_folder ?? "").trim();
-  if (!useDrive && !["qianyi", "dingmiao"].includes(w.provider)) {
-    return { ok: true, skipped: true, message: w.provider === "tiktok" ? "国内仓不同步实物库存" : `${w.name} 没有 API，也没配云盘文件夹，用页面「导入库存」` };
+  if (!["qianyi", "dingmiao"].includes(w.provider)) {
+    return { ok: true, skipped: true, message: w.provider === "tiktok" ? "国内仓只做预警，不同步库存" : `${w.name} 没有 API，用页面「上传覆盖库存」` };
   }
   try {
-    if (useDrive) return await syncFromDrive(w, force);
     const r = w.provider === "qianyi" ? await qianyiInventory(w.provider_ref ?? "") : await dingmiaoInventory(w.provider_ref ?? "");
     const valid = r.rows.filter((x) => x.wh_sku);
     if (!valid.length) throw new Error("接口返回 0 个 SKU，未覆盖原库存（请确认仓库系统仓库选对了）");
@@ -196,20 +173,6 @@ async function syncWarehouse(code: string, force = false) {
     await db.from("sea_inv_warehouses").update({ stock_error: err, updated_at: nowIso() }).eq("code", code);
     return { ok: false, error: err };
   }
-}
-
-/** 云盘预览：列出文件夹里的文件、会选中哪份、解析结果前 20 行（不写库） */
-async function drivePreview(b: Record<string, unknown>) {
-  const w = await loadWh(String(b.code ?? ""));
-  const folder = String(b.drive_folder ?? w.drive_folder ?? "").trim();
-  if (!folder) bad("先填云盘文件夹链接");
-  const pattern = b.drive_name_pattern !== undefined ? String(b.drive_name_pattern) : w.drive_name_pattern;
-  const cfg = (b.file_config ?? w.file_config ?? {}) as FileConfig;
-  const files = await listFolder(folder);
-  const f = pickLatest(files, pattern);
-  if (!f) return { files: files.slice(0, 20), picked: null, rows: [], notes: ["没有符合条件的表格文件"] };
-  const p = parseStockWorkbook(await downloadFile(f), cfg);
-  return { files: files.slice(0, 20), picked: f, sheet: p.sheet, header_row: p.header_row, count: p.rows.length, total_available: p.rows.reduce((t, r) => t + r.available, 0), rows: p.rows.slice(0, 20), notes: p.notes };
 }
 
 async function providerWarehouses(code: string) {
@@ -437,8 +400,8 @@ async function buildPlan(b: Record<string, unknown>, who: string) {
   const usable: Warehouse[] = [];
   for (const w of whs) {
     if (w.status === "disabled") continue;
-    if (!w.links.length) { if (w.kind === "overseas") warnings.push(`${w.name} 未绑定任何店铺的 TikTok 仓库，跳过`); continue; }
-    if (w.kind === "cn") { usable.push(w); continue; }
+    if (w.kind === "cn") continue; // 国内仓不绑定、只预警（见 planCn）
+    if (!w.links.length) { warnings.push(`${w.name} 未绑定任何店铺的 TikTok 仓库，跳过`); continue; }
     const at = w.stock_synced_at as string | null;
     const age = at ? (Date.now() - Date.parse(at)) / 3600_000 : Infinity;
     if (age > p.stock_max_age_hours) {
@@ -459,7 +422,8 @@ async function buildPlan(b: Record<string, unknown>, who: string) {
   const map = await allMap();
   const overrides = new Map(map.filter((r) => r.wh_sku_override).map((r) => [`${r.shop_id}|${r.sku_id}`, r.wh_sku_override!]));
   const ov = planOverseas({ warehouses: usable, slots: okSlots, stock, overrides, params: p });
-  const cn = planCn(usable, okSlots, p);
+  // 国内仓 = 未绑定到任何海外仓的 TikTok 仓库；用全部仓库判断（库存过期被跳过的海外仓，其 TikTok 仓库也不能误判成国内仓）
+  const cn = planCn(whs, okSlots, p);
   const items = sortByUrgency([...ov.items, ...cn]);
   const missing = ov.groups.filter((g) => g.wh_available === null);
   const summary = {
@@ -473,7 +437,7 @@ async function buildPlan(b: Record<string, unknown>, who: string) {
     source: String(b.source ?? "MANUAL"), created_by: who, params: p, summary, data_warnings: warnings, map_diff: b.map_diff ?? null,
   }).select("id").single();
   if (error) throw error;
-  const rows = items.map((i) => ({ ...i, plan_id: plan.id }));
+  const rows = items.map((i) => ({ ...i, selected: i.kind === "overseas", plan_id: plan.id })); // 国内仓只预警，不可勾选执行
   for (let k = 0; k < rows.length; k += 500) {
     const { error: e2 } = await db.from("sea_inv_plan_items").insert(rows.slice(k, k + 500));
     if (e2) throw e2;
@@ -527,7 +491,7 @@ async function planUpdate(b: Record<string, unknown>) {
       }
     }
     if (Object.keys(patch).length) {
-      const { error } = await db.from("sea_inv_plan_items").update(patch).eq("id", Number(it.id)).eq("plan_id", id).eq("exec_status", "PENDING");
+      const { error } = await db.from("sea_inv_plan_items").update(patch).eq("id", Number(it.id)).eq("plan_id", id).eq("exec_status", "PENDING").eq("kind", "overseas");
       if (error) throw error;
     }
   }
@@ -569,7 +533,7 @@ async function execute(b: Record<string, unknown>, who: string) {
   if (!["PENDING", "PARTIAL", "EXECUTING"].includes(plan.status)) bad(`计划状态 ${plan.status}，不能执行（已被新计划替代或已执行）`);
   const ageH = (Date.now() - Date.parse(plan.created_at)) / 3600_000;
   if (ageH > 14) bad(`计划生成于 ${Math.floor(ageH)} 小时前，数据已旧，请先重新生成`);
-  let q = db.from("sea_inv_plan_items").select("*").eq("plan_id", id).eq("exec_status", "PENDING").eq("selected", true);
+  let q = db.from("sea_inv_plan_items").select("*").eq("plan_id", id).eq("exec_status", "PENDING").eq("selected", true).eq("kind", "overseas");
   const ids = Array.isArray(b.item_ids) ? (b.item_ids as unknown[]).map(Number) : null;
   if (ids) q = q.in("id", ids);
   const { data: items, error } = await q;
@@ -641,7 +605,7 @@ async function execute(b: Record<string, unknown>, who: string) {
       }
     }
   }
-  const { count: pending } = await db.from("sea_inv_plan_items").select("id", { count: "exact", head: true }).eq("plan_id", id).eq("exec_status", "PENDING").eq("selected", true);
+  const { count: pending } = await db.from("sea_inv_plan_items").select("id", { count: "exact", head: true }).eq("plan_id", id).eq("exec_status", "PENDING").eq("selected", true).eq("kind", "overseas");
   const { count: bad_ } = await db.from("sea_inv_plan_items").select("id", { count: "exact", head: true }).eq("plan_id", id).eq("exec_status", "FAILED");
   const status = remaining ? "EXECUTING" : (pending ?? 0) > 0 || (bad_ ?? 0) > 0 ? "PARTIAL" : "DONE";
   await db.from("sea_inv_plans").update({ status, executed_at: nowIso(), executed_by: who }).eq("id", id);
@@ -699,16 +663,16 @@ async function buildMessage(b: Record<string, unknown>) {
     content: [
       `**生成时间**：${bjTime}（${plan.source === "CRON" ? "定时" : "手动"}）`,
       `**海外仓**：${ov.length} 条（${skuCount(ov)} 个 SKU）${ov.length ? `，最紧急可售 **<font color='${dayColor(minDays(ov))}'>${fmtDays(minDays(ov))} 天</font>**` : ""}`,
-      `**国内仓**：${cn.length} 条（${skuCount(cn)} 个 SKU）${cn.length ? `，最紧急可售 **<font color='${dayColor(minDays(cn))}'>${fmtDays(minDays(cn))} 天</font>**` : ""}`,
+      `**国内仓预警**：${cn.length} 条（${skuCount(cn)} 个 SKU）${cn.length ? `，最紧急可售 **<font color='${dayColor(minDays(cn))}'>${fmtDays(minDays(cn))} 天</font>**` : ""}`,
       md && (md.added || md.removed || md.changed) ? `**映射表变化**：新增 ${md.added}、下架 ${md.removed}、SKU 变更 ${md.changed}` : "",
     ].filter(Boolean).join("\n"),
   });
   if (ov.length) elements.push({ tag: "markdown", content: "**海外仓（按紧急度，前 15 条）**" }, table(ov, true));
-  if (cn.length) elements.push({ tag: "markdown", content: "**国内仓（按紧急度，前 15 条）**\n<font color='grey'>国内仓实物未接入，确认前请核对仓库有货</font>" }, table(cn, false));
+  if (cn.length) elements.push({ tag: "markdown", content: "**国内仓预警（按紧急度，前 15 条）**\n<font color='grey'>仅预警：确认国内仓有货（不足及时采购）后人工修改 TikTok 库存</font>" }, table(cn, false));
   elements.push({ tag: "markdown", content: items.length ? (execEnabled() ? "请到网页「SEA库存监控」核对并点「确认执行」，**未确认不会改任何库存**。" : "请到网页「SEA库存监控」核对，**导出调整清单后人工修改**（系统不会自动改库存）。") : "本次没有需要调整的 listing。" });
 
   const title = items.length
-    ? `SEA 库存调整计划：海外仓 ${skuCount(ov)} 个 SKU / 国内仓 ${skuCount(cn)} 个 SKU 待确认`
+    ? `SEA 库存：海外仓 ${skuCount(ov)} 个 SKU 待调整 / 国内仓 ${skuCount(cn)} 个 SKU 预警`
     : warnings.length ? "SEA 库存监控：无调整，但有数据异常" : "SEA 库存监控：本次无需调整";
   const card = { config: { wide_screen_mode: true }, header: { template, title: { tag: "plain_text", content: title } }, elements };
   // 纯文本兜底（卡片表格组件被拒时由路由改发这个）
@@ -747,7 +711,7 @@ Deno.serve(async (req) => {
         const code = String(b.code ?? "");
         if (!code) bad("code 必填");
         const patch: Record<string, unknown> = { updated_at: nowIso() };
-        for (const k of ["name", "status", "provider_ref", "note", "region", "drive_folder", "drive_name_pattern"]) if (b[k] !== undefined) patch[k] = b[k] === "" ? null : b[k];
+        for (const k of ["name", "status", "provider_ref", "note", "region"]) if (b[k] !== undefined) patch[k] = b[k] === "" ? null : b[k];
         if (b.file_config !== undefined) {
           const fc = (b.file_config ?? {}) as Record<string, unknown>;
           patch.file_config = Object.fromEntries(["sheet", "sku_col", "avail_col", "onhand_col", "name_col", "warehouse_col", "warehouse_value"]
@@ -798,8 +762,7 @@ Deno.serve(async (req) => {
         }
         return json(await importStock(b, "manual", asOf, { stock_file_name: b.file_name ? String(b.file_name).slice(0, 200) : null }));
       }
-      case "sync_warehouse": return json(await syncWarehouse(String(b.code ?? ""), !!b.force));
-      case "drive_preview": return json(await drivePreview(b));
+      case "sync_warehouse": return json(await syncWarehouse(String(b.code ?? "")));
       case "provider_warehouses": return json(await providerWarehouses(String(b.code ?? "")));
       case "sync_shop": return json(await syncShop(b));
       case "refresh_map": return json(await refreshMap());

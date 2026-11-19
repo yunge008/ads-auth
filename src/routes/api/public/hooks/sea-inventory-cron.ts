@@ -2,7 +2,7 @@
 //
 // 两种调用：
 //   ① pg_cron（北京 09:10 白天档 / 21:10 夜间档）：`apikey: <SUPABASE_PUBLISHABLE_KEY>` 头 → 下游带 x-cron-key；
-//      拉海外仓库存（千易/顶妙 API；配了云盘文件夹的仓取 RPA 导出的最新 Excel）→ 逐店同步 listing + 近 N 天订单（分片续跑）→ 夜间档刷新映射表 → 生成计划 → 发飞书。
+//      拉海外仓库存（千易/顶妙 API；BigSeller 仓由人工在页面上传）→ 逐店同步 listing + 近 N 天订单（分片续跑）→ 夜间档刷新映射表 → 生成计划 → 发飞书。
 //      没有任何仓库绑定店铺时直接跳过、不发消息（功能尚未配置）。
 //   ② 页面「发送到飞书」：带 x-admin-passcode / x-admin-name，body `{manual:true, plan_id?}`，只按该计划组装并发送。
 //
@@ -101,9 +101,8 @@ export const Route = createFileRoute("/api/public/hooks/sea-inventory-cron")({
             return jsonRes({ ok: true, skipped: "no linked shops" });
           }
           // 1. 海外仓库存（有 API 的仓；失败只记录，生成计划时该仓按「库存过期」跳过并在卡片置顶说明）
-          for (const w of (ov.warehouses as Array<{ code: string; provider: string; status: string; kind: string; drive_folder: string | null }>) ?? []) {
-            if (w.status === "disabled" || w.kind !== "overseas") continue;
-            if (!["qianyi", "dingmiao"].includes(w.provider) && !w.drive_folder) continue;
+          for (const w of (ov.warehouses as Array<{ code: string; provider: string; status: string; kind: string }>) ?? []) {
+            if (w.status === "disabled" || w.kind !== "overseas" || !["qianyi", "dingmiao"].includes(w.provider)) continue;
             try {
               const r = await callFn({ action: "sync_warehouse", code: w.code });
               steps.push(`${w.code}:${r.ok ? "ok" : "fail"}`);

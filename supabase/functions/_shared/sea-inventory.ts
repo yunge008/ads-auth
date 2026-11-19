@@ -399,27 +399,29 @@ export function planOverseas(input: OverseasInput): { items: PlanItem[]; groups:
   return { items, groups };
 }
 
+/**
+ * 国内仓：不绑定、不导入库存、不改库存，只预警（负责人 2026-11-19）。
+ * 同步过的店铺里，没有绑定到任何海外仓（不论海外仓状态）的 TikTok 仓库都视为国内仓。
+ * 可售天数 < cn_min_days 的列入预警，建议 TikTok 库存补到 cn_target_days 天销量，由人工确认国内仓有货 / 及时采购后手动改。
+ */
 export function planCn(warehouses: Warehouse[], slots: Slot[], p: Params): PlanItem[] {
+  const cnCode = warehouses.find((w) => w.kind === "cn")?.code ?? "CN";
+  const bound = new Set(warehouses.filter((w) => w.kind === "overseas").flatMap((w) => w.links.map((l) => `${l.shop_id}|${l.tts_warehouse_id}`)));
   const items: PlanItem[] = [];
-  for (const w of warehouses) {
-    if (w.kind !== "cn" || w.status === "disabled") continue;
-    const linkKeys = new Set(w.links.map((l) => `${l.shop_id}|${l.tts_warehouse_id}`));
-    for (const s of slots) {
-      if (s.virtual || !linkKeys.has(`${s.shop_id}|${s.tts_warehouse_id}`)) continue;
-      const daily = s.sold / p.window_days;
-      const before = daysOf(s.qty, daily);
-      if (before === null || before >= p.cn_min_days) continue;
-      const target = Math.ceil(daily * p.cn_target_days);
-      if (target <= s.qty) continue;
-      items.push({
-        kind: "cn", warehouse_code: w.code, wh_sku: normSku(s.seller_sku), shop_id: s.shop_id, region: s.region,
-        product_id: s.product_id, sku_id: s.sku_id, seller_sku: s.seller_sku, title: s.title, tts_warehouse_id: s.tts_warehouse_id,
-        current_qty: s.qty, proposed_qty: Math.min(99_999, target), daily_sales: Math.round(daily * 100) / 100,
-        days_before: r1(before), days_after: r1(daysOf(target, daily)), wh_available: null, pool: null,
-        reason: `可售 ${r1(before)} 天 < ${p.cn_min_days}，补到 ${p.cn_target_days} 天销量`,
-        warnings: ["国内仓实物库存未接入，确认前请核对仓库确有货"], new_link: false,
-      });
-    }
+  for (const s of slots) {
+    if (s.virtual || bound.has(`${s.shop_id}|${s.tts_warehouse_id}`)) continue;
+    const daily = s.sold / p.window_days;
+    const before = daysOf(s.qty, daily);
+    if (before === null || before >= p.cn_min_days) continue;
+    const target = Math.min(99_999, Math.ceil(daily * p.cn_target_days));
+    items.push({
+      kind: "cn", warehouse_code: cnCode, wh_sku: normSku(s.seller_sku), shop_id: s.shop_id, region: s.region,
+      product_id: s.product_id, sku_id: s.sku_id, seller_sku: s.seller_sku, title: s.title, tts_warehouse_id: s.tts_warehouse_id,
+      current_qty: s.qty, proposed_qty: Math.max(target, s.qty), daily_sales: Math.round(daily * 100) / 100,
+      days_before: r1(before), days_after: r1(daysOf(Math.max(target, s.qty), daily)), wh_available: null, pool: null,
+      reason: `国内仓预警：可售 ${r1(before)} 天 < ${p.cn_min_days} 天，建议 TikTok 库存补到 ${Math.max(target, s.qty)} 件（${p.cn_target_days} 天销量）`,
+      warnings: ["仅预警，系统不改库存：确认国内仓有货（不足及时采购）后人工修改"], new_link: false,
+    });
   }
   return items;
 }

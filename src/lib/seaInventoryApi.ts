@@ -7,16 +7,10 @@ export type SeaWarehouse = {
   status: "active" | "onboarding" | "phasing_out" | "disabled"; region: string | null; links: WhLink[];
   provider_ref: string | null; note: string | null; stock_synced_at: string | null; stock_source: string | null;
   stock_rows: number | null; stock_error: string | null;
-  drive_folder: string | null; drive_name_pattern: string | null; file_config: FileConfig | null;
-  stock_file_name: string | null; stock_file_modified: string | null;
+  file_config: FileConfig | null; stock_file_name: string | null;
 };
-export type FileConfig = { sheet?: string; sku_col?: string; avail_col?: string; onhand_col?: string; name_col?: string; warehouse_col?: string; warehouse_value?: string };
-export type DrivePreview = {
-  files: Array<{ id: string; name: string; mimeType: string; modifiedTime: string }>;
-  picked: { id: string; name: string; modifiedTime: string } | null;
-  sheet?: string | null; header_row?: number | null; count?: number; total_available?: number;
-  rows: Array<{ wh_sku: string; available: number; on_hand: number | null; product_name: string | null }>; notes: string[];
-};
+/** 只用 warehouse_value：导出文件「仓库」列里本仓的名称，上传时按它取本仓的行 */
+export type FileConfig = { warehouse_value?: string };
 export type SeaSettings = {
   window_days: number; min_days: number; min_qty: number; reserve_per_sku: number; zero_sale_qty: number;
   cn_min_days: number; cn_target_days: number; stock_max_age_hours: number; target_days: number; last_run_at: string | null; map_refreshed_at: string | null;
@@ -52,12 +46,11 @@ const fn = <T,>(action: string, body: Record<string, unknown> = {}, timeout = 15
 export const seaApi = {
   overview: () => fn<Overview>("overview"),
   saveSettings: (s: Partial<SeaSettings>) => fn<{ ok: true }>("save_settings", s),
-  drivePreview: (code: string, cfg: { drive_folder?: string; drive_name_pattern?: string; file_config?: FileConfig }) => fn<DrivePreview>("drive_preview", { code, ...cfg }),
   saveWarehouse: (w: Partial<SeaWarehouse> & { code: string }) => fn<{ ok: true }>("save_warehouse", w),
   shopWarehouses: (shop_id: string) => fn<{ fallback?: boolean; error?: string; warehouses: Array<{ id: string; name?: string; type?: string; sub_type?: string; is_default?: boolean; effect_status?: string; address?: { region_code?: string } }> }>("shop_warehouses", { shop_id }),
   importStock: (warehouse_code: string, rows: Array<{ wh_sku: string; available: number; on_hand?: number | null; product_name?: string | null }>, opts: { as_of?: string | null; file_name?: string } = {}) =>
     fn<{ ok: true; rows: number; total_available: number; errors: string[] }>("import_stock", { warehouse_code, rows, ...opts }),
-  syncWarehouse: (code: string, force = false) => fn<{ ok: boolean; error?: string; message?: string; rows?: number; total_available?: number; notes?: string[]; errors?: string[]; file?: string; unchanged?: boolean }>("sync_warehouse", { code, force }),
+  syncWarehouse: (code: string) => fn<{ ok: boolean; error?: string; message?: string; rows?: number; total_available?: number; notes?: string[]; errors?: string[] }>("sync_warehouse", { code }),
   providerWarehouses: (code: string) => fn<{ provider: string; warehouses: Array<{ ref: string; name: string; code: string | null; country: string | null; status: string | null }> }>("provider_warehouses", { code }),
   syncShop: (shop_id: string, cursor: unknown) => fn<{ done: boolean; cursor: unknown; slots?: number; orders?: number }>("sync_shop", { shop_id, cursor }),
   refreshMap: () => fn<{ total: number; multi_listing_skus: number; counts: Record<string, number> }>("refresh_map"),
@@ -81,51 +74,4 @@ export async function sendPlanToFeishu(plan_id: string, passcode: string, name: 
   const j = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string };
   if (!r.ok || !j.ok) throw new Error(j.error ?? `HTTP ${r.status}`);
   return j;
-}
-
-// ── 库存导入：xlsx / csv / 粘贴 ──────────────────────────────────────────────
-const SKU_HEAD = /^(sku|仓库sku|商品sku|seller\s*sku|商家sku|sku编码|商品编码|编码)$/i;
-const AVAIL_HEAD = /^(可用|可用库存|可用数量|可售|可售库存|available|available\s*qty|可用量)$/i;
-const ONHAND_HEAD = /^(在库|实物库存|总库存|库存|on\s*hand|现有库存)$/i;
-const NAME_HEAD = /^(商品名称|名称|品名|product\s*name|name)$/i;
-
-export type ParsedStock = { rows: Array<{ wh_sku: string; available: number; on_hand: number | null; product_name: string | null }>; notes: string[] };
-
-export function parseStockTable(table: unknown[][]): ParsedStock {
-  const notes: string[] = [];
-  // 找表头：前 10 行里同时有 SKU 列和可用列的第一行
-  let hi = -1, cSku = -1, cAv = -1, cOn = -1, cName = -1;
-  for (let i = 0; i < Math.min(10, table.length); i++) {
-    const row = (table[i] ?? []).map((c) => String(c ?? "").trim());
-    const s = row.findIndex((c) => SKU_HEAD.test(c));
-    const a = row.findIndex((c) => AVAIL_HEAD.test(c));
-    if (s >= 0 && a >= 0) { hi = i; cSku = s; cAv = a; cOn = row.findIndex((c) => ONHAND_HEAD.test(c)); cName = row.findIndex((c) => NAME_HEAD.test(c)); break; }
-  }
-  if (hi < 0) {
-    // 无表头：按「第 1 列 SKU、第 2 列可用」
-    hi = -1; cSku = 0; cAv = 1;
-    notes.push("没找到表头（需要「SKU」和「可用库存」两列），按第 1 列 SKU、第 2 列可用数量读取");
-  } else if (hi > 0) notes.push(`表头在第 ${hi + 1} 行，上面 ${hi} 行已忽略`);
-  const rows: ParsedStock["rows"] = [];
-  let skipped = 0;
-  for (let i = hi + 1; i < table.length; i++) {
-    const r = table[i] ?? [];
-    const sku = String(r[cSku] ?? "").trim();
-    const raw = String(r[cAv] ?? "").replace(/[,\s]/g, "");
-    if (!sku && !raw) continue;
-    const av = Number(raw);
-    if (!sku || raw === "" || !Number.isFinite(av)) { skipped++; continue; }
-    rows.push({
-      wh_sku: sku, available: Math.max(0, Math.floor(av)),
-      on_hand: cOn >= 0 && String(r[cOn] ?? "").trim() !== "" ? Number(String(r[cOn]).replace(/[,\s]/g, "")) : null,
-      product_name: cName >= 0 ? String(r[cName] ?? "").trim() || null : null,
-    });
-  }
-  if (skipped) notes.push(`${skipped} 行 SKU 为空或可用数量不是数字，已跳过`);
-  return { rows, notes };
-}
-
-export function parseStockPaste(text: string): ParsedStock {
-  const table = text.split(/\r?\n/).map((l) => l.split(/\t|,/));
-  return parseStockTable(table);
 }

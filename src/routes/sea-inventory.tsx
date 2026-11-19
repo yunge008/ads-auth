@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -16,8 +15,8 @@ import {
 import { getAdminName, getPasscode } from "@/lib/api";
 import { matchWarehouse, parseUploadFile, type UpGroup } from "@/lib/stockUpload";
 import {
-  type MapRow, type Overview, parseStockPaste, type ParsedStock, type PlanItem, type PlanRow,
-  type SeaShop, type SeaWarehouse, seaApi, type DrivePreview, type FileConfig, sendPlanToFeishu, type StockRow,
+  type MapRow, type Overview, type PlanItem, type PlanRow,
+  type SeaShop, type SeaWarehouse, seaApi, sendPlanToFeishu, type StockRow,
 } from "@/lib/seaInventoryApi";
 
 export const Route = createFileRoute("/sea-inventory")({
@@ -72,6 +71,40 @@ function Loading() {
 }
 
 // ═══ 调整计划 ═══════════════════════════════════════════════════════════════
+// ── 「同步并生成计划」任务：放在组件外，组件卸载（切 TAB / 换页面）不影响运行与进度 ──
+type GenJob = { running: boolean; msg: string; seq: number; planId: string | null };
+let genJob: GenJob = { running: false, msg: "", seq: 0, planId: null };
+const genSubs = new Set<() => void>();
+const setGenJob = (p: Partial<GenJob>) => { genJob = { ...genJob, ...p }; genSubs.forEach((f) => f()); };
+function useGenJob(): GenJob {
+  return React.useSyncExternalStore(
+    (cb) => { genSubs.add(cb); return () => { genSubs.delete(cb); }; },
+    () => genJob,
+    () => genJob,
+  );
+}
+async function runGenerate(shops: string[], shopName: (id: string) => string) {
+  if (genJob.running) return;
+  setGenJob({ running: true, msg: "开始同步…", planId: null });
+  try {
+    for (const sid of shops) {
+      let cursor: unknown = null, n = 0;
+      do {
+        setGenJob({ msg: `同步店铺 ${shopName(sid)}（第 ${++n} 段，首次会拉近 60 天订单）…` });
+        const r = await seaApi.syncShop(sid, cursor);
+        cursor = r.done ? null : r.cursor;
+      } while (cursor);
+    }
+    setGenJob({ msg: "生成计划…" });
+    const r = await seaApi.buildPlan();
+    toast.success(`已生成：海外仓调整 ${r.summary.overseas} 条、国内仓预警 ${r.summary.cn} 条${r.warnings.length ? `，${r.warnings.length} 条数据提示` : ""}`);
+    setGenJob({ running: false, msg: "", planId: r.plan_id, seq: genJob.seq + 1 });
+  } catch (e) {
+    toast.error((e as Error).message);
+    setGenJob({ running: false, msg: "", seq: genJob.seq + 1 });
+  }
+}
+
 function PlanPanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }) {
   const [planId, setPlanId] = React.useState<string | undefined>(ov.plans[0]?.id);
   const [plan, setPlan] = React.useState<PlanRow | null>(null);
@@ -93,24 +126,15 @@ function PlanPanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }
   const whName = (code: string) => ov.warehouses.find((w) => w.code === code)?.name ?? code;
   const editable = plan && ["PENDING", "PARTIAL"].includes(plan.status);
 
-  async function generate() {
-    try {
-      for (const sid of ov.linked_shops) {
-        let cursor: unknown = null, n = 0;
-        do {
-          setBusy(`同步店铺 ${shopName(sid)}（第 ${++n} 段）…`);
-          const r = await seaApi.syncShop(sid, cursor);
-          cursor = r.done ? null : r.cursor;
-        } while (cursor);
-      }
-      setBusy("生成计划…");
-      const r = await seaApi.buildPlan();
-      toast.success(`已生成：海外仓 ${r.summary.overseas} 条、国内仓 ${r.summary.cn} 条${r.warnings.length ? `，${r.warnings.length} 条数据提示` : ""}`);
-      await reload();
-      setPlanId(r.plan_id);
-      await loadPlan(r.plan_id);
-    } catch (e) { toast.error((e as Error).message); } finally { setBusy(""); }
-  }
+  // 同步任务在组件外运行（genJob），切换 TAB / 离开页面再回来进度都在；跑完自动载入新计划
+  const job = useGenJob();
+  const seenSeq = React.useRef(job.seq);
+  React.useEffect(() => {
+    if (job.seq === seenSeq.current || job.running) return;
+    seenSeq.current = job.seq;
+    if (job.planId) { void reload(); setPlanId(job.planId); void loadPlan(job.planId); }
+  }, [job.seq, job.running, job.planId, reload, loadPlan]);
+  const generate = () => runGenerate(ov.linked_shops, shopName);
 
   async function patch(it: PlanItem, p: { selected?: boolean; final_qty?: number | null }) {
     if (!plan) return;
@@ -147,7 +171,7 @@ function PlanPanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }
     if (!plan) return;
     const head = ["类型", "店铺", "仓库", "商家SKU", "SKU ID", "商品ID", "TikTok仓库ID", "日销", "当前可售", "建议数量", "可售天数(前)", "可售天数(后)", "仓库可用", "可分配", "原因", "提示", "勾选"];
     const rows = items.map((i) => [
-      i.kind === "cn" ? "国内仓" : "海外仓", shopName(i.shop_id), whName(i.warehouse_code), i.seller_sku ?? "", i.sku_id, i.product_id, i.tts_warehouse_id,
+      i.kind === "cn" ? "国内仓预警（人工）" : "海外仓", shopName(i.shop_id), whName(i.warehouse_code), i.seller_sku ?? "", i.sku_id, i.product_id, i.tts_warehouse_id,
       i.daily_sales, i.current_qty, i.final_qty ?? i.proposed_qty, i.days_before ?? "无销量", i.days_after ?? "无销量",
       i.wh_available ?? "", i.pool ?? "", i.reason ?? "", (i.warnings ?? []).join("；"), i.selected ? "是" : "否",
     ]);
@@ -178,7 +202,7 @@ function PlanPanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }
         </CardContent></Card>
       )}
       <div className="flex flex-wrap items-center gap-2">
-        <Button onClick={generate} disabled={!!busy || notConfigured}><RefreshCw className="h-4 w-4 mr-1" />同步并生成计划</Button>
+        <Button onClick={generate} disabled={!!busy || job.running || notConfigured}><RefreshCw className="h-4 w-4 mr-1" />同步并生成计划</Button>
         <select className="h-9 rounded-md border px-2 text-sm" value={planId ?? ""} onChange={(e) => setPlanId(e.target.value || undefined)}>
           {ov.plans.map((p) => <option key={p.id} value={p.id}>{bj(p.created_at)} · {p.source === "CRON" ? "定时" : "手动"} · {PLAN_STATUS[p.status] ?? p.status}</option>)}
           {!ov.plans.length && <option value="">暂无计划</option>}
@@ -191,7 +215,7 @@ function PlanPanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }
             <Play className="h-4 w-4 mr-1" />确认执行所选（{toRun.length}）
           </Button>
         )}
-        {busy && <span className="flex items-center gap-1 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />{busy}</span>}
+        {(job.running || busy) && <span className="flex items-center gap-1 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />{job.running ? job.msg : busy}</span>}
       </div>
 
       {plan && (
@@ -218,7 +242,7 @@ function PlanPanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }
       )}
 
       <ItemTable title="海外仓" items={ovItems} editable={!!editable} shopName={shopName} whName={whName} onPatch={patch} onAll={(v) => setAll("overseas", v)} />
-      <ItemTable title="国内仓" hint="国内仓实物库存未接入，勾选前请确认仓库确有货" items={cnItems} editable={!!editable} shopName={shopName} whName={whName} onPatch={patch} onAll={(v) => setAll("cn", v)} />
+      <ItemTable title="国内仓预警" hint="仅预警，系统不改库存：确认国内仓有货（不足及时采购）后人工修改；「建议」= 补到国内仓目标天数" items={cnItems} editable={false} shopName={shopName} whName={whName} onPatch={patch} onAll={(v) => setAll("cn", v)} />
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
@@ -301,122 +325,17 @@ function ItemTable({ title, hint, items, editable, shopName, whName, onPatch, on
 }
 
 // ═══ 仓库与库存 ═════════════════════════════════════════════════════════════
+// 国内仓不在这里：不绑定、不设库存，只在调整计划里做预警（未绑定到任何海外仓的 TikTok 仓库都算国内仓）
 function WarehousePanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }) {
   return (
     <div className="space-y-3 mt-3">
       <div className="text-sm text-muted-foreground">
-        每个实体仓绑定各店铺在 TikTok 里对应的仓库（一个店铺一个 warehouse_id）。海外仓库存超过 {ov.settings.stock_max_age_hours} 小时未更新的仓本次不参与调整。
-        泰国新仓启用时把状态改为「新仓接入中」：listing 还没挂新仓的会生成「新仓首次」设置项；顶妙 TH1 设为「逐步退出」。
+        每个海外仓绑定各店铺在 TikTok 里对应的仓库（一个店铺一个 warehouse_id）。库存来源：千易 / 顶妙点「API 同步」，其他仓点「上传覆盖库存」上传导出表。
+        库存超过 {ov.settings.stock_max_age_hours} 小时未更新的仓本次不参与调整。国内仓不用绑定，没绑定到海外仓的 TikTok 仓库自动按国内仓预警。
       </div>
-      <BatchUploadCard ov={ov} reload={reload} />
       <ShopSyncCard ov={ov} />
-      {ov.warehouses.map((w) => <WarehouseCard key={w.code} w={w} shops={ov.shops} reload={reload} />)}
+      {ov.warehouses.filter((w) => w.kind === "overseas").map((w) => <WarehouseCard key={w.code} w={w} shops={ov.shops} reload={reload} />)}
     </div>
-  );
-}
-
-type Pick = { include: boolean; target: string };
-/** 批量上传：一次选多个导出文件（BigSeller / 顶妙 / 千易），按文件里的「仓库」列自动分到对应仓，预览后导入（整仓覆盖） */
-function BatchUploadCard({ ov, reload }: { ov: Overview; reload: () => Promise<void> }) {
-  const [groups, setGroups] = React.useState<UpGroup[]>([]);
-  const [picks, setPicks] = React.useState<Record<string, Pick>>({});
-  const [busy, setBusy] = React.useState(false);
-  const overseas = ov.warehouses.filter((w) => w.kind === "overseas");
-  const isApi = (code: string) => ["qianyi", "dingmiao"].includes(ov.warehouses.find((w) => w.code === code)?.provider ?? "");
-
-  const parse = async (fs: File[], combo: boolean) => {
-    setBusy(true);
-    try {
-      const all: UpGroup[] = [];
-      for (const f of fs) all.push(...(await parseUploadFile(f, combo)));
-      const p: Record<string, Pick> = {};
-      for (const g of all) {
-        const w = matchWarehouse(g.whValue, overseas);
-        // 能走 API 的仓默认不导入（以 API 为准），只做核对
-        p[g.key] = { target: w?.code ?? "", include: !!w && g.rows.length > 0 && !isApi(w.code) };
-      }
-      setGroups(all); setPicks(p);
-    } catch (e) { toast.error(`解析失败：${(e as Error).message}`); } finally { setBusy(false); }
-  };
-
-  const doImport = async () => {
-    // 同一目标仓的多个分组合并（如含组合 SKU 时单品表 + 组合表）
-    const byWh = new Map<string, { rows: Map<string, UpGroup["rows"][number]>; asOf: string | null; files: Set<string> }>();
-    for (const g of groups) {
-      const pk = picks[g.key];
-      if (!pk?.include || !pk.target) continue;
-      const cur = byWh.get(pk.target) ?? { rows: new Map(), asOf: null, files: new Set<string>() };
-      for (const r of g.rows) {
-        const prev = cur.rows.get(r.wh_sku);
-        cur.rows.set(r.wh_sku, prev ? { ...prev, available: prev.available + r.available } : { ...r });
-      }
-      // 库存时间取各文件里最早的导出时间（保守）
-      if (g.exportTime && (!cur.asOf || g.exportTime < cur.asOf)) cur.asOf = g.exportTime;
-      cur.files.add(g.file);
-      byWh.set(pk.target, cur);
-    }
-    if (!byWh.size) { toast.error("没有勾选要导入的仓"); return; }
-    setBusy(true);
-    try {
-      for (const [code, x] of byWh) {
-        const r = await seaApi.importStock(code, [...x.rows.values()], { as_of: x.asOf, file_name: [...x.files].join("、") });
-        toast.success(`${ov.warehouses.find((w) => w.code === code)?.name ?? code}：导入 ${r.rows} 个 SKU，可用合计 ${r.total_available}`);
-        r.errors.forEach((e) => toast.warning(e));
-      }
-      setGroups([]); setPicks({});
-      await reload();
-    } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
-  };
-
-  return (
-    <Card><CardContent className="p-3 space-y-2 text-sm">
-      <div className="flex flex-wrap items-center gap-3">
-        <span className="font-medium">上传库存表</span>
-        <label className="inline-flex">
-          <input type="file" multiple accept=".xlsx,.xls,.csv" className="hidden" onChange={(e) => {
-            const fs = [...(e.target.files ?? [])]; e.target.value = "";
-            if (fs.length) void parse(fs, false);
-          }} />
-          <span className="inline-flex items-center h-8 px-3 rounded-md border cursor-pointer hover:bg-muted"><Upload className="h-4 w-4 mr-1" />选择文件（可多选）</span>
-        </label>
-        <span className="text-xs text-muted-foreground">支持 BigSeller、顶妙 TOPWMS、千易导出；按文件里的「仓库」列自动分仓，<b>导入会整仓覆盖</b>。千易 / 顶妙有 API 的仓默认不勾选，只用来核对。BigSeller 组合 SKU 不导入（库存由单品推算），组合款 listing 在生成计划时按单品库存分配。</span>
-      </div>
-      {busy && <div className="flex items-center gap-1 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />处理中…</div>}
-      {!!groups.length && (
-        <>
-          <table className="w-full text-xs">
-            <thead className="text-muted-foreground"><tr className="[&>th]:text-left [&>th]:px-1">
-              <th>导入</th><th>文件 / sheet</th><th>文件里的仓库</th><th>导入到</th><th className="text-right">SKU</th><th className="text-right">有货</th><th className="text-right">可用合计</th><th>导出时间</th><th>说明</th>
-            </tr></thead>
-            <tbody>
-              {groups.map((g) => {
-                const pk = picks[g.key] ?? { include: false, target: "" };
-                return (
-                  <tr key={g.key} className="border-t align-top [&>td]:px-1 [&>td]:py-1">
-                    <td><Checkbox checked={pk.include} disabled={!pk.target || !g.rows.length} onCheckedChange={(v) => setPicks({ ...picks, [g.key]: { ...pk, include: v === true } })} /></td>
-                    <td className="max-w-[220px] break-all">{g.file}<div className="text-muted-foreground">{g.sheet}</div></td>
-                    <td>{g.whValue ?? "（无仓库列）"}</td>
-                    <td>
-                      <select className="h-7 rounded border px-1" value={pk.target} onChange={(e) => setPicks({ ...picks, [g.key]: { target: e.target.value, include: !!e.target.value && g.rows.length > 0 } })}>
-                        <option value="">选择仓库…</option>
-                        {overseas.map((w) => <option key={w.code} value={w.code}>{w.name}</option>)}
-                      </select>
-                      {pk.target && isApi(pk.target) && <div className="text-amber-700">该仓有 API，导入会覆盖 API 数据</div>}
-                    </td>
-                    <td className="text-right">{g.rows.length}</td>
-                    <td className="text-right">{g.rows.filter((r) => r.available > 0).length}</td>
-                    <td className="text-right">{g.rows.reduce((t, r) => t + r.available, 0)}</td>
-                    <td>{g.exportTime ? bj(g.exportTime) : "—"}</td>
-                    <td className="max-w-[260px]">{g.notes.join("；")}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          <Button size="sm" disabled={busy || !Object.values(picks).some((p) => p.include)} onClick={doImport}>导入勾选的仓</Button>
-        </>
-      )}
-    </CardContent></Card>
   );
 }
 
@@ -435,13 +354,14 @@ function ShopSyncCard({ ov }: { ov: Overview }) {
   );
 }
 
+type UploadPreview = { file: string; rows: UpGroup["rows"]; notes: string[]; asOf: string | null; mismatch: string[] };
+
 function WarehouseCard({ w, shops, reload }: { w: SeaWarehouse; shops: SeaShop[]; reload: () => Promise<void> }) {
   const [busy, setBusy] = React.useState(false);
   const [shopId, setShopId] = React.useState("");
   const [ttsWhs, setTtsWhs] = React.useState<Array<{ id: string; name?: string; type?: string }>>([]);
   const [ttsWh, setTtsWh] = React.useState("");
-  const [parsed, setParsed] = React.useState<ParsedStock | null>(null);
-  const [paste, setPaste] = React.useState("");
+  const [preview, setPreview] = React.useState<UploadPreview | null>(null);
   const [stock, setStock] = React.useState<StockRow[] | null>(null);
   const [provWhs, setProvWhs] = React.useState<Array<{ ref: string; name: string; code: string | null; country: string | null }> | null>(null);
   const hasApi = ["qianyi", "dingmiao"].includes(w.provider);
@@ -461,22 +381,38 @@ function WarehouseCard({ w, shops, reload }: { w: SeaWarehouse; shops: SeaShop[]
       if (r.fallback) toast.warning(r.error ?? "读不到仓库名称，已改为从在售商品汇总仓库 ID", { duration: 10000 });
     } catch (e) { toast.error((e as Error).message); }
   };
-  const doImport = async () => {
-    if (!parsed?.rows.length) return;
+  /** 上传导出表：只取文件里属于本仓的行（按「仓库」列匹配；文件没有仓库列则整份），多个 sheet 合并 */
+  const onFile = async (f: File) => {
     setBusy(true);
     try {
-      const r = await seaApi.importStock(w.code, parsed.rows);
-      toast.success(`已导入 ${r.rows} 个 SKU，可用合计 ${r.total_available}`);
+      const groups = await parseUploadFile(f, false);
+      const withWh = groups.filter((g) => g.whValue !== null);
+      const mine = withWh.length ? groups.filter((g) => g.whValue !== null && matchWarehouse(g.whValue, [w]) === w) : groups;
+      const rows = new Map<string, UpGroup["rows"][number]>();
+      for (const g of mine) for (const r of g.rows) {
+        const prev = rows.get(r.wh_sku);
+        rows.set(r.wh_sku, prev ? { ...prev, available: prev.available + r.available } : { ...r });
+      }
+      const mismatch = withWh.length && !mine.length ? [...new Set(withWh.map((g) => g.whValue!))] : [];
+      setPreview({ file: f.name, rows: [...rows.values()], notes: [...new Set(mine.flatMap((g) => g.notes))], asOf: mine.find((g) => g.exportTime)?.exportTime ?? null, mismatch });
+    } catch (e) { toast.error(`解析失败：${(e as Error).message}`); } finally { setBusy(false); }
+  };
+  const doImport = async () => {
+    if (!preview?.rows.length) return;
+    setBusy(true);
+    try {
+      const r = await seaApi.importStock(w.code, preview.rows, { as_of: preview.asOf, file_name: preview.file });
+      toast.success(`已覆盖：${r.rows} 个 SKU，可用合计 ${r.total_available}`);
       r.errors.forEach((e) => toast.warning(e));
-      setParsed(null); setPaste(""); await reload();
+      setPreview(null); await reload();
     } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
   };
-  const sync = async (force = false) => {
+  const sync = async () => {
     setBusy(true);
     try {
-      const r = await seaApi.syncWarehouse(w.code, force);
+      const r = await seaApi.syncWarehouse(w.code);
       if (!r.ok) toast.error(r.error ?? "失败");
-      else toast.success(r.message ?? `已同步 ${r.rows ?? 0} 个 SKU，可用合计 ${r.total_available ?? 0}${r.file ? `（文件「${r.file}」）` : ""}`);
+      else toast.success(r.message ?? `已同步 ${r.rows ?? 0} 个 SKU，可用合计 ${r.total_available ?? 0}`);
       [...(r.notes ?? []), ...(r.errors ?? [])].forEach((n) => toast.warning(n));
       await reload();
     }
@@ -489,7 +425,7 @@ function WarehouseCard({ w, shops, reload }: { w: SeaWarehouse; shops: SeaShop[]
       <CardHeader className="py-3">
         <CardTitle className="text-base flex flex-wrap items-center gap-2">
           {w.name}
-          <Badge variant="outline">{w.kind === "cn" ? "国内仓" : `海外仓 ${w.region ?? ""}`}</Badge>
+          <Badge variant="outline">海外仓 {w.region ?? ""}</Badge>
           <Badge variant="secondary">{PROVIDER_LABEL[w.provider] ?? w.provider}</Badge>
           <select className="ml-auto h-8 rounded-md border px-2 text-sm font-normal" value={w.status} disabled={busy} onChange={(e) => save({ status: e.target.value as SeaWarehouse["status"] })}>
             {Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
@@ -535,94 +471,51 @@ function WarehouseCard({ w, shops, reload }: { w: SeaWarehouse; shops: SeaShop[]
             )}
           </div>
         )}
-        {w.kind === "overseas" && <DriveConfig w={w} reload={reload} />}
-        {w.kind === "overseas" && (
-          <div className="space-y-2">
-            <div className={stale ? "text-red-600" : ""}>
-              库存：{w.stock_rows ?? 0} 个 SKU，更新于 {bj(w.stock_synced_at)}（{w.stock_source === "api" ? "API" : w.stock_source === "drive" ? `云盘「${w.stock_file_name ?? ""}」，按文件修改时间计` : w.stock_source === "manual" ? "手动导入" : "—"}）
-              {stale && "，已过期，计划会跳过这个仓"}
-              {w.stock_error && <div className="text-red-600">⚠ {w.stock_error}</div>}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {(hasApi || w.drive_folder) && (
-                <Button size="sm" variant="outline" disabled={busy} onClick={() => sync(!!w.drive_folder)}>
-                  <RefreshCw className="h-4 w-4 mr-1" />{w.drive_folder ? "从云盘同步" : "API 同步"}
-                </Button>
-              )}
-              <Button size="sm" variant="ghost" onClick={async () => { try { setStock((await seaApi.stockList(w.code)).rows); } catch (e) { toast.error((e as Error).message); } }}>查看当前库存</Button>
-            </div>
-            <Textarea rows={2} placeholder="粘贴两列：SKU ⇥ 可用库存（可带表头，Excel 直接复制）；整份文件请用上方「上传库存表」" value={paste}
-              onChange={(e) => { setPaste(e.target.value); setParsed(e.target.value.trim() ? parseStockPaste(e.target.value) : null); }} />
-            {parsed && (
-              <div className="rounded border p-2 space-y-1">
-                <div>识别 {parsed.rows.length} 个 SKU，可用合计 {parsed.rows.reduce((s, r) => s + r.available, 0)}。<b>导入会整仓覆盖</b>（表里没有的 SKU 视为 0 / 无货）。</div>
-                {parsed.notes.map((n, i) => <div key={i} className="text-amber-700">⚠ {n}</div>)}
-                <div className="font-mono text-xs max-h-32 overflow-auto whitespace-pre">{parsed.rows.slice(0, 20).map((r) => `${r.wh_sku}  ${r.available}`).join("\n")}{parsed.rows.length > 20 && "\n…"}</div>
-                <Button size="sm" disabled={busy || !parsed.rows.length} onClick={doImport}>确认导入</Button>
-              </div>
-            )}
-            {stock && (
-              <div className="max-h-60 overflow-auto font-mono text-xs border rounded p-2">
-                {stock.map((r) => <div key={r.wh_sku}>{r.wh_sku}  可用 {r.available}{r.product_name ? `  ${r.product_name}` : ""}</div>)}
-                {!stock.length && "无"}
-              </div>
-            )}
+        <div className="space-y-2">
+          <div className={stale ? "text-red-600" : ""}>
+            库存：{w.stock_rows ?? 0} 个 SKU，更新于 {bj(w.stock_synced_at)}（{w.stock_source === "api" ? "API" : w.stock_source === "manual" ? `上传${w.stock_file_name ? `「${w.stock_file_name}」` : ""}` : "—"}）
+            {stale && "，已过期，计划会跳过这个仓"}
+            {w.stock_error && <div className="text-red-600">⚠ {w.stock_error}</div>}
           </div>
-        )}
+          <div className="flex flex-wrap items-center gap-2">
+            {hasApi && <Button size="sm" variant="outline" disabled={busy} onClick={sync}><RefreshCw className="h-4 w-4 mr-1" />API 同步</Button>}
+            <label className="inline-flex">
+              <input type="file" accept=".xlsx,.xls,.csv" className="hidden" disabled={busy} onChange={(e) => {
+                const f = e.target.files?.[0]; e.target.value = "";
+                if (f) void onFile(f);
+              }} />
+              <span className="inline-flex items-center h-8 px-3 rounded-md border cursor-pointer hover:bg-muted"><Upload className="h-4 w-4 mr-1" />上传覆盖库存</span>
+            </label>
+            <Button size="sm" variant="ghost" onClick={async () => { try { setStock((await seaApi.stockList(w.code)).rows); } catch (e) { toast.error((e as Error).message); } }}>查看当前库存</Button>
+            {busy && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+          </div>
+          {preview && (
+            <div className="rounded border p-2 space-y-1">
+              <div className="text-xs text-muted-foreground break-all">{preview.file}{preview.asOf && `，导出时间 ${bj(preview.asOf)}`}</div>
+              {preview.mismatch.length ? (
+                <div className="text-red-600">文件里的仓库是「{preview.mismatch.join("、")}」，不是本仓（{w.file_config?.warehouse_value ?? w.provider_ref ?? w.name}），未导入。请确认选对了文件。</div>
+              ) : (
+                <>
+                  <div>识别 {preview.rows.length} 个 SKU（有货 {preview.rows.filter((r) => r.available > 0).length}），可用合计 {preview.rows.reduce((t, r) => t + r.available, 0)}。<b>会整仓覆盖</b>：表里没有的 SKU 视为无货。</div>
+                  {preview.notes.map((n, i) => <div key={i} className="text-amber-700">⚠ {n}</div>)}
+                  {hasApi && <div className="text-amber-700">该仓有 API，上传会覆盖 API 数据，下次 API 同步后又会被替换。</div>}
+                </>
+              )}
+              <div className="flex gap-2">
+                <Button size="sm" disabled={busy || !preview.rows.length || preview.mismatch.length > 0} onClick={doImport}>确认覆盖</Button>
+                <Button size="sm" variant="ghost" onClick={() => setPreview(null)}>取消</Button>
+              </div>
+            </div>
+          )}
+          {stock && (
+            <div className="max-h-60 overflow-auto font-mono text-xs border rounded p-2">
+              {stock.map((r) => <div key={r.wh_sku}>{r.wh_sku}  可用 {r.available}{r.product_name ? `  ${r.product_name}` : ""}</div>)}
+              {!stock.length && "无"}
+            </div>
+          )}
+        </div>
       </CardContent>
     </Card>
-  );
-}
-
-const FC_FIELDS: Array<[keyof FileConfig, string]> = [
-  ["sku_col", "SKU 列表头"], ["avail_col", "可用数量列表头"], ["sheet", "sheet 名"],
-  ["warehouse_col", "仓库列表头"], ["warehouse_value", "只取该仓库"], ["onhand_col", "在库列表头"],
-];
-/** 云盘（RPA 导出）配置：填了文件夹就优先从云盘取，不再走 API */
-function DriveConfig({ w, reload }: { w: SeaWarehouse; reload: () => Promise<void> }) {
-  const [open, setOpen] = React.useState(!!w.drive_folder);
-  const [folder, setFolder] = React.useState(w.drive_folder ?? "");
-  const [pattern, setPattern] = React.useState(w.drive_name_pattern ?? "");
-  const [fc, setFc] = React.useState<FileConfig>(w.file_config ?? {});
-  const [pv, setPv] = React.useState<DrivePreview | null>(null);
-  const [busy, setBusy] = React.useState(false);
-  if (!open) return <Button size="sm" variant="ghost" className="px-0" onClick={() => setOpen(true)}>＋ 配置云盘自动导入（RPA 导出 Excel）</Button>;
-  const preview = async () => {
-    setBusy(true);
-    try { setPv(await seaApi.drivePreview(w.code, { drive_folder: folder, drive_name_pattern: pattern, file_config: fc })); }
-    catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
-  };
-  const save = async () => {
-    setBusy(true);
-    try { await seaApi.saveWarehouse({ code: w.code, drive_folder: folder.trim(), drive_name_pattern: pattern.trim(), file_config: fc }); toast.success(folder.trim() ? "已保存：之后该仓库存从云盘取" : "已清空云盘配置"); await reload(); }
-    catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
-  };
-  return (
-    <div className="rounded border p-2 space-y-2">
-      <div className="font-medium">云盘自动导入 <span className="text-xs font-normal text-muted-foreground">填了文件夹后，定时任务取文件夹里最新一份表格（xlsx/xls/csv/Google 表格），库存时间按文件修改时间算，超过有效期的不参与调整</span></div>
-      <div className="flex flex-wrap items-center gap-2">
-        <Input className="h-8 w-96" placeholder="Google 云盘文件夹链接（需共享给服务账号邮箱）" value={folder} onChange={(e) => setFolder(e.target.value)} />
-        <Input className="h-8 w-40" placeholder="文件名包含（可空）" value={pattern} onChange={(e) => setPattern(e.target.value)} />
-      </div>
-      <div className="flex flex-wrap items-center gap-2 text-xs">
-        {FC_FIELDS.map(([k, label]) => (
-          <Input key={k} className="h-7 w-32 text-xs" placeholder={label} value={fc[k] ?? ""} onChange={(e) => setFc({ ...fc, [k]: e.target.value })} />
-        ))}
-        <span className="text-muted-foreground">列名留空 = 自动识别（SKU / 可用库存 等常见表头）</span>
-      </div>
-      <div className="flex gap-2">
-        <Button size="sm" variant="outline" disabled={busy || !folder.trim()} onClick={preview}>预览最新文件</Button>
-        <Button size="sm" disabled={busy} onClick={save}>保存</Button>
-      </div>
-      {pv && (
-        <div className="text-xs space-y-1">
-          <div>文件夹内 {pv.files.length} 个文件；选中：<b>{pv.picked ? `${pv.picked.name}（修改于 ${bj(pv.picked.modifiedTime)}）` : "无"}</b>
-            {pv.picked && <>；sheet「{pv.sheet}」，表头第 {pv.header_row ?? "—"} 行，识别 {pv.count} 个 SKU，可用合计 {pv.total_available}</>}</div>
-          {pv.notes.map((n, i) => <div key={i} className="text-amber-700">⚠ {n}</div>)}
-          {!!pv.rows.length && <div className="font-mono max-h-40 overflow-auto whitespace-pre">{pv.rows.map((r) => `${r.wh_sku}  ${r.available}`).join("\n")}</div>}
-        </div>
-      )}
-    </div>
   );
 }
 
