@@ -8,6 +8,8 @@ export type SeaWarehouse = {
   provider_ref: string | null; note: string | null; stock_synced_at: string | null; stock_source: string | null;
   stock_rows: number | null; stock_error: string | null;
   file_config: FileConfig | null; stock_file_name: string | null;
+  /** 当前库存表汇总：SKU 数、有货 SKU 数、可用件数 */
+  stock_totals?: { skus: number; in_stock: number; units: number };
 };
 /** 只用 warehouse_value：导出文件「仓库」列里本仓的名称，上传时按它取本仓的行 */
 export type FileConfig = { warehouse_value?: string };

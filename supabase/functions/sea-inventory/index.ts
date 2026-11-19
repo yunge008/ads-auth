@@ -108,8 +108,23 @@ async function overview() {
     db.from("sea_inv_plans").select("id,created_at,source,status,summary,executed_at,executed_by").order("created_at", { ascending: false }).limit(10),
     db.from("sea_inv_sku_map").select("shop_id", { count: "exact", head: true }).eq("active", true),
   ]);
+  // 每个仓：SKU 数、有货 SKU 数、可用件数合计（按当前库存表实时汇总）
+  const totals = new Map<string, { skus: number; in_stock: number; units: number }>();
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await db.from("sea_inv_wh_stock").select("warehouse_code,available").range(from, from + 999);
+    if (error) throw error;
+    for (const r of data ?? []) {
+      const t = totals.get(r.warehouse_code) ?? { skus: 0, in_stock: 0, units: 0 };
+      const a = Number(r.available) || 0;
+      t.skus++; if (a > 0) t.in_stock++; t.units += a;
+      totals.set(r.warehouse_code, t);
+    }
+    if (!data || data.length < 1000) break;
+  }
   return {
-    settings: settings.data, warehouses, shops: shops.data ?? [], shop_sync: sync.data ?? [],
+    settings: settings.data,
+    warehouses: warehouses.map((w) => ({ ...w, stock_totals: totals.get(w.code) ?? { skus: 0, in_stock: 0, units: 0 } })),
+    shops: shops.data ?? [], shop_sync: sync.data ?? [],
     plans: plan.data ?? [], map_active: mapCount.count ?? 0, linked_shops: linkedShops(warehouses), exec_enabled: execEnabled(),
   };
 }

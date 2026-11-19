@@ -561,10 +561,15 @@ function StockTile({ w, maxAge, reload }: { w: SeaWarehouse; maxAge: number; rel
         </div>
         <div className="flex items-center gap-2">
           <span className={`w-2.5 h-2.5 shrink-0 rounded-full ${TONE_DOT[st.tone]}`} />
-          <span className={`whitespace-nowrap ${st.tone === "ok" ? "" : st.tone === "off" ? "text-muted-foreground" : "text-red-600 font-medium"}`}>{st.label}</span>
-          <span className="text-xs text-muted-foreground ml-auto truncate min-w-0" title={`${w.stock_rows ?? 0} 个 SKU，更新于 ${bj(w.stock_synced_at)}`}>
-            {w.stock_rows ?? 0} SKU · {shortTime(w.stock_synced_at)} · {w.stock_source === "api" ? "API" : w.stock_source === "manual" ? "上传" : "—"}
+          <span className={`whitespace-nowrap ${st.tone === "ok" ? "" : st.tone === "off" ? "text-muted-foreground" : "text-red-600 font-medium"}`}
+            title={`库存时间超过 ${maxAge} 小时算过期（参数页可改），过期的仓本次计划跳过`}>{st.label}</span>
+          <span className="text-xs text-muted-foreground ml-auto truncate min-w-0" title={`库存时间 ${bj(w.stock_synced_at)}`}>
+            {shortTime(w.stock_synced_at)} · {w.stock_source === "api" ? "API" : w.stock_source === "manual" ? "上传" : "—"}
           </span>
+        </div>
+        <div className="flex items-baseline justify-between gap-2 whitespace-nowrap" title="SKU 数（其中可用 > 0 的个数）· 可用件数合计">
+          <span><b className="text-lg tabular-nums">{(w.stock_totals?.skus ?? 0).toLocaleString()}</b> <span className="text-xs">SKU</span> <span className="text-xs text-muted-foreground">· 有货 {(w.stock_totals?.in_stock ?? 0).toLocaleString()}</span></span>
+          <span><b className="text-lg tabular-nums">{(w.stock_totals?.units ?? 0).toLocaleString()}</b> <span className="text-xs">件</span></span>
         </div>
         {!w.links.length && w.status !== "disabled" && <div className="text-xs text-red-600">未配对店铺，计划不含此仓</div>}
         {w.stock_error && <div className="text-xs text-red-600 line-clamp-2" title={w.stock_error}>⚠ {w.stock_error}</div>}
