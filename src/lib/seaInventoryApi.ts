@@ -58,6 +58,8 @@ export const seaApi = {
   refreshMap: () => fn<{ total: number; multi_listing_skus: number; counts: Record<string, number> }>("refresh_map"),
   mapList: () => fn<{ rows: MapRow[] }>("map_list"),
   setOverride: (shop_id: string, sku_id: string, wh_sku: string) => fn<{ ok: true }>("set_override", { shop_id, sku_id, wh_sku }),
+  setOverrideMany: (items: Array<{ shop_id: string; sku_id: string; product_id: string; seller_sku: string }>, wh_sku: string) =>
+    fn<{ ok: true; count: number }>("set_override", { items, wh_sku }),
   stockList: (warehouse_code: string) => fn<{ rows: StockRow[] }>("stock_list", { warehouse_code }),
   buildPlan: (map_diff?: unknown) => fn<{ plan_id: string; summary: Record<string, unknown>; warnings: string[] }>("build_plan", { map_diff }),
   planGet: (plan_id?: string) => fn<{ plan: PlanRow; items: PlanItem[]; shops: SeaShop[] }>("plan_get", { plan_id }),

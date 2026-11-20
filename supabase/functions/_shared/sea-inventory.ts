@@ -94,7 +94,30 @@ export type GroupStatus = {
   slots: number;
   triggered: boolean;
   note: string;
+  /** 「找不到」组：listing 在 TikTok 该仓的当前可售合计（> 0 = 有超卖风险） */
+  listing_qty?: number;
+  /** 「找不到」组：涉及的 listing（采用映射时逐个写 sea_inv_sku_map.wh_sku_override） */
+  listings?: Array<{ shop_id: string; sku_id: string; product_id: string; seller_sku: string; qty: number }>;
+  /** 「找不到」组：仓库里编码相近的 SKU（建议映射，需人工确认） */
+  candidates?: string[];
+  /** 「找不到」组：组合款缺的单品 */
+  missing_parts?: string[];
 };
+
+/** 编码核心：去掉 M-/M 前缀、AR 前缀、+B数字 包装后缀、空格，转大写；用于给「找不到」的 SKU 找相近的仓库编码 */
+export function skuCore(sku: string): string {
+  return normSku(sku).toUpperCase().replace(/\s+/g, "")
+    .replace(/^M-?/, "").replace(/(\+B\d+)+$/, "").replace(/(^|\+)AR/g, "$1");
+}
+/** 仓库里与 listing SKU 编码核心相同的 SKU（最多 3 个） */
+export function suggestWhSku(sku: string, stockKeys: Iterable<string>): string[] {
+  const core = skuCore(sku);
+  if (!core) return [];
+  const out: string[] = [];
+  for (const k of stockKeys) if (k !== sku && skuCore(k) === core) { out.push(k); if (out.length >= 3) break; }
+  return out;
+}
+const listingInfo = (g: Slot[]) => g.filter((s) => !s.virtual).map((s) => ({ shop_id: s.shop_id, sku_id: s.sku_id, product_id: s.product_id, seller_sku: s.seller_sku, qty: s.qty }));
 
 export function normSku(s: string | null | undefined): string {
   return String(s ?? "").trim();
@@ -271,7 +294,8 @@ export function planCluster(w: Warehouse, cs: Consumer[], stock: Map<string, num
         const pick = (floorDays: number, mustBeAbove: boolean) => cs.filter((d) => d !== c && !lowSet.has(d) && d.comps.has(k)
             && cur.get(d)! > keepAt(d, floorDays) && (!mustBeAbove || days(d, cur.get(d)! - 1) > days(c, cur.get(c)! + 1)))
           .sort((a, b) => (gaveTo.has(b) ? 1 : 0) - (gaveTo.has(a) ? 1 : 0) || days(b) - days(a))[0];
-        const donor = pick(p.target_days, false) ?? pick(p.min_days, true);
+        // 无销量的 listing 只用仓库未分配补，不从其他 listing 调（2026-11-20 负责人：尽量少改 listing）
+        const donor = c.daily > 0 ? (pick(p.target_days, false) ?? pick(p.min_days, true)) : undefined;
         if (!donor) return undo(); // 组合款某个单品凑不齐：已调出的退回，不白改别人
         move(donor, -1);
         log.push(donor);
@@ -350,7 +374,12 @@ export function planOverseas(input: OverseasInput): { items: PlanItem[]; groups:
       const real = g.filter((s) => !s.virtual);
       if (avail === undefined) {
         if (real.length) {
-          groups.push({ warehouse_code: w.code, wh_sku: whSku, wh_available: null, pool: null, slots: real.length, triggered: false, note: "仓库库存里找不到这个 SKU（编码不一致或仓库无货），未调整" });
+          const li = listingInfo(g);
+          groups.push({
+            warehouse_code: w.code, wh_sku: whSku, wh_available: null, pool: null, slots: real.length, triggered: false,
+            note: "仓库库存里没有这个 SKU（编码不一致或没发到这个仓），未调整",
+            listing_qty: li.reduce((t, x) => t + x.qty, 0), listings: li, candidates: suggestWhSku(whSku, stockMap?.keys() ?? []),
+          });
         }
         return;
       }
@@ -372,7 +401,14 @@ export function planOverseas(input: OverseasInput): { items: PlanItem[]; groups:
         const miss = [...comps.keys()].filter((k) => !stockMap?.has(k));
         if (!miss.length) { combos.set(whSku, { comps, slots: g }); continue; }
         if (hasPhysical) { physical.set(whSku, g); continue; } // 实物为 0 且单品凑不齐 → 按实物（会压到 0 并提示）
-        if (real.length) groups.push({ warehouse_code: w.code, wh_sku: whSku, wh_available: null, pool: null, slots: real.length, triggered: false, note: `组合款单品在仓库库存里找不到：${miss.join("、")}，未调整` });
+        if (real.length) {
+          const li = listingInfo(g);
+          groups.push({
+            warehouse_code: w.code, wh_sku: whSku, wh_available: null, pool: null, slots: real.length, triggered: false,
+            note: `组合款缺单品：${miss.join("、")}，未调整`,
+            listing_qty: li.reduce((t, x) => t + x.qty, 0), listings: li, candidates: suggestWhSku(whSku, stockMap?.keys() ?? []), missing_parts: miss,
+          });
+        }
         continue;
       }
       singleGroup(whSku, g); // 走原逻辑（会记「找不到」）

@@ -443,7 +443,9 @@ async function buildPlan(b: Record<string, unknown>, who: string) {
   const missing = ov.groups.filter((g) => g.wh_available === null);
   const summary = {
     overseas: ov.items.length, cn: cn.length, groups_checked: ov.groups.length, groups_triggered: ov.groups.filter((g) => g.triggered).length,
-    missing_in_warehouse: missing.length, missing_sample: missing.slice(0, 50),
+    // 找不到的全部保存（按 TikTok 当前可售降序：> 0 的有超卖风险，排最前）
+    missing_in_warehouse: missing.length, missing_risk: missing.filter((g) => (g.listing_qty ?? 0) > 0).length,
+    missing_sample: [...missing].sort((a, b) => (b.listing_qty ?? 0) - (a.listing_qty ?? 0)).slice(0, 3000),
     min_days_overseas: minDays(ov.items), min_days_cn: minDays(cn), slots: okSlots.length,
   };
 
@@ -782,10 +784,20 @@ Deno.serve(async (req) => {
       case "sync_shop": return json(await syncShop(b));
       case "refresh_map": return json(await refreshMap());
       case "set_override": {
-        const { error } = await db.from("sea_inv_sku_map").update({ wh_sku_override: normSku(b.wh_sku as string) || null, changed_at: nowIso() })
-          .eq("shop_id", String(b.shop_id ?? "")).eq("sku_id", String(b.sku_id ?? ""));
-        if (error) throw error;
-        return json({ ok: true });
+        // 人工映射：listing → 仓库 SKU。支持批量 items:[{shop_id, sku_id, product_id, seller_sku}]；映射表没有这行时新增（upsert）
+        const list = (Array.isArray(b.items) ? b.items : [b]) as Array<Record<string, unknown>>;
+        const wh = normSku(b.wh_sku as string) || null;
+        const t = nowIso();
+        for (const it of list) {
+          const shopId = String(it.shop_id ?? ""), skuId = String(it.sku_id ?? "");
+          if (!shopId || !skuId) bad("shop_id / sku_id 必填");
+          const { data: ex } = await db.from("sea_inv_sku_map").select("shop_id").eq("shop_id", shopId).eq("sku_id", skuId).maybeSingle();
+          const { error } = ex
+            ? await db.from("sea_inv_sku_map").update({ wh_sku_override: wh, changed_at: t }).eq("shop_id", shopId).eq("sku_id", skuId)
+            : await db.from("sea_inv_sku_map").insert({ shop_id: shopId, sku_id: skuId, product_id: String(it.product_id ?? ""), seller_sku: normSku(it.seller_sku as string), wh_sku_override: wh, changed_at: t });
+          if (error) throw error;
+        }
+        return json({ ok: true, count: list.length });
       }
       case "map_list": {
         const map = (await allMap()).filter((r) => b.include_inactive || r.active);

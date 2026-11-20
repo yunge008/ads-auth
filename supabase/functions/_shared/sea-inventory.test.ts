@@ -291,3 +291,28 @@ Deno.test("跨店铺多个 listing 共用单品：超卖时从天数最多的减
   const q = Object.fromEntries(r.items.map((i) => [i.sku_id, i.proposed_qty]));
   eq([q.A + q.B + q.C <= 1000, q.B <= 200, q.C <= 100], [true, true, true]);
 });
+
+// ── 「找不到」诊断与无销量补货（2026-11-20）──
+import { skuCore, suggestWhSku } from "./sea-inventory.ts";
+
+Deno.test("编码核心与建议映射：MY 仓的 M-…+B4 预装编码", () => {
+  const keys = ["M-AR101-A+B4", "M-334-A+B4", "M-AR402+406+B4", "AR1099-B60"];
+  eq(suggestWhSku("AR101-A", keys), ["M-AR101-A+B4"]);
+  eq(suggestWhSku("AR334-A", keys), ["M-334-A+B4"]);
+  eq(suggestWhSku("AR402+AR406", keys), ["M-AR402+406+B4"]);
+  eq(suggestWhSku("AR413-B11", ["AR413-B10", "AR413-B8"]), []); // 不同规格不建议
+  eq(skuCore("M1094-A3-60+B4"), "1094-A3-60");
+});
+
+Deno.test("找不到的 SKU：带出 TikTok 当前可售、listing 明细与建议映射", () => {
+  const r = planOverseas({ warehouses: [whPH], slots: [slot({ sku_id: "A", seller_sku: "AR101-A", qty: 7, sold: 10 })], stock: stock("QY-PH", { "M-AR101-A+B4": 50 }), overrides: new Map(), params: P });
+  const g = r.groups.find((x) => x.wh_available === null)!;
+  eq([g.listing_qty, g.candidates, g.listings!.map((x) => x.sku_id)], [7, ["M-AR101-A+B4"], ["A"]]);
+});
+
+Deno.test("无销量的 listing 只用仓库未分配补，不从其他 listing 调", () => {
+  // 可分配 40 已全部分给 B（40 件，日销 1 → 40 天，高于目标 30）；A 无销量 2 件 < 5 → 没有未分配，不应从 B 调
+  const slots = [slot({ sku_id: "A", qty: 2, sold: 0 }), slot({ sku_id: "B", qty: 38, sold: 10 })];
+  const { items } = planOverseas({ warehouses: [whPH], slots, stock: stock("QY-PH", { "AR140-B2": 45 }), overrides: new Map(), params: P });
+  eq(items.length, 0);
+});

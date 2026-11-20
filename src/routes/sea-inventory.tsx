@@ -191,8 +191,13 @@ function PlanPanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }
     catch (e) { toast.error((e as Error).message); } finally { setBusy(""); }
   }
 
-  const ovItems = items.filter((i) => i.kind === "overseas");
-  const cnItems = items.filter((i) => i.kind === "cn");
+  const [shopF, setShopF] = React.useState("");
+  const [whF, setWhF] = React.useState("");
+  const shown = items.filter((i) => (!shopF || i.shop_id === shopF) && (!whF || i.warehouse_code === whF));
+  const ovItems = shown.filter((i) => i.kind === "overseas");
+  const cnItems = shown.filter((i) => i.kind === "cn");
+  const shopOpts = [...new Set(items.map((i) => i.shop_id))];
+  const whOpts = [...new Set(items.map((i) => i.warehouse_code))];
   const notConfigured = !ov.linked_shops.length;
 
   return (
@@ -232,14 +237,23 @@ function PlanPanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }
         </CardContent></Card>
       )}
       {plan?.summary && Number(plan.summary.missing_in_warehouse ?? 0) > 0 && (
-        <details className="text-sm">
-          <summary className="cursor-pointer text-amber-700">{String(plan.summary.missing_in_warehouse)} 个 listing SKU 在对应海外仓库存里找不到（编码不一致或仓库无货），未参与调整 —— 展开查看</summary>
-          <div className="mt-2 max-h-60 overflow-auto text-xs font-mono">
-            {((plan.summary.missing_sample as Array<{ warehouse_code: string; wh_sku: string; slots: number }>) ?? []).map((g, i) => (
-              <div key={i}>{whName(g.warehouse_code)} · {g.wh_sku} · {g.slots} 个 listing</div>
-            ))}
-          </div>
-        </details>
+        <MissingTable plan={plan} shopName={shopName} whName={whName} />
+      )}
+
+      {items.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-muted-foreground">筛选</span>
+          <select className="h-8 rounded-md border px-2" value={shopF} onChange={(e) => setShopF(e.target.value)}>
+            <option value="">全部店铺</option>
+            {shopOpts.map((id) => <option key={id} value={id}>{shopName(id)}</option>)}
+          </select>
+          <select className="h-8 rounded-md border px-2" value={whF} onChange={(e) => setWhF(e.target.value)}>
+            <option value="">全部仓库</option>
+            {whOpts.map((c) => <option key={c} value={c}>{whName(c)}</option>)}
+          </select>
+          {(shopF || whF) && <Button size="sm" variant="ghost" onClick={() => { setShopF(""); setWhF(""); }}>清除</Button>}
+          <span className="text-xs text-muted-foreground">表头可点击排序</span>
+        </div>
       )}
 
       <ItemTable title="海外仓" items={ovItems} editable={!!editable} shopName={shopName} whName={whName} onPatch={patch} onAll={(v) => setAll("overseas", v)} />
@@ -264,11 +278,128 @@ function PlanPanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }
   );
 }
 
+type SortKey = "sku" | "shop" | "wh" | "daily" | "cur" | "prop" | "delta" | "days" | "avail";
+
+type MissingGroup = {
+  warehouse_code: string; wh_sku: string; slots: number; note: string; listing_qty?: number;
+  listings?: Array<{ shop_id: string; sku_id: string; product_id: string; seller_sku: string; qty: number }>;
+  candidates?: string[]; missing_parts?: string[];
+};
+/** 「找不到」清单：listing 挂了海外仓，但仓库库存里没有这个 SKU。TikTok 当前可售 > 0 的有超卖风险，排最前 */
+function MissingTable({ plan, shopName, whName }: { plan: PlanRow; shopName: (id: string) => string; whName: (c: string) => string }) {
+  const all = ((plan.summary?.missing_sample as MissingGroup[] | undefined) ?? []);
+  const [open, setOpen] = React.useState(false);
+  const [onlyRisk, setOnlyRisk] = React.useState(true);
+  const [whF, setWhF] = React.useState("");
+  const [shopF, setShopF] = React.useState("");
+  const [done, setDone] = React.useState<Record<string, string>>({});
+  const risk = all.filter((g) => (g.listing_qty ?? 0) > 0).length;
+  const withCand = all.filter((g) => g.candidates?.length).length;
+  const shopsIn = [...new Set(all.flatMap((g) => (g.listings ?? []).map((l) => l.shop_id)))];
+  const rows = all.filter((g) => (!onlyRisk || (g.listing_qty ?? 0) > 0) && (!whF || g.warehouse_code === whF) && (!shopF || (g.listings ?? []).some((l) => l.shop_id === shopF)));
+  const adopt = async (g: MissingGroup, wh: string) => {
+    try {
+      await seaApi.setOverrideMany((g.listings ?? []).map((l) => ({ shop_id: l.shop_id, sku_id: l.sku_id, product_id: l.product_id, seller_sku: l.seller_sku })), wh);
+      setDone((d) => ({ ...d, [`${g.warehouse_code}|${g.wh_sku}`]: wh }));
+      toast.success(`${g.wh_sku} → ${wh}：已映射 ${g.listings?.length ?? 0} 个 listing，下次生成计划生效`);
+    } catch (e) { toast.error((e as Error).message); }
+  };
+  return (
+    <Card className={risk ? "border-amber-300" : ""}>
+      <CardContent className="p-3 space-y-2 text-sm">
+        <button className="w-full text-left flex flex-wrap items-center gap-2" onClick={() => setOpen(!open)}>
+          <span className="font-medium">{open ? "▼" : "▶"} 仓库里找不到的 listing SKU：{all.length} 个，未参与调整</span>
+          <span className={`rounded-full px-2 py-0.5 text-xs ${risk ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-600"}`}>TikTok 显示有货（超卖风险）{risk}</span>
+          <span className="rounded-full px-2 py-0.5 text-xs bg-blue-100 text-blue-700">有相近编码可映射 {withCand}</span>
+        </button>
+        {open && (
+          <>
+            <div className="text-xs text-muted-foreground">
+              原因两类：① 编码不一致（如 MY 仓存的是 <span className="font-mono">M-AR101-A+B4</span>、listing 是 <span className="font-mono">AR101-A</span>）—— 确认是同一件货就点「采用」映射；
+              ② 货没发到这个仓 / 组合缺单品 —— 不是映射问题。TikTok 显示有货的要人工处理（补货或在 TikTok 把该仓库存改 0），显示 0 的可以忽略。
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-1"><Checkbox checked={onlyRisk} onCheckedChange={(v) => setOnlyRisk(v === true)} />只看 TikTok 显示有货的</label>
+              <select className="h-8 rounded-md border px-2" value={whF} onChange={(e) => setWhF(e.target.value)}>
+                <option value="">全部仓库</option>
+                {[...new Set(all.map((g) => g.warehouse_code))].map((c) => <option key={c} value={c}>{whName(c)}</option>)}
+              </select>
+              <select className="h-8 rounded-md border px-2" value={shopF} onChange={(e) => setShopF(e.target.value)}>
+                <option value="">全部店铺</option>
+                {shopsIn.map((id) => <option key={id} value={id}>{shopName(id)}</option>)}
+              </select>
+              <span className="text-xs text-muted-foreground">{rows.length} 个</span>
+            </div>
+            <div className="max-h-96 overflow-auto border rounded">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/50 text-muted-foreground sticky top-0"><tr className="[&>th]:px-2 [&>th]:py-1.5 [&>th]:text-left">
+                  <th>仓库</th><th>listing SKU</th><th>店铺</th><th className="text-right">listing 数</th><th className="text-right">TikTok 当前可售</th><th>原因</th><th>建议映射到仓库 SKU</th>
+                </tr></thead>
+                <tbody>
+                  {rows.map((g) => {
+                    const key = `${g.warehouse_code}|${g.wh_sku}`;
+                    return (
+                      <tr key={key} className="border-t align-top [&>td]:px-2 [&>td]:py-1">
+                        <td className="whitespace-nowrap">{whName(g.warehouse_code)}</td>
+                        <td className="font-mono whitespace-nowrap">{g.wh_sku}</td>
+                        <td className="max-w-[160px] truncate" title={[...new Set((g.listings ?? []).map((l) => shopName(l.shop_id)))].join("、")}>{[...new Set((g.listings ?? []).map((l) => shopName(l.shop_id)))].join("、")}</td>
+                        <td className="text-right">{g.slots}</td>
+                        <td className={`text-right tabular-nums ${(g.listing_qty ?? 0) > 0 ? "text-red-600 font-semibold" : "text-muted-foreground"}`}>{g.listing_qty ?? "—"}</td>
+                        <td>{g.missing_parts?.length ? <>组合缺单品 <span className="font-mono">{g.missing_parts.join("、")}</span></> : "仓库无此编码"}</td>
+                        <td>
+                          {done[key] ? <span className="text-green-700">✓ 已映射到 <span className="font-mono">{done[key]}</span></span>
+                            : g.candidates?.length ? g.candidates.map((c) => (
+                              <span key={c} className="inline-flex items-center gap-1 mr-2">
+                                <span className="font-mono">{c}</span>
+                                <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => adopt(g, c)}>采用</Button>
+                              </span>
+                            )) : <span className="text-muted-foreground">—</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function ItemTable({ title, hint, items, editable, shopName, whName, onPatch, onAll }: {
   title: string; hint?: string; items: PlanItem[]; editable: boolean; shopName: (id: string) => string; whName: (c: string) => string;
   onPatch: (it: PlanItem, p: { selected?: boolean; final_qty?: number | null }) => void; onAll: (v: boolean) => void;
 }) {
   const skus = new Set(items.map((i) => i.wh_sku)).size;
+  const [sort, setSort] = React.useState<{ key: SortKey; dir: 1 | -1 } | null>(null);
+  const rows = React.useMemo(() => {
+    if (!sort) return items;
+    const v = (i: PlanItem): string | number => {
+      switch (sort.key) {
+        case "sku": return i.seller_sku || i.sku_id;
+        case "shop": return shopName(i.shop_id);
+        case "wh": return whName(i.warehouse_code);
+        case "daily": return Number(i.daily_sales);
+        case "cur": return i.current_qty;
+        case "prop": return i.final_qty ?? i.proposed_qty;
+        case "delta": return (i.final_qty ?? i.proposed_qty) - i.current_qty;
+        case "days": return i.days_before === null ? Number.POSITIVE_INFINITY : Number(i.days_before);
+        case "avail": return i.wh_available ?? -1;
+      }
+    };
+    return [...items].sort((a, b) => {
+      const x = v(a), y = v(b);
+      return (typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), "zh")) * sort.dir;
+    });
+  }, [items, sort, shopName, whName]);
+  const Th = ({ k, children, right }: { k: SortKey; children: React.ReactNode; right?: boolean }) => (
+    <th className={`cursor-pointer select-none hover:text-foreground ${right ? "text-right" : ""}`}
+      onClick={() => setSort((p) => (p?.key === k ? (p.dir === 1 ? { key: k, dir: -1 } : null) : { key: k, dir: 1 }))}>
+      {children}{sort?.key === k ? (sort.dir === 1 ? " ▲" : " ▼") : ""}
+    </th>
+  );
   return (
     <Card>
       <CardHeader className="py-3">
@@ -288,12 +419,12 @@ function ItemTable({ title, hint, items, editable, shopName, whName, onPatch, on
           <table className="w-full text-sm">
             <thead className="bg-muted/50 text-xs text-muted-foreground">
               <tr className="[&>th]:px-2 [&>th]:py-2 [&>th]:text-left [&>th]:whitespace-nowrap">
-                <th></th><th>SKU</th><th>店铺</th><th>仓</th><th className="text-right">日销</th><th className="text-right">当前</th>
-                <th className="text-right">建议</th><th className="text-right">可售天数</th><th>仓库可用/可分配</th><th>原因</th><th>执行</th>
+                <th></th><Th k="sku">SKU</Th><Th k="shop">店铺</Th><Th k="wh">仓</Th><Th k="daily" right>日销</Th><Th k="cur" right>当前</Th>
+                <Th k="prop" right>建议</Th><Th k="delta" right>变化</Th><Th k="days" right>可售天数</Th><Th k="avail">仓库可用/可分配</Th><th>原因</th><th>执行</th>
               </tr>
             </thead>
             <tbody>
-              {items.map((it) => (
+              {rows.map((it) => (
                 <tr key={it.id} className="border-t align-top [&>td]:px-2 [&>td]:py-1.5">
                   <td><Checkbox checked={it.selected} disabled={!editable || it.exec_status !== "PENDING"} onCheckedChange={(v) => onPatch(it, { selected: v === true })} /></td>
                   <td className="font-mono whitespace-nowrap" title={it.title ?? ""}>{it.seller_sku || it.sku_id}{it.new_link && <Badge className="ml-1" variant="secondary">新仓首次</Badge>}</td>
@@ -307,6 +438,9 @@ function ItemTable({ title, hint, items, editable, shopName, whName, onPatch, on
                         onBlur={(e) => { const v = Number(e.target.value); if (v !== (it.final_qty ?? it.proposed_qty)) onPatch(it, { final_qty: v === it.proposed_qty ? null : v }); }} />
                     ) : <span>{it.exec_qty ?? it.final_qty ?? it.proposed_qty}</span>}
                     {it.final_qty !== null && <div className="text-[10px] text-muted-foreground">原建议 {it.proposed_qty}</div>}
+                  </td>
+                  <td className={`text-right tabular-nums ${(it.final_qty ?? it.proposed_qty) - it.current_qty > 0 ? "text-green-700" : "text-red-600"}`}>
+                    {(it.final_qty ?? it.proposed_qty) - it.current_qty > 0 ? "+" : ""}{(it.final_qty ?? it.proposed_qty) - it.current_qty}
                   </td>
                   <td className="text-right whitespace-nowrap"><span className={dayCls(it.days_before)}>{fmtDays(it.days_before)}</span> → {fmtDays(it.days_after)}</td>
                   <td className="whitespace-nowrap">{it.wh_available ?? "—"}{it.pool !== null && ` / ${it.pool}`}</td>
