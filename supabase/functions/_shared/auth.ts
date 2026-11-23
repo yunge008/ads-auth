@@ -109,14 +109,22 @@ export async function verifyPasscode(
   const db = admin();
   // Plaintext passcode is the source of truth; fall back to legacy sha256 hash
   // for any row that hasn't been migrated yet.
+  // 安全（2026-11-23）：不能把口令拼进 .or() 过滤串——口令里带「,is_admin.eq.true」之类会被 PostgREST 当成额外条件，
+  // 不知道口令也能匹配到管理员。改为两次参数化 .eq() 查询，口令只作为值传递。
   const hash = await sha256Hex(got);
-  let q = db
-    .from("app_accounts")
-    .select("id,name,is_admin,tab_permissions,active,passcode,passcode_hash")
-    .or(`passcode.eq.${got},passcode_hash.eq.${hash}`);
-  if (gotName) q = q.eq("name", gotName);
-  const { data, error } = await q.maybeSingle();
-  if (error) throw new Error(error.message);
+  const cols = "id,name,is_admin,tab_permissions,active";
+  const lookup = async (col: "passcode" | "passcode_hash", val: string) => {
+    let q = db.from("app_accounts").select(cols).eq(col, val);
+    if (gotName) q = q.eq("name", gotName);
+    const { data, error } = await q.limit(2);
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  };
+  let rows = await lookup("passcode", got);
+  if (!rows.length) rows = await lookup("passcode_hash", hash);
+  // 不带用户名时同一口令命中多个账号无法确定身份，与原 maybeSingle 行为一致：拒绝
+  if (rows.length > 1) throw unauthorized("多个账号使用同一密码，请输入用户名");
+  const data = rows[0];
   if (!data) throw unauthorized("用户名或密码错误");
   if (!data.active) throw forbidden("账号已停用");
 

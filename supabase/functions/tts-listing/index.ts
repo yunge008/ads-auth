@@ -127,10 +127,17 @@ async function replicated(shop: Shop, b: Record<string, unknown>) {
 async function uploadImage(shop: Shop, b: Record<string, unknown>) {
   const url = String(b.url ?? "").trim();
   if (!/^https:\/\//.test(url)) bad("url 必须是 https 公网图片地址");
+  // 安全（2026-11-23）：防止被当成服务端代理去访问内网/本机地址（SSRF）。只允许域名形式的公网地址，不跟随跳转。
+  let host = "";
+  try { host = new URL(url).hostname.toLowerCase(); } catch { bad("url 格式不对"); }
+  if (/^\[|^\d+\.\d+\.\d+\.\d+$|^localhost$|\.local$|\.internal$|^metadata\b/.test(host) || !host.includes(".")) {
+    bad(`url 只能是公网域名地址（不允许 IP / localhost / 内网域名）：${host}`);
+  }
   const useCase = String(b.use_case ?? "MAIN_IMAGE");
   if (!USE_CASES.has(useCase)) bad(`use_case 只能是 ${[...USE_CASES].join(" / ")}`);
-  const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+  const res = await fetch(url, { signal: AbortSignal.timeout(30_000), redirect: "manual" });
   if (!res.ok) bad(`取图失败 HTTP ${res.status}：${url}`);
+  if (!/^image\//i.test(res.headers.get("content-type") ?? "")) bad(`不是图片（content-type=${res.headers.get("content-type") ?? "空"}）：${url}`);
   const buf = new Uint8Array(await res.arrayBuffer());
   if (!buf.length || buf.length > MAX_IMAGE_BYTES) bad(`图片大小 ${buf.length} 字节，不在 (0, 10MB]`);
   const type = res.headers.get("content-type") || "image/jpeg";

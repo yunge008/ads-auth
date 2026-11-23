@@ -291,3 +291,4 @@
 2026-11-23 | claude | [1123.197] TikTok Shop 多应用：原应用 default 改名 sea，不设默认应用（不读 TTS_APP_KEY/SECRET/SERVICE_ID secrets，每个应用含 sea 必须在设置页填凭据；tts_shops.app_code NOT NULL 无默认、外键 tts_apps，已有店铺归 sea）；旧回调 /oauth/tts/callback 只提示不换 token。migration 20261123120000_tts_multi_app.sql 尚未执行，直接修改。
 2026-11-23 | claude | [1123.198] TikTok Shop 授权：重定向链接固定显示正式域名 ads-auth.lovable.app（原按当前页面域名，预览里显示成 lovableproject.com）；回调 / 粘贴链接带的 app_key 与所选应用核对，不一致直接报错并指出属于哪个应用；粘贴链接可按 app_key 自动选应用。纯前端。
 2026-11-23 | claude | [1123.199] 补 migration 20261123130000_outreach_settings_rls.sql：outreach_settings 开 RLS + 收回 anon/authenticated 权限（outreach_core 漏开，Lovable 安全扫描 Critical）。待人工在 SQL Editor 执行。
+2026-11-23 | claude | [1123.200] 安全修复：①_shared/auth.ts 口令校验原把用户输入拼进 PostgREST .or() 过滤串，可注入「,is_admin.eq.true」不知道口令即拿管理员身份 → 改为两次参数化 .eq() 查询；②tts-listing upload_image 拉图防 SSRF（只允许公网域名、不跟随跳转、必须 image/*）。需 Lovable 重新部署全部 Edge Function（auth.ts 被全部引用）。
