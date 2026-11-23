@@ -14,10 +14,43 @@ export type TtsShop = {
   status: string;
   authorized_by: string | null;
   updated_at: string;
+  app_code?: string | null;
+  last_refresh_at?: string | null;
+  last_refresh_error?: string | null;
 };
 
+/** 商家自用应用（每个店铺主体一个）。app_secret 只写不读。 */
+export type TtsApp = {
+  code: string;
+  name: string;
+  app_key: string;
+  has_secret: boolean;
+  service_id: string;
+  creds_source: "table" | "secrets";
+  updated_by: string | null;
+  updated_at: string | null;
+  shop_count: number;
+};
+
+export const TTS_DEFAULT_APP = "default";
+
+/** 该应用在 Partner Center 填的重定向链接。default = 原应用沿用旧地址。 */
+export function ttsRedirectUrl(
+  code: string,
+  origin = typeof window !== "undefined" ? window.location.origin : "https://ads-auth.lovable.app",
+): string {
+  return code === TTS_DEFAULT_APP
+    ? `${origin}/oauth/tts/callback`
+    : `${origin}/oauth/tts/callback/${code}`;
+}
+
 export type TtsExchangeResult = {
-  saved: Array<{ shop_id: string; shop_name: string | null; region: string | null; seller_type: string | null }>;
+  saved: Array<{
+    shop_id: string;
+    shop_name: string | null;
+    region: string | null;
+    seller_type: string | null;
+  }>;
   seller_name?: string;
   granted_scopes?: string[];
   get_authorized_shops?: { code: number | null; message: string };
@@ -37,8 +70,19 @@ export function extractTtsCode(input: string): string {
 }
 
 export const ttsApi = {
-  authUrl: () => invokeFn<{ url: string }>("tts-p0-probe", { action: "auth_url" }),
+  apps: () => invokeFn<{ apps: TtsApp[] }>("tts-p0-probe", { action: "apps" }),
+  saveApp: (app: {
+    code: string;
+    name?: string;
+    app_key?: string;
+    app_secret?: string;
+    service_id?: string;
+  }) => invokeFn<{ ok: boolean; apps: TtsApp[] }>("tts-p0-probe", { action: "save_app", ...app }),
+  authUrl: (app = TTS_DEFAULT_APP) =>
+    invokeFn<{ url: string }>("tts-p0-probe", { action: "auth_url", app }),
   shops: () => invokeFn<{ shops: TtsShop[] }>("tts-p0-probe", { action: "shops" }),
-  exchange: (auth_code: string) => invokeFn<TtsExchangeResult>("tts-p0-probe", { action: "exchange", auth_code }),
-  refresh: (shop_id: string) => invokeFn<TtsExchangeResult>("tts-p0-probe", { action: "refresh", shop_id }),
+  exchange: (auth_code: string, app = TTS_DEFAULT_APP) =>
+    invokeFn<TtsExchangeResult>("tts-p0-probe", { action: "exchange", auth_code, app }),
+  refresh: (shop_id: string) =>
+    invokeFn<TtsExchangeResult>("tts-p0-probe", { action: "refresh", shop_id }),
 };

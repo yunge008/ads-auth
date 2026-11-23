@@ -14,6 +14,8 @@
 //   access_token 默认 7 天有效；auth_code 30 分钟内一次性有效
 // - 限流信号：HTTP 429 或业务码 36009002 → 指数退避 + 抖动
 
+import { admin } from "./auth.ts";
+
 export const TTS_API_HOST = "https://open-api.tiktokglobalshop.com";
 export const TTS_AUTH_HOST = "https://auth.tiktok-shops.com";
 
@@ -27,6 +29,51 @@ export function ttsAppCreds(): { appKey: string; appSecret: string } {
     throw new Error("缺少 Supabase secrets：TTS_APP_KEY / TTS_APP_SECRET（在 Supabase → Edge Functions → Secrets 设置）");
   }
   return { appKey, appSecret };
+}
+
+// ── 多应用（2026-11-23）──────────────────────────────────────────────────────
+// 每个店铺主体一个「商家自用」应用，凭据存表 tts_apps；tts_shops.app_code 记录店铺由哪个应用授权。
+// token 只能配签发它的应用签名：ttsCall 不传 app 时按 access_token 反查店铺所属应用（isolate 内缓存），
+// 所以现有调用方（tts-export / tts-listing / sea-inventory / outreach）无需改动。
+// code='default' 且表里 app_key 为空时回落到 secrets TTS_APP_KEY / TTS_APP_SECRET（原应用）。
+export type TtsApp = { code: string; appKey: string; appSecret: string; serviceId: string };
+export const TTS_DEFAULT_APP = "default";
+
+const appCache = new Map<string, TtsApp>();
+const tokenAppCache = new Map<string, string>();
+
+export async function ttsApp(code: string): Promise<TtsApp> {
+  const c = (code || TTS_DEFAULT_APP).trim();
+  const hit = appCache.get(c);
+  if (hit) return hit;
+  const { data, error } = await admin().from("tts_apps").select("code,app_key,app_secret,service_id").eq("code", c).maybeSingle();
+  // 表还没建（migration 未跑）时，default 仍可用 secrets
+  if (error && c !== TTS_DEFAULT_APP) throw new Error(`读取 tts_apps 失败：${error.message}`);
+  let app: TtsApp | null = null;
+  if (data?.app_key && data?.app_secret) {
+    app = { code: c, appKey: data.app_key, appSecret: data.app_secret, serviceId: data.service_id ?? "" };
+  } else if (c === TTS_DEFAULT_APP) {
+    const { appKey, appSecret } = ttsAppCreds();
+    app = { code: c, appKey, appSecret, serviceId: data?.service_id || (Deno.env.get("TTS_SERVICE_ID") ?? "").trim() };
+  }
+  if (!app) throw new Error(`应用 ${c} 未配置 App Key / App Secret（设置 → TikTok Shop 授权 → 应用）`);
+  appCache.set(c, app);
+  return app;
+}
+
+export function ttsAppCacheClear() {
+  appCache.clear();
+}
+
+/** 按 access_token 找店铺所属应用；找不到（如刚换到、尚未入库的 token）按 default。 */
+async function appForToken(accessToken: string): Promise<TtsApp> {
+  let code = tokenAppCache.get(accessToken);
+  if (!code) {
+    const { data, error } = await admin().from("tts_shops").select("app_code").eq("access_token", accessToken).limit(1).maybeSingle();
+    code = (!error && data?.app_code) ? String(data.app_code) : TTS_DEFAULT_APP;
+    tokenAppCache.set(accessToken, code);
+  }
+  return ttsApp(code);
 }
 
 function toHex(buf: ArrayBuffer): string {
@@ -89,6 +136,8 @@ export type TtsCallOpts = {
   /** 写操作：只在「明确被限流拒绝」时重试，绝不在超时/5xx 时重试，避免重复建计划/重复发消息。 */
   write?: boolean;
   timeoutMs?: number;
+  /** 指定应用；省略时按 accessToken 反查店铺所属应用。 */
+  app?: TtsApp;
 };
 
 // ── 读写闸门（2026-11-16 负责人规定）────────────────────────────────────────
@@ -144,7 +193,7 @@ export async function ttsCall<T = unknown>(opts: TtsCallOpts): Promise<TtsResult
       request_id: "", data: null, ms: 0, attempts: 0,
     };
   }
-  const { appKey, appSecret } = ttsAppCreds();
+  const { appKey, appSecret } = opts.app ?? await appForToken(opts.accessToken);
   const bodyStr = opts.body === undefined ? "" : JSON.stringify(opts.body);
   const maxAttempts = 5;
   const started = Date.now();
@@ -214,24 +263,23 @@ export type TtsToken = {
   granted_scopes: string[];
 };
 
-async function tokenRequest(path: string, params: Record<string, string>): Promise<TtsToken> {
-  const { appKey, appSecret } = ttsAppCreds();
-  const q = new URLSearchParams({ app_key: appKey, app_secret: appSecret, ...params });
+async function tokenRequest(path: string, params: Record<string, string>, app: TtsApp): Promise<TtsToken> {
+  const q = new URLSearchParams({ app_key: app.appKey, app_secret: app.appSecret, ...params });
   const res = await fetch(`${TTS_AUTH_HOST}${path}?${q.toString()}`, { signal: AbortSignal.timeout(30_000) });
   const json = await res.json().catch(() => ({})) as { code?: number; message?: string; data?: TtsToken };
   if (json.code !== 0 || !json.data?.access_token) {
-    throw new Error(`TikTok Shop token 接口失败：code=${json.code} ${json.message ?? ""}`.trim());
+    throw new Error(`TikTok Shop token 接口失败（应用 ${app.code}）：code=${json.code} ${json.message ?? ""}`.trim());
   }
   return json.data;
 }
 
-/** auth_code → token。注意 grant_type 官方要求就是 authorized_code（不是 authorization_code）。 */
-export function ttsExchangeCode(authCode: string): Promise<TtsToken> {
-  return tokenRequest("/api/v2/token/get", { auth_code: authCode, grant_type: "authorized_code" });
+/** auth_code → token。注意 grant_type 官方要求就是 authorized_code（不是 authorization_code）。auth_code 绑定签发它的应用。 */
+export function ttsExchangeCode(authCode: string, app: TtsApp): Promise<TtsToken> {
+  return tokenRequest("/api/v2/token/get", { auth_code: authCode, grant_type: "authorized_code" }, app);
 }
 
-export function ttsRefreshToken(refreshToken: string): Promise<TtsToken> {
-  return tokenRequest("/api/v2/token/refresh", { refresh_token: refreshToken, grant_type: "refresh_token" });
+export function ttsRefreshToken(refreshToken: string, app: TtsApp): Promise<TtsToken> {
+  return tokenRequest("/api/v2/token/refresh", { refresh_token: refreshToken, grant_type: "refresh_token" }, app);
 }
 
 /** Excel 里的达人账号规范化：去 @、去空白、转小写。 */

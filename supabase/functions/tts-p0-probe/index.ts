@@ -2,10 +2,13 @@
 //   {"function":"tts-p0-probe","body":{"action":"shops"}}
 //
 // action：
-//   auth_url                                    返回店铺授权链接（需 secret TTS_SERVICE_ID = Partner Center 应用页的 Service ID）
-//   exchange {auth_code}                        auth_code → token → Get Authorized Shops → 写 tts_shops（返回不含 token）
+//   apps                                        列出应用（tts_apps，不含 app_secret）+ 各应用已授权店铺数
+//   save_app {code, name?, app_key?, app_secret?, service_id?}  新增/修改应用；app_secret 留空 = 不改
+//   auth_url {app?}                             返回该应用的店铺授权链接（service_id 取 tts_apps；default 回落 secret TTS_SERVICE_ID）
+//   exchange {auth_code, app?}                  auth_code → token → Get Authorized Shops → 写 tts_shops（app 默认 default；返回不含 token）
 //   shops                                       列出已授权店铺（不含 token）
-//   refresh  {shop_id}                          用 refresh_token 换新 token（验证自动刷新可行）
+//   refresh  {shop_id}                          用该店铺所属应用 + refresh_token 换新 token
+//   refresh_due {within_hours?=48}              刷新 access 将在 N 小时内到期的全部授权（pg_cron 每天调用；cron 身份只放行这一个 action）
 //   read     {shop_id, handles:[...]}           只读实测：名额 / 筛选项 / 逐个 handle 解析 / 资格检查 / 外联记录 / 会话列表 / 计划列表
 //   write    {shop_id, handles:[...], product_ids:[...], commission_pct, ad_commission_pct?, contact, message_text, tc_message?, send_card?, confirm:"SEND"}
 //            （也兼容单个 handle / product_id）
@@ -26,8 +29,11 @@
 //
 // 与 `_shared/tiktok.ts`（Business API）完全独立；只读写 tts_shops 一张表。
 import { admin, requireAdmin } from "../_shared/auth.ts";
+import { cronAuthed } from "../_shared/cron.ts";
 import { corsHeaders } from "../_shared/feishu.ts";
-import { normalizeHandle, pctToRate, ttsCall, type TtsResult, ttsExchangeCode, ttsRefreshToken, type TtsToken } from "../_shared/tts.ts";
+import {
+  normalizeHandle, pctToRate, type TtsApp, ttsApp, ttsAppCacheClear, ttsCall, TTS_DEFAULT_APP, type TtsResult, ttsExchangeCode, ttsRefreshToken, type TtsToken,
+} from "../_shared/tts.ts";
 
 type Shop = {
   shop_id: string;
@@ -41,10 +47,20 @@ type Shop = {
   refresh_expires_at: string | null;
   scopes: string[];
   contact_info: Record<string, string> | null;
+  app_code?: string | null;
 };
 
 const PUBLIC_COLS =
   "shop_id,shop_code,shop_name,region,seller_type,seller_name,seller_base_region,user_type,access_expires_at,refresh_expires_at,scopes,contact_info,status,authorized_by,updated_at";
+// 20261123120000_tts_multi_app.sql 新增列；migration 未跑时回落 PUBLIC_COLS
+const PUBLIC_COLS_V2 = `${PUBLIC_COLS},app_code,last_refresh_at,last_refresh_error`;
+const APP_CODE_RE = /^[a-z0-9-]{1,32}$/;
+
+function appCode(v: unknown): string {
+  const c = String(v ?? "").trim().toLowerCase() || TTS_DEFAULT_APP;
+  if (!APP_CODE_RE.test(c)) bad(`应用代号不合法：${c}（只能小写字母/数字/-）`);
+  return c;
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body, null, 2), {
@@ -85,11 +101,12 @@ function step(name: string, r: TtsResult, data?: unknown) {
   };
 }
 
-async function saveToken(tok: TtsToken, operator: string) {
+async function saveToken(tok: TtsToken, operator: string, app: TtsApp) {
   const shopsRes = await ttsCall<{ shops?: Array<Record<string, string>> }>({
     method: "GET",
     path: "/authorization/202309/shops",
     accessToken: tok.access_token,
+    app,
   });
   if (shopsRes.code !== 0) {
     return { saved: [], get_authorized_shops: step("get_authorized_shops", shopsRes) };
@@ -113,9 +130,17 @@ async function saveToken(tok: TtsToken, operator: string) {
     status: "ACTIVE",
     authorized_by: operator,
     updated_at: new Date().toISOString(),
+    app_code: app.code,
+    last_refresh_at: new Date().toISOString(),
+    last_refresh_error: null as string | null,
   }));
   if (rows.length) {
-    const { error } = await admin().from("tts_shops").upsert(rows, { onConflict: "shop_id" });
+    let { error } = await admin().from("tts_shops").upsert(rows, { onConflict: "shop_id" });
+    if (error && app.code === TTS_DEFAULT_APP && /app_code|last_refresh/.test(error.message)) {
+      // migration 未跑：只写旧列（仅 default 应用可这样兜底，其他应用必须记录 app_code 否则后续签名会用错应用）
+      const legacy = rows.map(({ app_code: _a, last_refresh_at: _b, last_refresh_error: _c, ...r }) => r);
+      ({ error } = await admin().from("tts_shops").upsert(legacy, { onConflict: "shop_id" }));
+    }
     if (error) throw error;
   }
   return {
@@ -126,7 +151,110 @@ async function saveToken(tok: TtsToken, operator: string) {
     granted_scopes: tok.granted_scopes,
     access_expires_at: tsToIso(tok.access_token_expire_in),
     refresh_expires_at: tsToIso(tok.refresh_token_expire_in),
+    app: app.code,
   };
+}
+
+async function listShops() {
+  const r = await admin().from("tts_shops").select(PUBLIC_COLS_V2).order("region");
+  if (!r.error) return r.data;
+  const legacy = await admin().from("tts_shops").select(PUBLIC_COLS).order("region");
+  if (legacy.error) throw legacy.error;
+  return legacy.data;
+}
+
+async function listApps() {
+  const { data, error } = await admin().from("tts_apps").select("code,name,app_key,app_secret,service_id,updated_by,updated_at").order("created_at");
+  if (error) bad(`读取 tts_apps 失败（先在 SQL Editor 执行 20261123120000_tts_multi_app.sql）：${error.message}`);
+  const { data: shops } = await admin().from("tts_shops").select("app_code");
+  const count = new Map<string, number>();
+  for (const s of (shops ?? []) as Array<{ app_code?: string }>) {
+    const c = s.app_code ?? TTS_DEFAULT_APP;
+    count.set(c, (count.get(c) ?? 0) + 1);
+  }
+  const envDefault = !!(Deno.env.get("TTS_APP_KEY") && Deno.env.get("TTS_APP_SECRET"));
+  return (data ?? []).map((a) => {
+    const fromEnv = a.code === TTS_DEFAULT_APP && !a.app_key;
+    return {
+      code: a.code,
+      name: a.name,
+      app_key: fromEnv ? (Deno.env.get("TTS_APP_KEY") ?? "") : a.app_key,
+      has_secret: fromEnv ? envDefault : !!a.app_secret,
+      service_id: a.service_id || (a.code === TTS_DEFAULT_APP ? (Deno.env.get("TTS_SERVICE_ID") ?? "") : ""),
+      creds_source: fromEnv ? "secrets" : "table",
+      updated_by: a.updated_by,
+      updated_at: a.updated_at,
+      shop_count: count.get(a.code) ?? 0,
+    };
+  });
+}
+
+async function saveApp(b: Record<string, unknown>, operator: string) {
+  const code = appCode(b.code);
+  const patch: Record<string, unknown> = { code, updated_by: operator, updated_at: new Date().toISOString() };
+  for (const k of ["name", "app_key", "app_secret", "service_id"] as const) {
+    const v = b[k];
+    if (typeof v !== "string") continue;
+    const t = v.trim();
+    if (k === "app_secret" && !t) continue; // 留空 = 不改
+    patch[k] = t;
+  }
+  const { data: cur } = await admin().from("tts_apps").select("code,name").eq("code", code).maybeSingle();
+  if (!cur && !patch.name) patch.name = code.toUpperCase();
+  const { error } = await admin().from("tts_apps").upsert(patch, { onConflict: "code" });
+  if (error) throw error;
+  ttsAppCacheClear();
+  return { ok: true, apps: await listApps() };
+}
+
+/** 刷新 access 将在 withinHours 内到期的授权。同一次授权（同应用 + 同 refresh_token）的多个店铺只刷一次。 */
+async function refreshDue(withinHours: number, operator: string) {
+  const { data, error } = await admin().from("tts_shops")
+    .select("shop_id,shop_name,region,app_code,refresh_token,access_expires_at,refresh_expires_at");
+  if (error) throw error;
+  const deadline = Date.now() + withinHours * 3600_000;
+  type Row = { shop_id: string; shop_name: string | null; region: string | null; app_code: string | null; refresh_token: string; access_expires_at: string | null; refresh_expires_at: string | null };
+  const groups = new Map<string, Row[]>();
+  for (const r of (data ?? []) as Row[]) {
+    if (r.access_expires_at && Date.parse(r.access_expires_at) > deadline) continue;
+    const k = `${r.app_code ?? TTS_DEFAULT_APP}\u0000${r.refresh_token}`;
+    groups.set(k, [...(groups.get(k) ?? []), r]);
+  }
+  const results: Array<{ app: string; shops: string[]; ok: boolean; message: string; access_expires_at?: string | null }> = [];
+  for (const rows of groups.values()) {
+    const code = rows[0].app_code ?? TTS_DEFAULT_APP;
+    const names = rows.map((r) => `${r.region ?? ""} ${r.shop_name ?? r.shop_id}`.trim());
+    const ids = rows.map((r) => r.shop_id);
+    const markErr = (msg: string) =>
+      admin().from("tts_shops").update({ last_refresh_at: new Date().toISOString(), last_refresh_error: msg.slice(0, 500) }).in("shop_id", ids);
+    const rExp = rows[0].refresh_expires_at;
+    if (rExp && Date.parse(rExp) < Date.now()) {
+      const msg = "refresh_token 已过期，需重新授权";
+      await markErr(msg);
+      results.push({ app: code, shops: names, ok: false, message: msg });
+      continue;
+    }
+    try {
+      const app = await ttsApp(code);
+      const saved = await saveToken(await ttsRefreshToken(rows[0].refresh_token, app), operator, app);
+      const got = new Set(saved.saved.map((s) => s.shop_id));
+      const missing = ids.filter((id) => !got.has(id));
+      if (missing.length) {
+        await admin().from("tts_shops").update({ last_refresh_error: "刷新后不在授权店铺列表中（可能已取消授权）" }).in("shop_id", missing);
+      }
+      const ok = got.size > 0 && !missing.length;
+      results.push({
+        app: code, shops: names, ok,
+        message: ok ? "ok" : (got.size ? `${missing.length} 个店铺不在授权列表` : `获取店铺失败：${saved.get_authorized_shops?.message ?? ""}`),
+        access_expires_at: saved.access_expires_at,
+      });
+    } catch (e) {
+      const msg = (e as Error).message;
+      await markErr(msg);
+      results.push({ app: code, shops: names, ok: false, message: msg });
+    }
+  }
+  return { checked: (data ?? []).length, groups: results.length, failed: results.filter((r) => !r.ok).length, results };
 }
 
 type Creator = { username?: string; nickname?: string; creator_open_id?: string; follower_count?: number; selection_region?: string };
@@ -801,28 +929,37 @@ async function reconStatement(shop: Shop, b: Record<string, unknown>) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    const acc = await requireAdmin(req);
+    // 先读 body：cron 身份只放行 refresh_due
     const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     const action = String(b.action ?? "");
+    if (action === "refresh_due" && await cronAuthed(req)) {
+      return json(await refreshDue(Number(b.within_hours) > 0 ? Number(b.within_hours) : 48, "cron"));
+    }
+    const acc = await requireAdmin(req);
 
+    if (action === "apps") return json({ apps: await listApps() });
+    if (action === "save_app") return json(await saveApp(b, acc.name));
+    if (action === "refresh_due") {
+      return json(await refreshDue(Number(b.within_hours) > 0 ? Number(b.within_hours) : 48, acc.name));
+    }
     if (action === "auth_url") {
-      const sid = (Deno.env.get("TTS_SERVICE_ID") ?? "").trim();
-      if (!sid) bad("缺少 Supabase secret：TTS_SERVICE_ID（Partner Center → 应用详情页的 Service ID）。也可以直接用 Partner Center 里「复制授权链接」");
-      return json({ url: `https://services.tiktokshop.com/open/authorize?service_id=${encodeURIComponent(sid)}` });
+      const app = await ttsApp(appCode(b.app));
+      if (!app.serviceId) bad(`应用 ${app.code} 未填 Service ID（Partner Center → 应用详情页）。也可以直接用 Partner Center 里「复制授权链接」`);
+      return json({ url: `https://services.tiktokshop.com/open/authorize?service_id=${encodeURIComponent(app.serviceId)}` });
     }
     if (action === "exchange") {
       const code = String(b.auth_code ?? b.code ?? "").trim();
       if (!code) bad("auth_code 必填（授权后跳转地址里 code= 后面那串，30 分钟内有效、只能用一次）");
-      return json(await saveToken(await ttsExchangeCode(code), acc.name));
+      const app = await ttsApp(appCode(b.app));
+      return json(await saveToken(await ttsExchangeCode(code, app), acc.name, app));
     }
     if (action === "shops") {
-      const { data, error } = await admin().from("tts_shops").select(PUBLIC_COLS).order("region");
-      if (error) throw error;
-      return json({ shops: data });
+      return json({ shops: await listShops() });
     }
     if (action === "refresh") {
       const shop = await loadShop(b.shop_id);
-      return json(await saveToken(await ttsRefreshToken(shop.refresh_token), acc.name));
+      const app = await ttsApp(shop.app_code ?? TTS_DEFAULT_APP);
+      return json(await saveToken(await ttsRefreshToken(shop.refresh_token, app), acc.name, app));
     }
     if (action === "read") {
       const handles = Array.isArray(b.handles) ? (b.handles as unknown[]).map(String).filter(Boolean) : [];
@@ -867,7 +1004,7 @@ Deno.serve(async (req) => {
       });
       return json(step("raw", r));
     }
-    bad("action 只能是 auth_url / exchange / shops / refresh / read / write / add_to_tc / name_probe / check2 / recon / raw");
+    bad("action 只能是 apps / save_app / refresh_due / auth_url / exchange / shops / refresh / read / write / add_to_tc / name_probe / check2 / recon / raw");
   } catch (error) {
     const status = (error as Error & { status?: number }).status ?? 400;
     return json({ error: (error as Error).message }, status);
