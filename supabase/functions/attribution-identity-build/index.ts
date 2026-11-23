@@ -265,11 +265,15 @@ Deno.serve(async (req) => {
     }));
 
     const assign = assignCreatorIds(components, existingEntities);
-    // 合并：被吞掉的一方保留 creator_id（外部引用仍能解析），只记 merged_into
+    // 合并：被吞掉的一方保留 creator_id（外部引用仍能解析），记 merged_into，
+    // 同时让出 identity_signature（加 #merged: 后缀）：UNIQUE(site, identity_signature) 不区分是否已合并，
+    // 存活方改用合并后分量的签名时常常正是被吞方的旧签名，不让出就会撞唯一约束整次失败（2026-11-23 修）。
+    const sigById = new Map(existingEntities.map((e) => [e.creatorId, e.signature]));
     for (const m of assign.merges) {
+      const oldSig = sigById.get(m.creatorId) ?? "";
       const { error } = await db
         .from("creator_entities")
-        .update({ merged_into: m.mergedInto })
+        .update({ merged_into: m.mergedInto, identity_signature: `${oldSig}#merged:${m.creatorId}` })
         .eq("creator_id", m.creatorId);
       if (error) throw new Error(`creator_entities merge: ${error.message}`);
     }

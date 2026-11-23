@@ -341,6 +341,8 @@ Deno.test("区间：同日交接与人工判定同时存在 → 交接优先", (
   const at = stages.find((s) => s.startDate === "2026-07-01");
   assertEquals(at?.staffName, "李汝华");
   assertEquals(at?.stageType, "HANDOVER");
+  // 2026-11-23：原实现在这里还会多出一段 0 长度区间（数据库 CHECK end_date > start_date 拒绝），现在不允许
+  assert(stages.every((s) => s.endDate === null || s.endDate > s.startDate), `出现非法区间：${JSON.stringify(stages)}`);
 });
 
 Deno.test("区间：区间之间首尾相接、不重叠（数据库排他约束的前置保证）", () => {
@@ -377,4 +379,38 @@ Deno.test("buildAllStages: 按 (站点, 达人) 分组，站点不同即不同�
   });
   assertEquals(stages.length, 2);
   assertEquals(stages.map((s) => [s.country, s.staffName]).sort(), [["PH", "李汝华"], ["PH2", "何莎莎"]]);
+});
+
+// ---------- 2026-11-23 回归：区间长度不能为 0 / 负（CHECK end_date > start_date） ----------
+const validRanges = (stages: Array<{ startDate: string; endDate: string | null }>) =>
+  stages.every((s) => s.endDate === null || s.endDate > s.startDate);
+
+Deno.test("同日交接：交接生效当天就是原 BD 首次动作日 → 不产生 0 长度区间，新 BD 从该日接管", () => {
+  const { stages } = buildStagesForCreator(
+    "PH", "王姐好物",
+    [REG("何莎莎", "2026-03-01", null), REG("李汝华", "2026-03-01", null)],
+    [{ fromBd: "何莎莎", toBd: "李汝华", date: "2026-03-01" }],
+  );
+  assert(validRanges(stages), `出现非法区间：${JSON.stringify(stages)}`);
+  assertEquals(stages.map((s) => [s.staffName, s.startDate, s.endDate, s.stageType]), [["李汝华", "2026-03-01", null, "HANDOVER"]]);
+});
+
+Deno.test("人工判定生效日早于首次动作 → 不产生负长度区间，人工归属接管首个区间", () => {
+  const { stages } = buildStagesForCreator(
+    "PH", "王姐好物",
+    [REG("何莎莎", "2026-03-01", null), REG("何莎莎", "2026-03-05", null)],
+    [],
+    [{ decision: "ASSIGN", staffName: "李汝华", effectiveFrom: "2026-01-01", effectiveTo: null }],
+  );
+  assert(validRanges(stages), `出现非法区间：${JSON.stringify(stages)}`);
+  assertEquals(stages.map((s) => [s.staffName, s.startDate, s.endDate, s.stageType]), [["李汝华", "2026-03-01", null, "MANUAL"]]);
+});
+
+Deno.test("正常交接不受影响：交接晚于首次动作仍切两段", () => {
+  const { stages } = buildStagesForCreator(
+    "PH", "王姐好物",
+    [REG("何莎莎", "2026-03-01", null), REG("李汝华", "2026-04-01", null)],
+    [{ fromBd: "何莎莎", toBd: "李汝华", date: "2026-03-20" }],
+  );
+  assertEquals(stages.map((s) => [s.staffName, s.startDate, s.endDate]), [["何莎莎", "2026-03-01", "2026-04-01"], ["李汝华", "2026-04-01", null]]);
 });

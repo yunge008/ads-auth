@@ -135,6 +135,17 @@ export function buildStagesForCreator(
   let fi = 0;
 
   const openStage = (staff: string, date: string, type: Stage["stageType"], evidence: unknown) => {
+    // 新区间开始日不晚于当前区间开始日（同日交接 / 人工判定生效日早于首次动作）：
+    // 当前区间长度为 0 或负，不能落库（CHECK end_date > start_date）→ 直接由新归属接管当前区间，开始日不变。
+    if (owner && date <= stageStart) {
+      // 同日交接与人工判定并存：交接优先（沿用 identity.test.ts「同日交接与人工判定同时存在 → 交接优先」）
+      if (date === stageStart && stageType === "HANDOVER" && type === "MANUAL") return;
+      owner = staff;
+      stageType = type;
+      stageEvidence = evidence;
+      if (date > ownerLast) ownerLast = date;
+      return;
+    }
     if (owner) stages.push({ country, creatorKey, staffName: owner, stageType, startDate: stageStart, endDate: date, evidence: stageEvidence });
     owner = staff;
     stageStart = date;

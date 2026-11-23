@@ -483,6 +483,9 @@ async function snapshotJudgeNext(
   runId: string,
 ): Promise<{ done: boolean; remaining: number; judged: number; country?: string }> {
   const t0 = Date.now();
+  // 心跳（2026-11-23）：分片判定可能整体超过 10 分钟，收尸 RPC 按 heartbeat_at 判断「多久没动静」而不是开始时间。
+  // migration 20261123150000 未执行时该列不存在，更新失败不影响判定。
+  await db.from("attribution_runs").update({ heartbeat_at: new Date().toISOString() }).eq("id", runId).then(() => undefined, () => undefined);
   const { data, error } = await db.rpc("attribution_next_chunk_json", { _run_id: runId });
   if (error) throw new Error(`读取待判定分片失败：${error.message}`);
   const chunk = (data ?? {}) as {
@@ -720,6 +723,8 @@ async function snapshotFinish(
       .from("attribution_runs")
       .update({
         status: "READY",
+        // 若判定期间被误判超时标过 FAILED，这里完成后一并清掉那条错误
+        error: null,
         upload_count: uploads.length,
         agg_rows: Number(keyCount ?? 0),
         raw_rows: rawRows,
