@@ -2822,15 +2822,51 @@ export type Database = {
         }
         Relationships: []
       }
+      tts_apps: {
+        Row: {
+          app_key: string
+          app_secret: string
+          code: string
+          created_at: string
+          name: string
+          service_id: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          app_key?: string
+          app_secret?: string
+          code: string
+          created_at?: string
+          name: string
+          service_id?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          app_key?: string
+          app_secret?: string
+          code?: string
+          created_at?: string
+          name?: string
+          service_id?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       tts_shops: {
         Row: {
           access_expires_at: string | null
           access_token: string
+          app_code: string
           authorized_by: string | null
           authorizer_open_id: string | null
           contact_info: Json | null
           created_at: string
           id: string
+          last_refresh_at: string | null
+          last_refresh_error: string | null
           refresh_expires_at: string | null
           refresh_token: string
           region: string | null
@@ -2849,11 +2885,14 @@ export type Database = {
         Insert: {
           access_expires_at?: string | null
           access_token: string
+          app_code: string
           authorized_by?: string | null
           authorizer_open_id?: string | null
           contact_info?: Json | null
           created_at?: string
           id?: string
+          last_refresh_at?: string | null
+          last_refresh_error?: string | null
           refresh_expires_at?: string | null
           refresh_token: string
           region?: string | null
@@ -2872,11 +2911,14 @@ export type Database = {
         Update: {
           access_expires_at?: string | null
           access_token?: string
+          app_code?: string
           authorized_by?: string | null
           authorizer_open_id?: string | null
           contact_info?: Json | null
           created_at?: string
           id?: string
+          last_refresh_at?: string | null
+          last_refresh_error?: string | null
           refresh_expires_at?: string | null
           refresh_token?: string
           region?: string | null
@@ -2892,7 +2934,15 @@ export type Database = {
           updated_at?: string
           user_type?: number | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "tts_shops_app_code_fkey"
+            columns: ["app_code"]
+            isOneToOne: false
+            referencedRelation: "tts_apps"
+            referencedColumns: ["code"]
+          },
+        ]
       }
     }
     Views: {
