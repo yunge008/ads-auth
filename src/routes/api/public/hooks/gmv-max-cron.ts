@@ -7,6 +7,7 @@
 // platform-level auth, so we re-check anon key here to prevent random callers.
 // Downstream call to gmv-max-sync uses `x-cron-key` (vault secret) so the edge
 // function bypasses the admin-passcode check.
+import { isCronCaller } from "@/lib/cron-caller.server";
 import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
 
@@ -39,9 +40,8 @@ export const Route = createFileRoute("/api/public/hooks/gmv-max-cron")({
         const anonKey = process.env.SUPABASE_ANON_KEY ?? process.env.SUPABASE_PUBLISHABLE_KEY ?? "";
         const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-        // 1. Verify caller (pg_cron passes apikey header)
-        const callerKey = request.headers.get("apikey") ?? request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
-        if (!anonKey || callerKey !== anonKey) {
+        // 1. Verify caller：必须带 vault 里的 x-cron-key（公开 publishable key 不能当凭证，2026-11-23）
+        if (!(await isCronCaller(request))) {
           return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { "Content-Type": "application/json" } });
         }
 

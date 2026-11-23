@@ -127,6 +127,8 @@ async function replicated(shop: Shop, b: Record<string, unknown>) {
 const IMAGE_HOST_SUFFIXES = [
   "tiktokcdn.com", "tiktokcdn-us.com", "tiktokcdn-eu.com", "ibyteimg.com", "byteimg.com",
   "tiktok.com", "ttwstatic.com", "feishu.cn", "larksuite.com", "supabase.co",
+  // 火山引擎 TOS（上架工具链图片默认地址 https://{bucket}.tos-{region}.volces.com；自定义 CDN 域名用 TTS_IMAGE_HOSTS 追加）
+  "volces.com",
 ];
 
 async function uploadImage(shop: Shop, b: Record<string, unknown>) {
