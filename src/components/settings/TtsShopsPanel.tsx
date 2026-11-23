@@ -30,7 +30,15 @@ import {
 } from "@/components/ui/table";
 import { Copy, ExternalLink, HelpCircle, Pencil, Plus, RotateCw } from "lucide-react";
 import { toast } from "sonner";
-import { extractTtsCode, ttsApi, type TtsApp, ttsRedirectUrl, type TtsShop } from "@/lib/ttsApi";
+import {
+  extractTtsAppKey,
+  extractTtsCode,
+  ttsApi,
+  ttsAppKeyMismatch,
+  type TtsApp,
+  ttsRedirectUrl,
+  type TtsShop,
+} from "@/lib/ttsApi";
 
 const fmt = (iso: string | null | undefined) =>
   iso ? new Date(iso).toLocaleString("zh-CN", { hour12: false }) : "—";
@@ -229,9 +237,17 @@ export function TtsShopsPanel() {
     }
     // 粘贴的是带 /oauth/tts/callback/<app> 的完整链接时，以链接里的应用为准
     const m = paste.match(/\/oauth\/tts\/callback\/([a-z0-9-]+)/i);
-    const app = m ? m[1].toLowerCase() : pasteApp;
+    const linkKey = extractTtsAppKey(paste);
+    const app = m
+      ? m[1].toLowerCase()
+      : pasteApp || apps.find((a) => linkKey && a.app_key === linkKey)?.code || "";
     if (!app) {
       toast.error("请先选择应用");
+      return;
+    }
+    const why = ttsAppKeyMismatch(linkKey, app, apps);
+    if (why) {
+      toast.error(why);
       return;
     }
     setBusy("exchange");
@@ -426,7 +442,9 @@ export function TtsShopsPanel() {
               onClick={exchange}
               disabled={
                 busy === "exchange" ||
-                (!pasteApp && !/\/oauth\/tts\/callback\/[a-z0-9-]+/i.test(paste))
+                (!pasteApp &&
+                  !/\/oauth\/tts\/callback\/[a-z0-9-]+/i.test(paste) &&
+                  !extractTtsAppKey(paste))
               }
             >
               {busy === "exchange" ? "处理中…" : "完成授权"}

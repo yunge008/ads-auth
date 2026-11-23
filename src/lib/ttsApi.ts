@@ -32,11 +32,34 @@ export type TtsApp = {
 };
 
 /** 该应用在 Partner Center 填的重定向链接（每个应用一条，末尾是应用代号；不设默认应用）。 */
-export function ttsRedirectUrl(
-  code: string,
-  origin = typeof window !== "undefined" ? window.location.origin : "https://ads-auth.lovable.app",
-): string {
-  return `${origin}/oauth/tts/callback/${code}`;
+/** 正式站点域名。Partner Center 只能填它（预览域名 lovableproject.com 不对外）。 */
+export const TTS_REDIRECT_ORIGIN = "https://ads-auth.lovable.app";
+
+export function ttsRedirectUrl(code: string): string {
+  return `${TTS_REDIRECT_ORIGIN}/oauth/tts/callback/${code}`;
+}
+
+/** TikTok 回调地址里带的 app_key（用于核对应用没选错）。 */
+export function extractTtsAppKey(input: string): string {
+  const m = input.match(/[?&]app_key=([^&#\s]+)/);
+  return m ? decodeURIComponent(m[1]) : "";
+}
+
+/** 回调 app_key 与所选应用不一致时返回错误文案；无法判断（没带 app_key / 应用没填）时返回 null。 */
+export function ttsAppKeyMismatch(
+  appKeyFromLink: string,
+  app: string,
+  apps: TtsApp[],
+): string | null {
+  const a = apps.find((x) => x.code === app);
+  if (!appKeyFromLink || !a?.app_key || a.app_key === appKeyFromLink) return null;
+  const right = apps.find((x) => x.app_key === appKeyFromLink);
+  return (
+    `回调里的 app_key（${appKeyFromLink}）不是应用 ${a.name} 的` +
+    (right
+      ? `，属于 ${right.name}：请检查 Partner Center 里 ${right.name} 的重定向链接`
+      : "：请检查 Partner Center 应用的重定向链接")
+  );
 }
 
 export type TtsExchangeResult = {

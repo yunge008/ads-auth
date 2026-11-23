@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, Loader2, XCircle } from "lucide-react";
-import { ttsApi, type TtsExchangeResult, type TtsShop } from "@/lib/ttsApi";
+import { ttsApi, ttsAppKeyMismatch, type TtsExchangeResult, type TtsShop } from "@/lib/ttsApi";
 
 export function TtsCallback({ app = "" }: { app?: string }) {
   const [stage, setStage] = useState<"loading" | "ok" | "err">("loading");
@@ -20,6 +20,7 @@ export function TtsCallback({ app = "" }: { app?: string }) {
     started.current = true;
     const sp = new URLSearchParams(window.location.search);
     const code = sp.get("code") ?? sp.get("auth_code");
+    const linkAppKey = sp.get("app_key") ?? "";
     setRegion(sp.get("shop_region") ?? "");
     // 不管成败都把 code 从地址栏去掉：code 只能用一次，刷新页面不应再换一次（会误报失败）
     if (code) window.history.replaceState(null, "", window.location.pathname);
@@ -47,7 +48,15 @@ export function TtsCallback({ app = "" }: { app?: string }) {
       return;
     }
     ttsApi
-      .exchange(code, app)
+      .apps()
+      .then(
+        (r) => {
+          const why = ttsAppKeyMismatch(linkAppKey, app, r.apps ?? []);
+          if (why) throw new Error(why);
+        },
+        () => undefined,
+      ) // 读应用列表失败不拦截，交给后端换 token 时报错
+      .then(() => ttsApi.exchange(code, app))
       .then((r) => {
         setRes(r);
         if (r.saved?.length) {
