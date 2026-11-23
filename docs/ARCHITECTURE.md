@@ -192,3 +192,11 @@
   - 2026-11-18 对账：千易 MY API 与导出逐 SKU 一致（2992）；PH 8 个 SKU 差 1–2 件（API 更低，导出更早，合计 38335 vs 38344）；API 多出的 SKU 均为 0 库存；顶妙 API 与导出逐 SKU 一致（124 SKU / 575）。
   - 接口返回 0 个 SKU 时不覆盖。Secrets：`QIANYI_ACCESS_ID`/`QIANYI_SECRET_KEY`、`DINGMIAO_BASE_URL`/`DINGMIAO_APP_KEY`/`DINGMIAO_APP_SECRET`（`DINGMIAO_SOURCE` 可选）。
 
+
+## 运行环境（Lovable Cloud，2026-11-23 Lovable 回复记录，仅供参考）
+
+- 数据库：Lovable Cloud 托管 Supabase `ifwyjsdvptbfuqhonnzd`，ap-southeast-1（新加坡），Postgres 17.6，约 2.5 GB（数据盘 40%），实例 Tiny。负责人决定不迁移自有 Supabase（免费版 500MB 放不下，不开 Pro）。
+- 导出：More → Database → Manage → Settings → Export project data（pg_dump custom-format `.backup`，≤5 GB，24h 一次；不含 secrets、Storage 文件、Edge Function 代码，pg_cron 不保证）。
+- 改接外部 Supabase：Settings → General → External Supabase；不自动迁移数据，**单向不可回 Cloud**；前端与 `ads-auth.lovable.app` 不变。
+- Edge Function secrets（19 个，名字）：ADMIN_PASSCODE、DINGMIAO_APP_KEY、DINGMIAO_APP_SECRET、DINGMIAO_BASE_URL、ECO_PASSWORD、ECO_USERNAME、FEISHU_APP_ID、FEISHU_APP_SECRET、FEISHU_BOT_WEBHOOK、FEISHU_EDITOR_SPREADSHEET_TOKEN、FEISHU_SKU_SPREADSHEET_TOKEN、FEISHU_SPREADSHEET_TOKEN、LOVABLE_API_KEY（系统托管）、QIANYI_ACCESS_ID、QIANYI_SECRET_KEY、TIKTOK_APP_ID、TIKTOK_APP_SECRET、TIKTOK_BC_ACCESS_TOKEN、TIKTOK_BC_ID。
+- 部署核验脚本：`tools/check-deploy.sh`（无权限探测，不读写数据）。

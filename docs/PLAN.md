@@ -13,15 +13,18 @@
 
 ## 待部署 Edge Function 清单（Lovable 积分有限，负责人 2026-11-23 决定继续用 Lovable Cloud、不迁移）
 
-部署只能经 Lovable（每次消耗积分）。规则：**能放前端 / 服务端路由（src/routes/api）的改动优先放那边**（Lovable 同步 main 即生效、不耗积分）；
-改 `_shared/*` 时在交付里列出受影响函数，并把未部署的记到这里，等有其他理由部署时顺带。部署完把对应函数从下表删掉。
+部署只能经 Lovable（耗积分）。**每次会话开工前跑 `bash tools/check-deploy.sh`** 核对上一次的部署是否落实，未落实的告诉负责人；
+需要部署时直接把函数名列给负责人，不替负责人排计划。能放前端 / 服务端路由（src/routes/api）的改动优先放那边（不耗积分）。
+部署核实后把对应行删掉。
 
-| 函数 | 待上线的改动 | 优先级 |
+| 函数 | 待上线的改动 | 核验方式 |
 | --- | --- | --- |
-| app-accounts、gmv-max-adgroup-create、gmv-max-adgroup-batch-create、tiktok-connections、tiktok-connection-save、tiktok-oauth-exchange、tts-export | `_shared/auth.ts` 口令注入修复（1123.200） | 高（安全） |
-| attribution-upload、attribution-identity-build | auth.ts 修复 + 归因 3 个 bug（1123.203） | 高 |
-| attribution-feishu、attribution-run、attribution-sync-creators、authorize-batch、authorize-log、balance-alert、bc-list-advertisers、connection-stats-query、data-preview、feishu-read、feishu-read-bd-vids、feishu-read-connection-stats、feishu-read-editors、feishu-read-sku、feishu-writeback、gmv-max-daily-report、gmv-max-identity-get、gmv-max-live-status、gmv-max-query、gmv-max-raw-export、gmv-max-sync、sea-inventory、staff-sheets、tiktok-comments-sync、tiktok-comments-translate、tiktok-oauth-init | auth.ts 修复 | 低（随下次部署带上） |
-| tts-listing | 图片白名单补 TOS 域名（1123.202） | 中（上架用 API 传图前必须部署） |
+| attribution-upload | 快照重算心跳（1123.203） | 外部无法探测；下次大月份重算超 10 分钟不再误报失败即确认 |
+| attribution-identity-build | 身份合并让出签名、区间不再出 0 长度（1123.203） | 外部无法探测；下次「重建身份与区间」不报错即确认 |
+| tts-listing | 图片白名单补火山引擎 TOS（1123.202） | 外部无法探测；下次 API 上架传 TOS 图不报「域名不在允许列表」即确认 |
+
+2026-11-23 核验：`tools/check-deploy.sh` 显示 39 个函数全部已是新版 `_shared/auth.ts`（口令注入修复已上线）。
+同时说明 Lovable 在同步 main 后会自动重新部署 Edge Function（推断，依据：只要求部署了 4 个，实测 39 个全是新版）。
 
 ## 任务板
 
