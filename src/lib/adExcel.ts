@@ -115,6 +115,9 @@ const REQUIRED: Array<keyof ParsedRow> = [
   "campaign_id", "product_id", "creative_type", "vid", "tt_account_name", "cost", "gross_revenue",
   // 「货币」必须有：缺了会让每一行默认按 USD 计算，非美元站点的 GMV 直接放大几十倍且全程无提示
   "currency",
+  // 「发布时间」必须有（V3 阶段 3①，负责人 2026-11-23 定）：缺了整月每行发布时间为空，交接切分退到登记日期，
+  // GMV 可能归错人且无任何提示。只要求表头存在；直播 / 商品卡行本来就没有发布时间，单元格为空照常接受。
+  "posted_at",
 ];
 
 /** 缺失列在报错信息里的中文名（否则只报内部字段名，用户看不懂要去 Excel 里补哪一列）。 */
@@ -127,6 +130,7 @@ const REQUIRED_LABELS: Partial<Record<keyof ParsedRow, string>> = {
   cost: "成本 / Cost",
   gross_revenue: "总收入 / Gross revenue",
   currency: "货币 / Currency",
+  posted_at: "发布时间 / Time posted",
 };
 
 /** 业务上目前只应出现这两种结算币种；其余值仅告警，不阻断（新站点可能引入新币种）。 */
@@ -223,6 +227,8 @@ export async function parseAdExcel(file: File): Promise<ParsedFile> {
     const labels = missing.map((k) => REQUIRED_LABELS[k] ?? k).join("、");
     const extra = missing.includes("currency")
       ? "\n「货币 / Currency」列缺失会让所有行默认按 USD 计算，非美元站点 GMV 会被放大几十倍，因此这里直接阻断上传。请重新导出带货币列的报表。"
+      : missing.includes("posted_at")
+      ? "\n「发布时间 / Time posted」列缺失会让整月每行都没有发布时间，站点交接无法按发布日期切分，GMV 可能算给错误的人，因此这里直接阻断上传。表头必须正好叫「发布时间」或「Time posted」（大小写、空格不限），请检查是否被改名后重新导出或改回表头。"
       : "";
     throw new Error(`${file.name}: 表头不符合 TikTok 广告导出格式，缺少列：${labels}${extra}`);
   }
