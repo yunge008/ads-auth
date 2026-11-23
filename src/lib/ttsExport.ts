@@ -60,7 +60,9 @@ function writeXlsx(fileName: string, sheets: Array<{ name: string; aoa: (string 
   XLSX.writeFile(wb, fileName);
 }
 function csvCell(v: Cell): string {
-  const raw = v === null || v === undefined ? "" : String(v);
+  let raw = v === null || v === undefined ? "" : String(v);
+  // 防 CSV 公式注入：以 = + - @ 制表/回车开头且不是纯数字的单元格前加 '
+  if (/^[=+\-@\t\r]/.test(raw) && !/^[+-]?\d+(\.\d+)?\t?$/.test(raw)) raw = `'${raw}`;
   return /[",\r\n]/.test(raw) ? `"${raw.replaceAll('"', '""')}"` : raw;
 }
 function writeCsv(fileName: string, columns: string[], rows: Cell[][]) {

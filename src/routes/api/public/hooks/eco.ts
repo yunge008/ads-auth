@@ -7,6 +7,7 @@
 //   2fa_verify  {method, code} 提交验证码、记住设备（仅管理员）
 // 鉴权：cron 带 apikey=<SUPABASE_PUBLISHABLE_KEY> 只放行 sync；页面请求带 x-admin-passcode/x-admin-name，
 // 转给 Edge Function balance-alert 的 auth_check 校验（与其他页面同一套口令体系）。
+import { isCronCaller } from "@/lib/cron-caller.server";
 import process from "node:process";
 import { createFileRoute } from "@tanstack/react-router";
 import { eco2faSend, eco2faVerify, ecoStatus, syncEcoBalances } from "@/lib/eco.server";
@@ -50,8 +51,7 @@ export const Route = createFileRoute("/api/public/hooks/eco")({
         const anonKey = process.env.SUPABASE_ANON_KEY ?? process.env.SUPABASE_PUBLISHABLE_KEY ?? "";
         const isCron =
           !request.headers.get("x-admin-passcode") &&
-          !!anonKey &&
-          request.headers.get("apikey") === anonKey;
+          (await isCronCaller(request));
         if (!(isCron && action === "sync")) {
           const err = await checkPasscode(request, action.startsWith("2fa_"));
           if (err) return jsonRes({ error: err }, 401);

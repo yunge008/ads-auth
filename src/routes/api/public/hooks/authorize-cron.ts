@@ -6,6 +6,7 @@
 // Auth: requires `apikey: <SUPABASE_PUBLISHABLE_KEY>` header (pg_cron passes it).
 // Downstream edge fns are called with `x-cron-key` (vault secret) which they
 // verify via verify_gmv_cron_key RPC to bypass the admin passcode.
+import { isCronCaller } from "@/lib/cron-caller.server";
 import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
 
@@ -104,7 +105,7 @@ export const Route = createFileRoute("/api/public/hooks/authorize-cron")({
           request.headers.get("apikey") ??
           request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
           "";
-        if (!anonKey || callerKey !== anonKey) {
+        if (!(await isCronCaller(request))) {
           return new Response(JSON.stringify({ error: "unauthorized" }), {
             status: 401,
             headers: { "Content-Type": "application/json" },

@@ -33,6 +33,10 @@ export async function loadLastWorkdays(pool: string): Promise<Record<string, str
 export async function loadInputs(pool: string, creators: CreatorRef[]): Promise<Input[]> {
   const keys = [...new Set(creators.map(creatorKey).filter(Boolean))];
   const names = [...new Set(creators.map((c) => normalizeHandle(c.username ?? "")).filter(Boolean))];
+  // 安全：只保留不含过滤语法字符的值，防止 PostgREST or() 过滤注入
+  const safe = (v: string) => /^[^"\\,()]{1,128}$/.test(v);
+  keys.splice(0, keys.length, ...keys.filter(safe));
+  names.splice(0, names.length, ...names.filter(safe));
   const orFilter = [keys.length ? `creator_key.in.(${keys.map((k) => `"${k}"`).join(",")})` : "", names.length ? `username.in.(${names.map((k) => `"${k}"`).join(",")})` : ""].filter(Boolean).join(",");
   if (!orFilter) return creators.map(() => ({ touches: [], events: [] }));
   const db = admin();

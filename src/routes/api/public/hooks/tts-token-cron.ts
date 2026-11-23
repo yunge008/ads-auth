@@ -3,6 +3,7 @@
 // `apikey: <SUPABASE_PUBLISHABLE_KEY>` 头 → 下游 tts-p0-probe 带 x-cron-key，只放行 action=refresh_due：
 // 刷新 access 将在 48 小时内到期的全部授权（多应用：各自用所属应用的 app_key/app_secret）。
 // 有失败（含 refresh_token 过期需重新授权）才发飞书 FEISHU_BOT_WEBHOOK，全部成功不打扰。
+import { isCronCaller } from "@/lib/cron-caller.server";
 import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
 
@@ -35,7 +36,7 @@ export const Route = createFileRoute("/api/public/hooks/tts-token-cron")({
           request.headers.get("apikey") ??
           request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
           "";
-        if (!anonKey || callerKey !== anonKey) return jsonRes({ error: "unauthorized" }, 401);
+        if (!(await isCronCaller(request))) return jsonRes({ error: "unauthorized" }, 401);
 
         const admin = createClient(supabaseUrl, serviceKey, {
           auth: { autoRefreshToken: false, persistSession: false },

@@ -8,6 +8,7 @@
 //
 // 发送渠道：SEA_INV_FEISHU_WEBHOOK（库存群），没配则用 FEISHU_BOT_WEBHOOK（与每日授权通知同一个群）。
 // 只发提醒、不改库存：改库存必须用户在网页确认后执行。
+import { isCronCaller } from "@/lib/cron-caller.server";
 import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
 
@@ -59,7 +60,7 @@ export const Route = createFileRoute("/api/public/hooks/sea-inventory-cron")({
           authHeaders = { "x-admin-passcode": passcode, "x-admin-name": request.headers.get("x-admin-name") ?? "" };
         } else {
           const callerKey = request.headers.get("apikey") ?? request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
-          if (!anonKey || callerKey !== anonKey) return jsonRes({ error: "unauthorized" }, 401);
+          if (!(await isCronCaller(request))) return jsonRes({ error: "unauthorized" }, 401);
           const admin = createClient(supabaseUrl, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
           const { data: cronKey, error } = await admin.rpc("get_gmv_cron_secret");
           if (error || !cronKey) return jsonRes({ error: "missing vault secret gmv_max_cron_secret", detail: error?.message }, 500);

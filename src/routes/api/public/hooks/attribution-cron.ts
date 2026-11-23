@@ -4,6 +4,7 @@
 //
 // Auth: 需要 `apikey: <SUPABASE_PUBLISHABLE_KEY>` 头（pg_cron 传入）。
 // 调下游 Edge Function 时带 `x-cron-key`（vault secret），由 verify_gmv_cron_key RPC 校验以跳过管理口令。
+import { isCronCaller } from "@/lib/cron-caller.server";
 import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
 
@@ -39,7 +40,7 @@ export const Route = createFileRoute("/api/public/hooks/attribution-cron")({
           request.headers.get("apikey") ??
           request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
           "";
-        if (!anonKey || callerKey !== anonKey) {
+        if (!(await isCronCaller(request))) {
           return new Response(JSON.stringify({ error: "unauthorized" }), {
             status: 401,
             headers: { "Content-Type": "application/json" },

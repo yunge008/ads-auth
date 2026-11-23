@@ -352,6 +352,14 @@ function strList(one: unknown, many: unknown): string[] {
   return [...new Set(arr.map((x) => String(x ?? "").trim()).filter(Boolean))];
 }
 
+/** 安全：限制对外发送的达人账号格式与私信长度，防止被滥用群发任意内容 */
+function checkOutboundText(handles: string[], text: string, tcMessage: string) {
+  const badHandle = handles.find((h) => !/^@?[A-Za-z0-9._]{1,64}$/.test(h));
+  if (badHandle) bad(`达人账号格式不对：${badHandle.slice(0, 80)}`);
+  if ([...text].length > 1000) bad("message_text 最多 1000 字");
+  if ([...tcMessage].length > 500) bad("tc_message 最多 500 字");
+}
+
 async function actionWrite(shop: Shop, b: Record<string, unknown>, operator: string) {
   if (b.confirm !== "SEND") bad('写入会真实建计划、消耗名额、给达人发消息。确认请在 body 里加 "confirm":"SEND"');
   const productIds = strList(b.product_id, b.product_ids);
@@ -367,6 +375,7 @@ async function actionWrite(shop: Shop, b: Record<string, unknown>, operator: str
   if (!(pct >= 1 && pct <= 80)) bad("commission_pct 需在 1–80 之间（单位：%）");
   if (adPct !== null && !(adPct >= 0 && adPct <= 80)) bad("ad_commission_pct 需在 0–80 之间（单位：%）");
   if (!text) bad("message_text 必填（私信正文，{link} 会被替换成计划邀请链接）");
+  checkOutboundText(handles, text, tcMessage);
   const contact = (b.contact as Record<string, string> | undefined) ?? shop.contact_info ?? null;
   if (!contact || !Object.values(contact).some((v) => String(v ?? "").trim())) {
     bad("contact 必填：至少一个 email / phone_number / whatsapp / telegram / line");
@@ -538,6 +547,8 @@ async function actionAddToTc(shop: Shop, b: Record<string, unknown>) {
     : Number(b.ad_commission_pct);
   if (productIds.length && !(pct >= 1 && pct <= 80)) bad("新增商品时 commission_pct 必填，1–80（%）");
   const text = String(b.message_text ?? "").trim();
+  if (handles.length > 50) bad("handles 最多 50 个");
+  checkOutboundText(handles, text, "");
 
   const T = { accessToken: shop.access_token, shopCipher: shop.shop_cipher };
   const steps: unknown[] = [];

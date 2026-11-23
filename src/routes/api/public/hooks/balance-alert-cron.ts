@@ -8,6 +8,7 @@
 //      先同步 ECO 余额（src/lib/eco.server.ts）→ refresh（分片续跑到 remaining 为空）→ build_message，每天都发完整列表（交互卡片，绿/黄/红）。
 //   ② 页面「发送到飞书」按钮：带 x-admin-passcode / x-admin-name，原样转给 Edge Function 校验（需 settings 权限）；
 //      body `{ manual: true }`，不刷新，只按库里当前快照组装并强制发送（无预警也发一条，用于确认通道）。
+import { isCronCaller } from "@/lib/cron-caller.server";
 import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
 import { db, ecoStatus, syncEcoBalances } from "@/lib/eco.server";
@@ -144,7 +145,7 @@ export const Route = createFileRoute("/api/public/hooks/balance-alert-cron")({
             request.headers.get("apikey") ??
             request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
             "";
-          if (!anonKey || callerKey !== anonKey) return jsonRes({ error: "unauthorized" }, 401);
+          if (!(await isCronCaller(request))) return jsonRes({ error: "unauthorized" }, 401);
           const admin = createClient(supabaseUrl, serviceKey, {
             auth: { autoRefreshToken: false, persistSession: false },
           });

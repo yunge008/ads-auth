@@ -124,14 +124,22 @@ async function replicated(shop: Shop, b: Record<string, unknown>) {
   return brief(r);
 }
 
+const IMAGE_HOST_SUFFIXES = [
+  "tiktokcdn.com", "tiktokcdn-us.com", "tiktokcdn-eu.com", "ibyteimg.com", "byteimg.com",
+  "tiktok.com", "ttwstatic.com", "feishu.cn", "larksuite.com", "supabase.co",
+];
+
 async function uploadImage(shop: Shop, b: Record<string, unknown>) {
   const url = String(b.url ?? "").trim();
   if (!/^https:\/\//.test(url)) bad("url 必须是 https 公网图片地址");
   // 安全（2026-11-23）：防止被当成服务端代理去访问内网/本机地址（SSRF）。只允许域名形式的公网地址，不跟随跳转。
   let host = "";
   try { host = new URL(url).hostname.toLowerCase(); } catch { bad("url 格式不对"); }
-  if (/^\[|^\d+\.\d+\.\d+\.\d+$|^localhost$|\.local$|\.internal$|^metadata\b/.test(host) || !host.includes(".")) {
-    bad(`url 只能是公网域名地址（不允许 IP / localhost / 内网域名）：${host}`);
+  // 只允许受信任的图片域名（TikTok/字节 CDN、飞书、本项目存储）；可用 TTS_IMAGE_HOSTS 追加（逗号分隔）
+  const extra = (Deno.env.get("TTS_IMAGE_HOSTS") ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const allowed = [...IMAGE_HOST_SUFFIXES, ...extra];
+  if (!allowed.some((d) => host === d || host.endsWith(`.${d}`))) {
+    bad(`url 域名不在允许列表（${allowed.join(" / ")}）：${host}`);
   }
   const useCase = String(b.use_case ?? "MAIN_IMAGE");
   if (!USE_CASES.has(useCase)) bad(`use_case 只能是 ${[...USE_CASES].join(" / ")}`);
