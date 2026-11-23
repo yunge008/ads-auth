@@ -831,6 +831,7 @@ export type Database = {
           agg_rows: number
           error: string | null
           finished_at: string | null
+          heartbeat_at: string | null
           id: string
           month: string
           raw_rows: number
@@ -849,6 +850,7 @@ export type Database = {
           agg_rows?: number
           error?: string | null
           finished_at?: string | null
+          heartbeat_at?: string | null
           id?: string
           month: string
           raw_rows?: number
@@ -867,6 +869,7 @@ export type Database = {
           agg_rows?: number
           error?: string | null
           finished_at?: string | null
+          heartbeat_at?: string | null
           id?: string
           month?: string
           raw_rows?: number
