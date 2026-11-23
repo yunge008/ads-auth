@@ -11,6 +11,18 @@
 4. **GMV 归因 V3 阶段 0**：①VN 站点林丽洪起始日期 **2024-01-01 已确认**（2026-09-16），`staff_site_permissions` 里那行备注的「待确认」字样只是文案，不影响判定；②`attribution_posted_at_gap` 已跑，**缺「发布时间」的 GMV 占比约 15%**，超过计划 §7.5 的 5% 阈值。但「缺发布时间」≠「会进 PENDING」——被 VID 强归因命中的行和商品卡片都不需要发布时间，需再按「缺发布时间 且 非商品卡片 且 VID 未登记」的口径算一遍真实影响面，再决定是否重新导出历史文件覆盖上传。**这个决定是阶段 3.1 的前置条件**：3.1 上线后这类行会进 PENDING（不计入任何人 KPI，但仍留在 GMV 总额里）
 5. **前端「上次自动刷新时间」UI**：展示 `gmv_max_sync_state` 最近运行时间（未做）
 
+## 待部署 Edge Function 清单（Lovable 积分有限，负责人 2026-11-23 决定继续用 Lovable Cloud、不迁移）
+
+部署只能经 Lovable（每次消耗积分）。规则：**能放前端 / 服务端路由（src/routes/api）的改动优先放那边**（Lovable 同步 main 即生效、不耗积分）；
+改 `_shared/*` 时在交付里列出受影响函数，并把未部署的记到这里，等有其他理由部署时顺带。部署完把对应函数从下表删掉。
+
+| 函数 | 待上线的改动 | 优先级 |
+| --- | --- | --- |
+| app-accounts、gmv-max-adgroup-create、gmv-max-adgroup-batch-create、tiktok-connections、tiktok-connection-save、tiktok-oauth-exchange、tts-export | `_shared/auth.ts` 口令注入修复（1123.200） | 高（安全） |
+| attribution-upload、attribution-identity-build | auth.ts 修复 + 归因 3 个 bug（1123.203） | 高 |
+| attribution-feishu、attribution-run、attribution-sync-creators、authorize-batch、authorize-log、balance-alert、bc-list-advertisers、connection-stats-query、data-preview、feishu-read、feishu-read-bd-vids、feishu-read-connection-stats、feishu-read-editors、feishu-read-sku、feishu-writeback、gmv-max-daily-report、gmv-max-identity-get、gmv-max-live-status、gmv-max-query、gmv-max-raw-export、gmv-max-sync、sea-inventory、staff-sheets、tiktok-comments-sync、tiktok-comments-translate、tiktok-oauth-init | auth.ts 修复 | 低（随下次部署带上） |
+| tts-listing | 图片白名单补 TOS 域名（1123.202） | 中（上架用 API 传图前必须部署） |
+
 ## 任务板
 
 | 任务 | 状态 | 认领 | 涉及文件 | 备注 |

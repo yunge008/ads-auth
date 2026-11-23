@@ -296,3 +296,4 @@
 2026-11-23 | claude | [1123.202] 复核 Lovable 安全修复（1123.201）：①tts-listing 图片域名白名单漏了火山引擎 TOS（上架工具链默认图床 *.volces.com），补上；②gmv-max-cron 仍接受公开 publishable key，改为 isCronCaller。另：_shared/auth.ts 口令注入修复（1123.200）Lovable 只部署了 4 个函数，其余 35 个仍是旧版。
 2026-11-23 | claude | [1123.203] 归因 3 个 bug：①重建身份时两个实体合并，存活方改用被吞方的旧签名撞 UNIQUE(site,identity_signature) 整次失败 → 被吞方让出签名（加 #merged: 后缀）；②同日交接 / 人工判定生效日早于首次动作会生成 0 或负长度区间被 CHECK 拒绝、区间表已先清空 → 新归属直接接管当前区间（同日交接与人工判定并存仍交接优先）；③快照分片判定整体超 10 分钟被误标 FAILED → 每判一片写 heartbeat_at，收尸按最后心跳判断，完成时清 error（migration 20261123150000）。未处理：上传表「发布时间」表头只认精确写法（待负责人决定）。
 2026-11-23 | claude | [1123.204] GMV 上传：表头缺「发布时间 / Time posted」直接拒绝上传并提示（V3 阶段 3①，负责人选 A）；只要求有这一列，直播/商品卡行单元格为空照常。纯前端。
+2026-11-23 | claude | [1123.205] 负责人决定不迁移自有 Supabase、继续 Lovable Cloud；PLAN.md 新增「待部署 Edge Function 清单」记录未上线的函数改动，改动优先放前端/服务端路由以省积分。
