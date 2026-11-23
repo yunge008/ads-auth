@@ -4,8 +4,8 @@
 // action：
 //   apps                                        列出应用（tts_apps，不含 app_secret）+ 各应用已授权店铺数
 //   save_app {code, name?, app_key?, app_secret?, service_id?}  新增/修改应用；app_secret 留空 = 不改
-//   auth_url {app?}                             返回该应用的店铺授权链接（service_id 取 tts_apps；default 回落 secret TTS_SERVICE_ID）
-//   exchange {auth_code, app?}                  auth_code → token → Get Authorized Shops → 写 tts_shops（app 默认 default；返回不含 token）
+//   auth_url {app}                              返回该应用的店铺授权链接（service_id 取 tts_apps）
+//   exchange {auth_code, app}                   auth_code → token → Get Authorized Shops → 写 tts_shops（app 必填，不设默认；返回不含 token）
 //   shops                                       列出已授权店铺（不含 token）
 //   refresh  {shop_id}                          用该店铺所属应用 + refresh_token 换新 token
 //   refresh_due {within_hours?=48}              刷新 access 将在 N 小时内到期的全部授权（pg_cron 每天调用；cron 身份只放行这一个 action）
@@ -32,7 +32,7 @@ import { admin, requireAdmin } from "../_shared/auth.ts";
 import { cronAuthed } from "../_shared/cron.ts";
 import { corsHeaders } from "../_shared/feishu.ts";
 import {
-  normalizeHandle, pctToRate, type TtsApp, ttsApp, ttsAppCacheClear, ttsCall, TTS_DEFAULT_APP, type TtsResult, ttsExchangeCode, ttsRefreshToken, type TtsToken,
+  normalizeHandle, pctToRate, type TtsApp, ttsApp, ttsAppCacheClear, ttsCall, type TtsResult, ttsExchangeCode, ttsRefreshToken, type TtsToken,
 } from "../_shared/tts.ts";
 
 type Shop = {
@@ -52,12 +52,13 @@ type Shop = {
 
 const PUBLIC_COLS =
   "shop_id,shop_code,shop_name,region,seller_type,seller_name,seller_base_region,user_type,access_expires_at,refresh_expires_at,scopes,contact_info,status,authorized_by,updated_at";
-// 20261123120000_tts_multi_app.sql 新增列；migration 未跑时回落 PUBLIC_COLS
+// 20261123120000_tts_multi_app.sql 新增列
 const PUBLIC_COLS_V2 = `${PUBLIC_COLS},app_code,last_refresh_at,last_refresh_error`;
 const APP_CODE_RE = /^[a-z0-9-]{1,32}$/;
 
 function appCode(v: unknown): string {
-  const c = String(v ?? "").trim().toLowerCase() || TTS_DEFAULT_APP;
+  const c = String(v ?? "").trim().toLowerCase();
+  if (!c) bad("app 必填（应用代号，如 sea / mx-ar）");
   if (!APP_CODE_RE.test(c)) bad(`应用代号不合法：${c}（只能小写字母/数字/-）`);
   return c;
 }
@@ -135,12 +136,7 @@ async function saveToken(tok: TtsToken, operator: string, app: TtsApp) {
     last_refresh_error: null as string | null,
   }));
   if (rows.length) {
-    let { error } = await admin().from("tts_shops").upsert(rows, { onConflict: "shop_id" });
-    if (error && app.code === TTS_DEFAULT_APP && /app_code|last_refresh/.test(error.message)) {
-      // migration 未跑：只写旧列（仅 default 应用可这样兜底，其他应用必须记录 app_code 否则后续签名会用错应用）
-      const legacy = rows.map(({ app_code: _a, last_refresh_at: _b, last_refresh_error: _c, ...r }) => r);
-      ({ error } = await admin().from("tts_shops").upsert(legacy, { onConflict: "shop_id" }));
-    }
+    const { error } = await admin().from("tts_shops").upsert(rows, { onConflict: "shop_id" });
     if (error) throw error;
   }
   return {
@@ -156,11 +152,9 @@ async function saveToken(tok: TtsToken, operator: string, app: TtsApp) {
 }
 
 async function listShops() {
-  const r = await admin().from("tts_shops").select(PUBLIC_COLS_V2).order("region");
-  if (!r.error) return r.data;
-  const legacy = await admin().from("tts_shops").select(PUBLIC_COLS).order("region");
-  if (legacy.error) throw legacy.error;
-  return legacy.data;
+  const { data, error } = await admin().from("tts_shops").select(PUBLIC_COLS_V2).order("region");
+  if (error) throw error;
+  return data;
 }
 
 async function listApps() {
@@ -169,24 +163,19 @@ async function listApps() {
   const { data: shops } = await admin().from("tts_shops").select("app_code");
   const count = new Map<string, number>();
   for (const s of (shops ?? []) as Array<{ app_code?: string }>) {
-    const c = s.app_code ?? TTS_DEFAULT_APP;
+    const c = s.app_code ?? "";
     count.set(c, (count.get(c) ?? 0) + 1);
   }
-  const envDefault = !!(Deno.env.get("TTS_APP_KEY") && Deno.env.get("TTS_APP_SECRET"));
-  return (data ?? []).map((a) => {
-    const fromEnv = a.code === TTS_DEFAULT_APP && !a.app_key;
-    return {
-      code: a.code,
-      name: a.name,
-      app_key: fromEnv ? (Deno.env.get("TTS_APP_KEY") ?? "") : a.app_key,
-      has_secret: fromEnv ? envDefault : !!a.app_secret,
-      service_id: a.service_id || (a.code === TTS_DEFAULT_APP ? (Deno.env.get("TTS_SERVICE_ID") ?? "") : ""),
-      creds_source: fromEnv ? "secrets" : "table",
-      updated_by: a.updated_by,
-      updated_at: a.updated_at,
-      shop_count: count.get(a.code) ?? 0,
-    };
-  });
+  return (data ?? []).map((a) => ({
+    code: a.code,
+    name: a.name,
+    app_key: a.app_key,
+    has_secret: !!a.app_secret,
+    service_id: a.service_id,
+    updated_by: a.updated_by,
+    updated_at: a.updated_at,
+    shop_count: count.get(a.code) ?? 0,
+  }));
 }
 
 async function saveApp(b: Record<string, unknown>, operator: string) {
@@ -217,12 +206,12 @@ async function refreshDue(withinHours: number, operator: string) {
   const groups = new Map<string, Row[]>();
   for (const r of (data ?? []) as Row[]) {
     if (r.access_expires_at && Date.parse(r.access_expires_at) > deadline) continue;
-    const k = `${r.app_code ?? TTS_DEFAULT_APP}\u0000${r.refresh_token}`;
+    const k = `${r.app_code ?? ""}\u0000${r.refresh_token}`;
     groups.set(k, [...(groups.get(k) ?? []), r]);
   }
   const results: Array<{ app: string; shops: string[]; ok: boolean; message: string; access_expires_at?: string | null }> = [];
   for (const rows of groups.values()) {
-    const code = rows[0].app_code ?? TTS_DEFAULT_APP;
+    const code = rows[0].app_code ?? "";
     const names = rows.map((r) => `${r.region ?? ""} ${r.shop_name ?? r.shop_id}`.trim());
     const ids = rows.map((r) => r.shop_id);
     const markErr = (msg: string) =>
@@ -958,7 +947,7 @@ Deno.serve(async (req) => {
     }
     if (action === "refresh") {
       const shop = await loadShop(b.shop_id);
-      const app = await ttsApp(shop.app_code ?? TTS_DEFAULT_APP);
+      const app = await ttsApp(shop.app_code ?? "");
       return json(await saveToken(await ttsRefreshToken(shop.refresh_token, app), acc.name, app));
     }
     if (action === "read") {

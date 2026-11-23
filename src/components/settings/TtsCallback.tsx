@@ -1,13 +1,13 @@
-// TikTok Shop 店铺授权回调页（共用组件）：/oauth/tts/callback（原应用 default）与 /oauth/tts/callback/<app>（商家自用应用）。
+// TikTok Shop 店铺授权回调页（共用组件）：/oauth/tts/callback/<app>。不设默认应用：旧地址 /oauth/tts/callback 不带应用，只提示不换 token。
 // 页面在登录本工具后才会渲染（PasscodeGate），此时地址栏的 code 仍在，自动用对应应用换 token 入库。
 import { Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, Loader2, XCircle } from "lucide-react";
-import { TTS_DEFAULT_APP, ttsApi, type TtsExchangeResult, type TtsShop } from "@/lib/ttsApi";
+import { ttsApi, type TtsExchangeResult, type TtsShop } from "@/lib/ttsApi";
 
-export function TtsCallback({ app = TTS_DEFAULT_APP }: { app?: string }) {
+export function TtsCallback({ app = "" }: { app?: string }) {
   const [stage, setStage] = useState<"loading" | "ok" | "err">("loading");
   const [msg, setMsg] = useState("正在完成店铺授权…");
   const [res, setRes] = useState<TtsExchangeResult | null>(null);
@@ -28,6 +28,14 @@ export function TtsCallback({ app = TTS_DEFAULT_APP }: { app?: string }) {
         .shops()
         .then((r) => setShops(r.shops ?? []))
         .catch(() => setShops(null));
+    if (code && code !== "null" && !app) {
+      setStage("err");
+      setMsg(
+        "重定向链接没有应用代号，无法判断用哪个应用换 token。请把 Partner Center 里该应用的重定向链接改成「设置 → TikTok Shop 授权 → 应用」表里对应的那条，再重新授权。",
+      );
+      loadShops();
+      return;
+    }
     if (!code || code === "null") {
       setStage("err");
       setMsg(
@@ -73,7 +81,7 @@ export function TtsCallback({ app = TTS_DEFAULT_APP }: { app?: string }) {
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         <p className="text-muted-foreground">
-          应用：{app === TTS_DEFAULT_APP ? "原应用" : app.toUpperCase()}
+          应用：{app ? app.toUpperCase() : "—"}
           {region && <> · 授权站点：{region}</>}
         </p>
         <p className={stage === "err" ? "text-red-600" : ""}>{msg}</p>
@@ -100,10 +108,7 @@ export function TtsCallback({ app = TTS_DEFAULT_APP }: { app?: string }) {
                 {shops.map((s) => (
                   <li key={s.shop_id}>
                     {s.region} · {s.shop_name}
-                    {s.app_code && s.app_code !== TTS_DEFAULT_APP
-                      ? ` · ${s.app_code.toUpperCase()}`
-                      : ""}{" "}
-                    · access 到期{" "}
+                    {s.app_code ? ` · ${s.app_code.toUpperCase()}` : ""} · access 到期{" "}
                     {s.access_expires_at
                       ? new Date(s.access_expires_at).toLocaleString("zh-CN", { hour12: false })
                       : "—"}

@@ -30,22 +30,13 @@ import {
 } from "@/components/ui/table";
 import { Copy, ExternalLink, HelpCircle, Pencil, Plus, RotateCw } from "lucide-react";
 import { toast } from "sonner";
-import {
-  extractTtsCode,
-  TTS_DEFAULT_APP,
-  ttsApi,
-  type TtsApp,
-  ttsRedirectUrl,
-  type TtsShop,
-} from "@/lib/ttsApi";
+import { extractTtsCode, ttsApi, type TtsApp, ttsRedirectUrl, type TtsShop } from "@/lib/ttsApi";
 
 const fmt = (iso: string | null | undefined) =>
   iso ? new Date(iso).toLocaleString("zh-CN", { hour12: false }) : "—";
 const appLabel = (code: string | null | undefined, apps: TtsApp[]) => {
-  const c = code ?? TTS_DEFAULT_APP;
-  return (
-    apps.find((a) => a.code === c)?.name ?? (c === TTS_DEFAULT_APP ? "原应用" : c.toUpperCase())
-  );
+  if (!code) return "—";
+  return apps.find((a) => a.code === code)?.name ?? code.toUpperCase();
 };
 
 /** 「?」说明：悬停 / 键盘聚焦 / 点按都能打开。 */
@@ -194,7 +185,7 @@ export function TtsShopsPanel() {
   const [appsErr, setAppsErr] = React.useState("");
   const [loading, setLoading] = React.useState(true);
   const [paste, setPaste] = React.useState("");
-  const [pasteApp, setPasteApp] = React.useState(TTS_DEFAULT_APP);
+  const [pasteApp, setPasteApp] = React.useState("");
   const [busy, setBusy] = React.useState<string | null>(null);
   const [draft, setDraft] = React.useState<Draft | null>(null);
 
@@ -239,6 +230,10 @@ export function TtsShopsPanel() {
     // 粘贴的是带 /oauth/tts/callback/<app> 的完整链接时，以链接里的应用为准
     const m = paste.match(/\/oauth\/tts\/callback\/([a-z0-9-]+)/i);
     const app = m ? m[1].toLowerCase() : pasteApp;
+    if (!app) {
+      toast.error("请先选择应用");
+      return;
+    }
     setBusy("exchange");
     try {
       const r = await ttsApi.exchange(code, app);
@@ -275,7 +270,7 @@ export function TtsShopsPanel() {
     setDraft({
       code: a.code,
       name: a.name,
-      app_key: a.creds_source === "secrets" ? "" : a.app_key,
+      app_key: a.app_key,
       app_secret: "",
       service_id: a.service_id,
       isNew: false,
@@ -301,8 +296,8 @@ export function TtsShopsPanel() {
                 分钟内有效、只能用一次。
               </div>
               <div>
-                原应用（default）的 App Key / Secret 为空时读 Supabase secrets TTS_APP_KEY /
-                TTS_APP_SECRET / TTS_SERVICE_ID。
+                不设默认应用：每个应用都要填齐 App Key / App Secret / Service ID
+                才能授权和调用接口。
               </div>
               <div>token 每天北京 05:17 自动刷新 48 小时内到期的授权，失败发飞书。</div>
             </Help>
@@ -409,16 +404,14 @@ export function TtsShopsPanel() {
           <div className="flex flex-wrap gap-2">
             <Select value={pasteApp} onValueChange={setPasteApp}>
               <SelectTrigger className="w-36" aria-label="授权所属应用">
-                <SelectValue />
+                <SelectValue placeholder="选择应用" />
               </SelectTrigger>
               <SelectContent>
-                {(apps.length ? apps : [{ code: TTS_DEFAULT_APP, name: "原应用" } as TtsApp]).map(
-                  (a) => (
-                    <SelectItem key={a.code} value={a.code}>
-                      {a.name}
-                    </SelectItem>
-                  ),
-                )}
+                {apps.map((a) => (
+                  <SelectItem key={a.code} value={a.code}>
+                    {a.name}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
             <Input
@@ -428,7 +421,14 @@ export function TtsShopsPanel() {
               value={paste}
               onChange={(e) => setPaste(e.target.value)}
             />
-            <Button size="sm" onClick={exchange} disabled={busy === "exchange"}>
+            <Button
+              size="sm"
+              onClick={exchange}
+              disabled={
+                busy === "exchange" ||
+                (!pasteApp && !/\/oauth\/tts\/callback\/[a-z0-9-]+/i.test(paste))
+              }
+            >
               {busy === "exchange" ? "处理中…" : "完成授权"}
             </Button>
           </div>

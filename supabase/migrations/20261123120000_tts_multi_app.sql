@@ -3,8 +3,9 @@
 -- 背景：外部应用审核资料过多，改为每个店铺主体各开一个「商家自用」应用，
 --       每个应用有自己的 app_key / app_secret，token 只能配签发它的应用签名。
 -- 1. 新表 tts_apps：应用凭据（app_secret 存表，负责人 2026-11-23 决定），RLS 开、无 policy，仅 service role。
---    code='default' = 原应用：app_key 留空时读 Supabase secrets TTS_APP_KEY / TTS_APP_SECRET / TTS_SERVICE_ID。
--- 2. tts_shops 加 app_code（店铺由哪个应用授权）+ 刷新状态。已有店铺归 default。
+--    不设默认应用（负责人 2026-11-23）：每个应用（含原东南亚应用 sea）都必须在设置页填 App Key / Secret / Service ID，
+--    不再读 Supabase secrets TTS_APP_KEY / TTS_APP_SECRET / TTS_SERVICE_ID。
+-- 2. tts_shops 加 app_code（店铺由哪个应用授权，NOT NULL 无默认值）+ 刷新状态。已有店铺（PH/TH 等）归 sea。
 -- 3. pg_cron `tts-token-refresh`：每天北京 05:17 → /api/public/hooks/tts-token-cron，刷新 48h 内到期的 token。
 
 CREATE TABLE IF NOT EXISTS public.tts_apps (
@@ -21,7 +22,7 @@ ALTER TABLE public.tts_apps ENABLE ROW LEVEL SECURITY;
 GRANT ALL ON public.tts_apps TO service_role;
 
 INSERT INTO public.tts_apps (code, name) VALUES
-  ('default', '原应用'),
+  ('sea', 'SEA'),
   ('mx-ar', 'MX-AR'),
   ('mx-ne', 'MX-NE'),
   ('mx-sj', 'MX-SJ'),
@@ -29,9 +30,11 @@ INSERT INTO public.tts_apps (code, name) VALUES
 ON CONFLICT (code) DO NOTHING;
 
 ALTER TABLE public.tts_shops
-  ADD COLUMN IF NOT EXISTS app_code text NOT NULL DEFAULT 'default',
+  ADD COLUMN IF NOT EXISTS app_code text REFERENCES public.tts_apps(code),
   ADD COLUMN IF NOT EXISTS last_refresh_at timestamptz,
   ADD COLUMN IF NOT EXISTS last_refresh_error text;
+UPDATE public.tts_shops SET app_code = 'sea' WHERE app_code IS NULL;
+ALTER TABLE public.tts_shops ALTER COLUMN app_code SET NOT NULL;
 
 DO $$
 DECLARE

@@ -22,41 +22,26 @@ export const TTS_AUTH_HOST = "https://auth.tiktok-shops.com";
 /** 平台限流业务码（Rate limits 文档 §4）。 */
 export const TTS_RATE_LIMIT_CODE = 36009002;
 
-export function ttsAppCreds(): { appKey: string; appSecret: string } {
-  const appKey = Deno.env.get("TTS_APP_KEY") ?? "";
-  const appSecret = Deno.env.get("TTS_APP_SECRET") ?? "";
-  if (!appKey || !appSecret) {
-    throw new Error("缺少 Supabase secrets：TTS_APP_KEY / TTS_APP_SECRET（在 Supabase → Edge Functions → Secrets 设置）");
-  }
-  return { appKey, appSecret };
-}
-
 // ── 多应用（2026-11-23）──────────────────────────────────────────────────────
 // 每个店铺主体一个「商家自用」应用，凭据存表 tts_apps；tts_shops.app_code 记录店铺由哪个应用授权。
 // token 只能配签发它的应用签名：ttsCall 不传 app 时按 access_token 反查店铺所属应用（isolate 内缓存），
 // 所以现有调用方（tts-export / tts-listing / sea-inventory / outreach）无需改动。
-// code='default' 且表里 app_key 为空时回落到 secrets TTS_APP_KEY / TTS_APP_SECRET（原应用）。
+// 不设默认应用（负责人 2026-11-23）：每个应用（含 sea）都必须在 tts_apps 填 app_key / app_secret，不读 secrets。
 export type TtsApp = { code: string; appKey: string; appSecret: string; serviceId: string };
-export const TTS_DEFAULT_APP = "default";
 
 const appCache = new Map<string, TtsApp>();
 const tokenAppCache = new Map<string, string>();
 
 export async function ttsApp(code: string): Promise<TtsApp> {
-  const c = (code || TTS_DEFAULT_APP).trim();
+  const c = String(code ?? "").trim();
+  if (!c) throw new Error("未指定应用（tts_apps.code）");
   const hit = appCache.get(c);
   if (hit) return hit;
   const { data, error } = await admin().from("tts_apps").select("code,app_key,app_secret,service_id").eq("code", c).maybeSingle();
-  // 表还没建（migration 未跑）时，default 仍可用 secrets
-  if (error && c !== TTS_DEFAULT_APP) throw new Error(`读取 tts_apps 失败：${error.message}`);
-  let app: TtsApp | null = null;
-  if (data?.app_key && data?.app_secret) {
-    app = { code: c, appKey: data.app_key, appSecret: data.app_secret, serviceId: data.service_id ?? "" };
-  } else if (c === TTS_DEFAULT_APP) {
-    const { appKey, appSecret } = ttsAppCreds();
-    app = { code: c, appKey, appSecret, serviceId: data?.service_id || (Deno.env.get("TTS_SERVICE_ID") ?? "").trim() };
-  }
-  if (!app) throw new Error(`应用 ${c} 未配置 App Key / App Secret（设置 → TikTok Shop 授权 → 应用）`);
+  if (error) throw new Error(`读取 tts_apps 失败：${error.message}`);
+  if (!data) throw new Error(`应用 ${c} 不存在（设置 → TikTok Shop 授权 → 应用）`);
+  if (!data.app_key || !data.app_secret) throw new Error(`应用 ${c} 未填 App Key / App Secret（设置 → TikTok Shop 授权 → 应用）`);
+  const app = { code: c, appKey: data.app_key, appSecret: data.app_secret, serviceId: data.service_id ?? "" };
   appCache.set(c, app);
   return app;
 }
@@ -65,12 +50,14 @@ export function ttsAppCacheClear() {
   appCache.clear();
 }
 
-/** 按 access_token 找店铺所属应用；找不到（如刚换到、尚未入库的 token）按 default。 */
+/** 按 access_token 找店铺所属应用；找不到直接报错（不回落任何默认应用）。 */
 async function appForToken(accessToken: string): Promise<TtsApp> {
   let code = tokenAppCache.get(accessToken);
   if (!code) {
     const { data, error } = await admin().from("tts_shops").select("app_code").eq("access_token", accessToken).limit(1).maybeSingle();
-    code = (!error && data?.app_code) ? String(data.app_code) : TTS_DEFAULT_APP;
+    if (error) throw new Error(`查询店铺所属应用失败：${error.message}`);
+    if (!data?.app_code) throw new Error("该 token 对应的店铺未关联应用（tts_shops.app_code 为空或店铺不存在），请重新授权");
+    code = String(data.app_code);
     tokenAppCache.set(accessToken, code);
   }
   return ttsApp(code);

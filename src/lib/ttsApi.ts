@@ -26,22 +26,17 @@ export type TtsApp = {
   app_key: string;
   has_secret: boolean;
   service_id: string;
-  creds_source: "table" | "secrets";
   updated_by: string | null;
   updated_at: string | null;
   shop_count: number;
 };
 
-export const TTS_DEFAULT_APP = "default";
-
-/** 该应用在 Partner Center 填的重定向链接。default = 原应用沿用旧地址。 */
+/** 该应用在 Partner Center 填的重定向链接（每个应用一条，末尾是应用代号；不设默认应用）。 */
 export function ttsRedirectUrl(
   code: string,
   origin = typeof window !== "undefined" ? window.location.origin : "https://ads-auth.lovable.app",
 ): string {
-  return code === TTS_DEFAULT_APP
-    ? `${origin}/oauth/tts/callback`
-    : `${origin}/oauth/tts/callback/${code}`;
+  return `${origin}/oauth/tts/callback/${code}`;
 }
 
 export type TtsExchangeResult = {
@@ -78,10 +73,9 @@ export const ttsApi = {
     app_secret?: string;
     service_id?: string;
   }) => invokeFn<{ ok: boolean; apps: TtsApp[] }>("tts-p0-probe", { action: "save_app", ...app }),
-  authUrl: (app = TTS_DEFAULT_APP) =>
-    invokeFn<{ url: string }>("tts-p0-probe", { action: "auth_url", app }),
+  authUrl: (app: string) => invokeFn<{ url: string }>("tts-p0-probe", { action: "auth_url", app }),
   shops: () => invokeFn<{ shops: TtsShop[] }>("tts-p0-probe", { action: "shops" }),
-  exchange: (auth_code: string, app = TTS_DEFAULT_APP) =>
+  exchange: (auth_code: string, app: string) =>
     invokeFn<TtsExchangeResult>("tts-p0-probe", { action: "exchange", auth_code, app }),
   refresh: (shop_id: string) =>
     invokeFn<TtsExchangeResult>("tts-p0-probe", { action: "refresh", shop_id }),
