@@ -19,11 +19,11 @@
 
 | 函数 | 待上线的改动 | 核验方式 |
 | --- | --- | --- |
-| tts-export（1125.264） | 新增 kind=sync（订单/财务每日增量入库，cron 可调用） | 部署后跑一次 tts-sync-cron，tts_sync_state 出现 PH/TH 两行即确认 |
 | gmv-max-exclusive-auth、gmv-max-adgroup-batch-create（1124.209~211 改动） | **暂不部署（积分用完）**：页面建组/切户已改走免费的服务端路由 `/api/public/hooks/gmv-max-write`，这两个 Edge Function 线上仍是旧版/不存在，前端已不调用 | 无需核验，以后有积分可部署或删除 |
 
 2026-11-23 核验：`tools/check-deploy.sh` 显示 39 个函数全部已是新版 `_shared/auth.ts`（口令注入修复已上线）。
 2026-11-24 核验：`attribution-upload`、`attribution-identity-build`、`tts-listing`、`feishu-read` 已重新部署（1124.253），四个均正常应答（401 鉴权提示），上表对应行已删。
+2026-11-25 核验：`tts-export` 已按 main 48d14c3 重新部署（1125.265），正常应答（401 鉴权提示），上表对应行已删；**增量取数是否生效仍需负责人跑一次 tts-sync-cron，看 tts_sync_state 是否出现 PH/TH 两行**。
 ~~同时说明 Lovable 在同步 main 后会自动重新部署 Edge Function~~ **2026-11-24 证伪**：新函数 gmv-max-exclusive-auth 推 main 后仍 404，Edge Function 只在 Lovable 手动部署（耗积分）时更新；前端与服务端路由随 main 同步免费上线。
 
 ## 任务板
