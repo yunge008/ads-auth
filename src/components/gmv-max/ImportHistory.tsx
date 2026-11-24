@@ -11,19 +11,24 @@ import { callGmvMaxWrite } from "@/lib/api";
 export type ProductResult = { item_group_id: string; status: string; reason: string };
 export type DetailRow = {
   campaign_name: string; new_campaign_id?: string | null; source_campaign_id?: string; advertiser_id: string; bc_id?: string;
+  advertiser_name?: string; bc_name?: string;
+  source_advertiser_id?: string; source_advertiser_name?: string; source_bc_id?: string; source_bc_name?: string;
   group_status: string; group_note: string; item_group_id: string; status: string; reason: string; created_at?: string;
 };
 
-export const DETAIL_HEADERS = ["计划名称", "新计划ID", "源计划ID", "广告户ID", "BC", "商品ID", "状态", "原因", "组状态", "组备注", "时间"];
+export const DETAIL_HEADERS = ["计划名称", "新计划ID", "源计划ID", "来源广告户", "来源广告户ID", "来源BC", "来源BC ID",
+  "去向广告户", "去向广告户ID", "去向BC", "去向BC ID", "商品ID", "状态", "原因", "组状态", "组备注", "时间"];
 
 /** 「商品明细」sheet：一行一个商品，带自动筛选，可按状态筛 */
 export function detailSheet(rows: DetailRow[]): XLSX.WorkSheet {
   const aoa = [DETAIL_HEADERS, ...rows.map((r) => [
-    r.campaign_name, r.new_campaign_id ?? "", r.source_campaign_id ?? "", r.advertiser_id, r.bc_id ?? "",
+    r.campaign_name, r.new_campaign_id ?? "", r.source_campaign_id ?? "",
+    r.source_advertiser_name ?? "", r.source_advertiser_id ?? "", r.source_bc_name ?? "", r.source_bc_id ?? "",
+    r.advertiser_name ?? "", r.advertiser_id, r.bc_name ?? "", r.bc_id ?? "",
     r.item_group_id, r.status, r.reason, r.group_status, r.group_note, r.created_at ? new Date(r.created_at).toLocaleString() : "",
   ])];
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  for (let r = 1; r < aoa.length; r++) for (const c of [1, 2, 3, 4, 5]) {
+  for (let r = 1; r < aoa.length; r++) for (const c of [1, 2, 4, 6, 8, 10, 11]) {
     const cell = ws[XLSX.utils.encode_cell({ r, c })];
     if (cell) { cell.t = "s"; cell.z = "@"; }
   }
@@ -37,9 +42,21 @@ export function newBatchId(): string {
 
 type Batch = {
   batch_id: string; kind: string; source: string; operator: string; advertiser_id: string;
+  advertiser_name?: string; bc_id?: string; bc_name?: string;
+  source_advertiser_id?: string; source_advertiser_name?: string; source_bc_id?: string; source_bc_name?: string;
   first_at: string; last_at: string; groups: number; counts: Record<string, number>;
 };
 const KIND_LABEL: Record<string, string> = { excel: "Excel", copy: "复制", single: "单个" };
+
+// 户名 + ID 一行，BC 名 + ID 一行（灰）
+function AdvBc({ name, id, bcName, bcId }: { name?: string; id?: string; bcName?: string; bcId?: string }) {
+  return (
+    <div className="leading-tight">
+      <div>{name || "—"} <span className="font-mono text-muted-foreground">{id}</span></div>
+      {(bcName || bcId) && <div className="text-muted-foreground">BC {bcName} <span className="font-mono">{bcId}</span></div>}
+    </div>
+  );
+}
 
 export function ImportHistory({ refreshKey }: { refreshKey: number }) {
   const [batches, setBatches] = React.useState<Batch[]>([]);
@@ -92,7 +109,7 @@ export function ImportHistory({ refreshKey }: { refreshKey: number }) {
                   <TableHead>时间</TableHead>
                   <TableHead>方式</TableHead>
                   <TableHead>来源</TableHead>
-                  <TableHead>广告户</TableHead>
+                  <TableHead>去向</TableHead>
                   <TableHead className="text-right">组</TableHead>
                   <TableHead className="text-right">成功</TableHead>
                   <TableHead className="text-right">未纳入</TableHead>
@@ -106,8 +123,14 @@ export function ImportHistory({ refreshKey }: { refreshKey: number }) {
                   <TableRow key={b.batch_id}>
                     <TableCell className="text-xs whitespace-nowrap">{new Date(b.last_at).toLocaleString()}</TableCell>
                     <TableCell className="text-xs">{KIND_LABEL[b.kind] ?? b.kind}</TableCell>
-                    <TableCell className="text-xs max-w-48 truncate" title={b.source}>{b.source}</TableCell>
-                    <TableCell className="text-xs font-mono">{b.advertiser_id}</TableCell>
+                    <TableCell className="text-xs">
+                      {b.source_advertiser_id
+                        ? <AdvBc name={b.source_advertiser_name} id={b.source_advertiser_id} bcName={b.source_bc_name} bcId={b.source_bc_id} />
+                        : <span className="block max-w-48 truncate" title={b.source}>{b.source}</span>}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      <AdvBc name={b.advertiser_name} id={b.advertiser_id} bcName={b.bc_name} bcId={b.bc_id} />
+                    </TableCell>
                     <TableCell className="text-right text-xs">{b.groups}</TableCell>
                     <TableCell className="text-right text-xs text-emerald-600">{b.counts["成功"] ?? 0}</TableCell>
                     <TableCell className="text-right text-xs text-amber-600">{b.counts["组成功商品未纳入"] ?? 0}</TableCell>

@@ -9,7 +9,7 @@
 // 鉴权：x-admin-passcode，需 gmv-max-create 页面权限。
 import { createFileRoute } from "@tanstack/react-router";
 import {
-  adminDb, bcListForToken, campaignInfo, campaignProducts, checkGmvMaxPasscode, createOne, exclusiveAuth, getImportBatch, listImportBatches, listStoreProducts, logImport,
+  adminDb, bcListForToken, campaignInfo, campaignProducts, listIdentities, checkGmvMaxPasscode, createOne, exclusiveAuth, getImportBatch, listImportBatches, listStoreProducts, logImport,
   spendReport, type CreateRow, type LogMeta,
 } from "@/lib/gmv-max-write.server";
 
@@ -50,6 +50,8 @@ export const Route = createFileRoute("/api/public/hooks/gmv-max-write")({
             case "campaign_products": // 只读：某组近 N 天有数据的商品（全店组转指定商品用）
               return jsonRes(await campaignProducts(db, String(body.advertiser_id ?? "").trim(),
                 String(body.campaign_id ?? "").trim(), Number(body.days ?? 30) || 30));
+            case "identities": // 只读：某户在某 BC 下可用视频账号
+              return jsonRes({ identities: await listIdentities(db, String(body.advertiser_id ?? "").trim(), String(body.bc_id ?? "").trim()) });
             case "bc_list": // 只读：授权回调页用新 token 查可访问 BC
               return jsonRes({ bcs: await bcListForToken(String(body.access_token ?? "")) });
             case "info": // 只读：广告组列表 + 逐个 info，按 bc_id 对应连接的授权读取

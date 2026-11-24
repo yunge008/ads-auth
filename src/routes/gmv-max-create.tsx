@@ -228,6 +228,9 @@ function GmvMaxCreatePage() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [connections, shops, advertisers]);
 
+  const advNameOf = (id: string) => advOptions.find((a) => a.id === id)?.name ?? "";
+  const bcNameOf = (id?: string) => (id ? connections.find((c) => c.bc_id === id)?.bc_name ?? "" : "");
+
   // ---- 单个新建 ----
   const [advertiserId, setAdvertiserId] = React.useState("");
   const [singleBc, setSingleBc] = React.useState("");
@@ -269,7 +272,10 @@ function GmvMaxCreatePage() {
         end_time: toTikTokTime(endTime),
         ...(singleBc ? { store_authorized_bc_id: singleBc } : {}),
       };
-      const res = await runBatch([row], { batch_id: newBatchId(), source: "单个新建", kind: "single" });
+      const res = await runBatch([row], {
+        batch_id: newBatchId(), source: "单个新建", kind: "single",
+        advertiser_name: advNameOf(advertiserId), bc_name: bcNameOf(singleBc),
+      });
       setLogRefresh((k) => k + 1);
       setResults(res);
       const ok = res[0]?.ok;
@@ -406,7 +412,8 @@ function GmvMaxCreatePage() {
           if (!adv) throw new Error("未选目标广告户，且该行广告户ID 为空");
           const usedBc = batchAdv ? batchBc : store_authorized_bc_id;
           const res = await runBatch([{ advertiser_id: adv, campaign_name, item_group_ids, roas_bid, budget, start_time, end_time,
-            identity_list, accelerate_testing_for_new_videos, store_authorized_bc_id: usedBc, source_campaign_id }], log);
+            identity_list, accelerate_testing_for_new_videos, store_authorized_bc_id: usedBc, source_campaign_id }],
+            { ...log, advertiser_name: advNameOf(adv), bc_name: bcNameOf(usedBc) });
           const r0 = res[0];
           if (r0?.ok && !r0.partial) ok++;
           setBatchRows((prev) => prev.map((r, idx) => (idx === i ? {
@@ -424,7 +431,7 @@ function GmvMaxCreatePage() {
     } finally {
       setBatchSubmitting(false);
       setLogRefresh((k) => k + 1);
-      if (logErr) toast.error(`导入记录未保存：${logErr}`, { duration: 15000 });
+      if (logErr) toast.error(`导入记录：${logErr}`, { duration: 15000 });
       if (ok === total) toast.success(`批量创建完成：全部成功 ${ok} / ${total}`);
       else toast.error(`批量创建完成：成功 ${ok} / ${total}，其余 ${total - ok} 行见下方「未成功」列表`, { duration: 15000 });
     }

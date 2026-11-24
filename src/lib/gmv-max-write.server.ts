@@ -245,6 +245,20 @@ export async function campaignProducts(db: SupabaseClient, advertiserId: string,
   return { start, end, products };
 }
 
+// 某户在某 BC 下可用于商品 GMV Max 的视频账号（/gmv_max/identity/get/，同建组时用的口径）
+export async function listIdentities(db: SupabaseClient, advertiserId: string, bcId: string) {
+  const { storeId, conns } = await loadAdv(db, advertiserId, bcId || undefined);
+  if (!storeId) throw new Error(`广告户 ${advertiserId} 未配置店铺 ID`);
+  if (!bcId) throw new Error("bc_id 必填");
+  const m = await targetIdentities(conns, advertiserId, storeId, [bcId]);
+  return Array.from(m.values()).map((x) => ({
+    identity_id: String(x.identity_id ?? ""),
+    identity_type: String(x.identity_type ?? ""),
+    name: String(x.display_name ?? x.user_name ?? x.identity_name ?? x.username ?? ""),
+    product_gmv_max_available: x.product_gmv_max_available !== false,
+  }));
+}
+
 // 店铺商品清单（含是否在 GMV Max 组内），给页面下载「未在广告组的商品」
 export async function listStoreProducts(db: SupabaseClient, advertiserId: string, preferBc?: string) {
   const { storeId, conns, bcId } = await loadAdv(db, advertiserId, preferBc);
@@ -563,7 +577,11 @@ export async function bcListForToken(accessToken: string) {
 }
 
 // 导入记录：每个商品一行写 gmv_max_import_logs（表由 migration 20261124120000 创建；表不存在时不影响建组）
-export type LogMeta = { batch_id?: unknown; source?: unknown; kind?: unknown; source_campaign_id?: unknown };
+export type LogMeta = {
+  batch_id?: unknown; source?: unknown; kind?: unknown; source_campaign_id?: unknown;
+  source_advertiser_id?: unknown; source_advertiser_name?: unknown; source_bc_id?: unknown; source_bc_name?: unknown;
+  advertiser_name?: unknown; bc_name?: unknown;
+};
 export async function logImport(db: SupabaseClient, meta: LogMeta, row: CreateRow, res: CreateResult, operator: string) {
   const batchId = String(meta.batch_id ?? "").trim();
   if (!batchId) return null;
@@ -580,27 +598,46 @@ export async function logImport(db: SupabaseClient, meta: LogMeta, row: CreateRo
     group_status: res.ok ? (res.partial ? "已建·需处理" : "成功") : "失败",
     group_note: res.ok ? (res.notes ?? []).join("；") : (res.error ?? ""),
   };
+  // 来源/去向的户与 BC（migration 20261124130000 新增列；列不存在时退回旧字段写入，不影响建组）
+  const extra = {
+    source_advertiser_id: String(meta.source_advertiser_id ?? ""),
+    source_advertiser_name: String(meta.source_advertiser_name ?? ""),
+    source_bc_id: String(meta.source_bc_id ?? ""),
+    source_bc_name: String(meta.source_bc_name ?? ""),
+    advertiser_name: String(meta.advertiser_name ?? ""),
+    bc_name: String(meta.bc_name ?? ""),
+  };
   const products = res.products?.length ? res.products : [{ item_group_id: "", status: res.ok ? "成功" : "失败", reason: res.error ?? "" }];
-  const { error } = await db.from("gmv_max_import_logs").insert(
-    products.map((p) => ({ ...base, item_group_id: p.item_group_id, status: p.status, reason: p.reason })),
-  );
+  const rowsOf = (withExtra: boolean) =>
+    products.map((p) => ({ ...base, ...(withExtra ? extra : {}), item_group_id: p.item_group_id, status: p.status, reason: p.reason }));
+  let { error } = await db.from("gmv_max_import_logs").insert(rowsOf(true));
+  if (error && /column|schema cache/i.test(error.message)) {
+    ({ error } = await db.from("gmv_max_import_logs").insert(rowsOf(false)));
+    if (!error) return "记录已保存，但来源/去向户名与 BC 未保存（需执行 migration 20261124130000）";
+  }
   return error ? error.message : null;
 }
 
 export async function listImportBatches(db: SupabaseClient, days = 30) {
   const since = new Date(Date.now() - days * 86400_000).toISOString();
   const out = new Map<string, { batch_id: string; kind: string; source: string; operator: string; advertiser_id: string;
-    first_at: string; last_at: string; groups: Set<string>; counts: Record<string, number> }>();
+    first_at: string; last_at: string; groups: Set<string>; counts: Record<string, number>;
+    bc_id: string; advertiser_name: string; bc_name: string;
+    source_advertiser_id: string; source_advertiser_name: string; source_bc_id: string; source_bc_name: string }>();
   for (let from = 0; from < 50000; from += 1000) {
     const { data, error } = await db.from("gmv_max_import_logs")
-      .select("batch_id, kind, source, operator, advertiser_id, created_at, campaign_name, status")
+      .select("*")
       .gte("created_at", since).order("created_at", { ascending: false }).range(from, from + 999);
     if (error) throw new Error(error.message);
     type LogRow = { batch_id: string; kind: string; source: string; operator: string; advertiser_id: string;
-      created_at: string; campaign_name: string; status: string };
+      created_at: string; campaign_name: string; status: string; bc_id?: string; advertiser_name?: string; bc_name?: string;
+      source_advertiser_id?: string; source_advertiser_name?: string; source_bc_id?: string; source_bc_name?: string };
     for (const r of (data ?? []) as unknown as LogRow[]) {
       const b = out.get(r.batch_id) ?? { batch_id: r.batch_id, kind: r.kind, source: r.source, operator: r.operator,
-        advertiser_id: r.advertiser_id, first_at: r.created_at, last_at: r.created_at, groups: new Set<string>(), counts: {} };
+        advertiser_id: r.advertiser_id, first_at: r.created_at, last_at: r.created_at, groups: new Set<string>(), counts: {},
+        bc_id: r.bc_id ?? "", advertiser_name: r.advertiser_name ?? "", bc_name: r.bc_name ?? "",
+        source_advertiser_id: r.source_advertiser_id ?? "", source_advertiser_name: r.source_advertiser_name ?? "",
+        source_bc_id: r.source_bc_id ?? "", source_bc_name: r.source_bc_name ?? "" };
       if (r.created_at < b.first_at) b.first_at = r.created_at;
       if (r.created_at > b.last_at) b.last_at = r.created_at;
       b.groups.add(r.campaign_name);
