@@ -334,3 +334,4 @@
 2026-11-24 | claude | [1124.238] 账户复制：源户也配 BC 下拉（同 TargetPicker，默认匹配该户的最新授权 BC，可选全部 BC）；读取源组用源户 BC 的授权，视频账号面板「来源 BC」也按它查；目标户 BC 独立选择。
 2026-11-24 | claude | [1124.239] ①账户复制授权状态文案：「已独占授权」→「店铺已授权为新账号」，「授权在」→「店铺授权在」；②导入记录显示时补名：服务端 log_batches/log_get 用 advertiser_countries.advertiser_name、tiktok_connections.bc_name 补户名/BC 名，旧复制记录从 source「源户 <id>」解析来源户 ID，前端再用页面广告户名兜底；来源 BC 旧记录未存，显示「BC —」。
 2026-11-24 | claude | [1124.240] 视频账号面板补昵称：GMV Max identity/get 不返回的 BC_AUTH_TT 账号，再用通用 /identity/get/（identity_type=BC_AUTH_TT + identity_authorized_bc_id，参数与权限未核验，失败忽略）按 BC 查 display_name，仅用于显示名称。
+2026-11-24 | claude | [1124.241] 首页执行授权：「获取所有素材」按授权码去重（建联表优先于 M:S 归档；同 VID 不同码保留；未授权模式不去重）；素材列表工具栏/筛选/进度重排，列顺序调整，卡片一屏高、每页行数自适应；说明改「?」；修复说明气泡键盘聚焦/点按即关。核验：飞书「达人建联表（旧）」(98d7e1) 0 授权码不纳入；隐藏 sheet「阿木」5505 组 VID+码全部已在「授权记录」M:S（BD=阿木）。tsc 0 错误；Playwright 模拟拉取→去重（8→5）→授权→进度→状态筛选通过。

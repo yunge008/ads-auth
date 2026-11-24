@@ -18,6 +18,7 @@ export function MultiSelect({
   placeholder = "全部",
   className,
   counts,
+  hideLabel = false,
 }: {
   label: string;
   options: string[];
@@ -26,6 +27,8 @@ export function MultiSelect({
   placeholder?: string;
   className?: string;
   counts?: Record<string, number>;
+  /** 不显示上方标签：空值时按钮里显示标签名，标签名保留为 aria-label */
+  hideLabel?: boolean;
 }) {
   const allChecked = options.length > 0 && value.length === options.length;
   const toggle = (opt: string) => {
@@ -33,21 +36,26 @@ export function MultiSelect({
   };
   return (
     <div className={cn("flex flex-col gap-1", className)}>
-      <span className="text-xs text-muted-foreground">{label}</span>
+      {!hideLabel && <span className="text-xs text-muted-foreground">{label}</span>}
       <Popover>
         <PopoverTrigger asChild>
           <Button
             variant="outline"
             size="sm"
-            className="h-8 justify-between font-normal min-w-[140px]"
+            aria-label={hideLabel ? label : undefined}
+            className={cn(
+              "h-8 justify-between font-normal",
+              hideLabel ? "min-w-[96px]" : "min-w-[140px]",
+              hideLabel && value.length > 0 && "border-primary/60",
+            )}
           >
             <span className="truncate text-left">
               {value.length === 0 ? (
-                <span className="text-muted-foreground">{placeholder}</span>
+                <span className="text-muted-foreground">{hideLabel ? label : placeholder}</span>
               ) : value.length <= 2 ? (
                 value.join("、")
               ) : (
-                `已选 ${value.length} 项`
+                `${hideLabel ? label : "已选"} ${value.length} 项`
               )}
             </span>
             <ChevronDown className="h-3.5 w-3.5 opacity-60 ml-2 shrink-0" />

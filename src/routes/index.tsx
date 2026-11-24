@@ -36,6 +36,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
+  HelpCircle,
+  X,
 } from "lucide-react";
 import {
   Collapsible,
@@ -72,6 +74,27 @@ async function callAuthorizeLog<T>(body: Record<string, unknown>): Promise<T> {
 }
 
 const LOG_PAGE_SIZE = 10;
+/** 素材表固定行高（px），与 MaterialRow 的 h-10 一致；首行未渲染时用来估算每页行数 */
+const MATERIAL_ROW_PX = 40;
+/** 授权失败类结果状态（进度条里排在「已授权」之后） */
+const OTHER_RESULT_STATUSES: MaterialStatus[] = [
+  "代码过期",
+  "代码删除",
+  "代码有误",
+  "代码涉及多素材",
+  "视频不可见",
+  "API错误",
+];
+/** 回写飞书处理的状态 */
+const WRITEBACK_STATUSES: MaterialStatus[] = [
+  "已授权",
+  "代码过期",
+  "代码删除",
+  "代码有误",
+  "代码涉及多素材",
+  "视频不可见",
+  "API错误",
+];
 
 function AuthorizeLogPanel({ refreshKey }: { refreshKey: number }) {
   const [logs, setLogs] = React.useState<AuthorizeLogEntry[]>([]);
@@ -217,11 +240,18 @@ function IssueTip({ text }: { text: string }) {
           onMouseLeave={() => setOpen(false)}
           onFocus={() => setOpen(true)}
           onBlur={() => setOpen(false)}
+          // 点按只打开：聚焦已打开时 Radix 默认的切换会把它关掉（手机点按 = 聚焦 + 点击）
+          onClick={(e) => {
+            e.preventDefault();
+            setOpen(true);
+          }}
         >
           <AlertTriangle className="h-3.5 w-3.5" />
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-80 text-xs break-all">{text}</PopoverContent>
+      <PopoverContent className="w-80 text-xs break-all" onOpenAutoFocus={(e) => e.preventDefault()}>
+        {text}
+      </PopoverContent>
     </Popover>
   );
 }
@@ -371,15 +401,43 @@ function AuthorizePage() {
     [],
   );
 
-  // Pagination (50 rows / page)
-  const PAGE_SIZE = 20;
+  // 分页：每页行数 = 表格区高度 / 行高。素材列表卡片高度固定为一屏，
+  // 页面滚到底时整个卡片（工具栏 + 表格 + 翻页）正好在一屏内，不出现表格内滚动。
+  const tableBoxRef = React.useRef<HTMLDivElement>(null);
+  const [pageSize, setPageSize] = React.useState(15);
   const [page, setPage] = React.useState(1);
-  const pageCount = Math.max(1, Math.ceil(visibleMaterials.length / PAGE_SIZE));
-  React.useEffect(() => { setPage(1); }, [fStaff, fCountry, fStatus, fVid, fAuth, materials]);
+  const pageCount = Math.max(1, Math.ceil(visibleMaterials.length / pageSize));
+  // 只在筛选变化或条数变化时回第 1 页；授权过程中状态刷新不跳页
+  React.useEffect(() => { setPage(1); }, [fStaff, fCountry, fStatus, fVid, fAuth, materials.length]);
+  React.useEffect(() => { if (page > pageCount) setPage(pageCount); }, [page, pageCount]);
+  const hasRows = visibleMaterials.length > 0;
+  React.useLayoutEffect(() => {
+    const el = tableBoxRef.current;
+    if (!el) return;
+    const calc = () => {
+      const head = el.querySelector("thead")?.getBoundingClientRect().height ?? 40;
+      const firstRow = hasRows ? el.querySelector("tbody tr") : null;
+      const row = firstRow?.getBoundingClientRect().height || MATERIAL_ROW_PX;
+      const n = Math.max(5, Math.floor((el.clientHeight - head - 2) / row));
+      setPageSize((p) => (p === n ? p : n));
+    };
+    calc();
+    const ro = new ResizeObserver(calc);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [hasRows]);
   const pagedMaterials = React.useMemo(
-    () => visibleMaterials.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
-    [visibleMaterials, page],
+    () => visibleMaterials.slice((page - 1) * pageSize, page * pageSize),
+    [visibleMaterials, page, pageSize],
   );
+  const filterActive = fStaff.length + fCountry.length + fStatus.length > 0 || !!fVid || !!fAuth;
+  const clearFilters = () => {
+    setFStaff([]);
+    setFCountry([]);
+    setFStatus([]);
+    setFVid("");
+    setFAuth("");
+  };
 
 
   const handleFetch = async (includeDone = false) => {
@@ -447,11 +505,21 @@ function AuthorizePage() {
         }
         for (const ms of r.resp?.missing_sheets ?? []) if (ms !== ARCHIVE || idx === 0) missing.add(ms);
       });
-      const staffKeys = new Set(staffRows.map((m) => `${m.vid}__${m.auth_code}`));
-      const data: ReadResp = {
-        materials: [...staffRows, ...archiveRows.filter((m) => !staffKeys.has(`${m.vid}__${m.auth_code}`))],
-        missing_sheets: [...missing],
+      // 「获取所有素材」按授权码去重：同一授权码只留一条（建联表优先于「授权记录」归档，
+      // 建联表内按人员表顺序、行号先到先得）；同一 VID 不同授权码都保留。
+      // 「获取未授权素材」不去重：每行都要按 sheet+行号 回写 V/W。
+      const seenCode = new Set<string>();
+      const firstByCode = (m: Material) => {
+        const k = m.auth_code.trim();
+        if (seenCode.has(k)) return false;
+        seenCode.add(k);
+        return true;
       };
+      const merged = includeDone
+        ? [...staffRows.filter(firstByCode), ...archiveRows.filter(firstByCode)]
+        : [...staffRows, ...archiveRows];
+      const dupDropped = staffRows.length + archiveRows.length - merged.length;
+      const data: ReadResp = { materials: merged, missing_sheets: [...missing] };
       setFetchReport(
         results.map((r, idx) => {
           const sheet = activeStaff[idx].resolved_sheet_name || activeStaff[idx].sheet_name;
@@ -490,7 +558,7 @@ function AuthorizePage() {
       if (data?.missing_sheets?.length) {
         toast.warning(`以下 sheet 未找到：${data.missing_sheets.join(", ")}`);
       }
-      toast.success(`已拉取 ${list.length} 条素材`);
+      toast.success(`已拉取 ${list.length} 条素材` + (dupDropped > 0 ? `（按授权码去重 ${dupDropped} 条）` : ""));
 
     } catch (e) {
       toast.error(`拉取失败：${(e as Error).message}`);
@@ -502,14 +570,25 @@ function AuthorizePage() {
   const AUTH_CHUNK_SIZE = 200;
   const AUTH_MAX_CONCURRENT = 3;
 
+  // 执行授权的目标：当前筛选可见 + 待授权/API错误 + 有广告户和授权码 + 广告户在「待授权账户」中开启
+  const authCandidates = React.useMemo(
+    () =>
+      visibleMaterials.filter(
+        (m) =>
+          (m.status === "待授权" || m.status === "API错误") &&
+          m.advertiser_id &&
+          m.auth_code &&
+          enabledAdvertiserIds.has(m.advertiser_id),
+      ),
+    [visibleMaterials, enabledAdvertiserIds],
+  );
+  const writebackCount = React.useMemo(
+    () => materials.filter((m) => WRITEBACK_STATUSES.includes(m.status)).length,
+    [materials],
+  );
+
   const handleAuthorize = async () => {
-    const targets = visibleMaterials.filter(
-      (m) =>
-        (m.status === "待授权" || m.status === "API错误") &&
-        m.advertiser_id &&
-        m.auth_code &&
-        enabledAdvertiserIds.has(m.advertiser_id),
-    );
+    const targets = authCandidates;
     if (targets.length === 0) {
       toast.error("没有可执行授权的素材（待授权 / API错误，且账户已在「待授权账户」中开启）");
       return;
@@ -591,16 +670,7 @@ function AuthorizePage() {
     );
   };
 
-  const OTHER_RESULT_STATUSES: MaterialStatus[] = [
-    "代码过期",
-    "代码删除",
-    "代码有误",
-    "代码涉及多素材",
-    "视频不可见",
-    "API错误",
-  ];
-
-  // 本次执行授权的实时状态条：授权中/已授权常驻显示，其余状态有结果才显示。
+  // 本次执行授权的进度：进度条 + 各结果状态计数（已授权 → 各类失败 → 授权中，0 的不显示）。
   const authStats = React.useMemo(() => {
     if (!authTargetIds) return null;
     const counts: Partial<Record<MaterialStatus, number>> = {};
@@ -609,31 +679,16 @@ function AuthorizePage() {
       counts[m.status] = (counts[m.status] ?? 0) + 1;
     }
     const pending = counts["授权中"] ?? 0;
-    const done = authTargetIds.size - pending;
-    const leadLabel = authorizing ? "授权中" : "授权完毕";
-    const parts = [
-      `授权中${pending}`,
-      `已授权${counts["已授权"] ?? 0}`,
-      ...OTHER_RESULT_STATUSES.filter((s) => (counts[s] ?? 0) > 0).map((s) => `${s}${counts[s]}`),
-    ];
+    const order: MaterialStatus[] = ["已授权", ...OTHER_RESULT_STATUSES, "授权中"];
     return {
       total: authTargetIds.size,
-      done,
-      text: `${leadLabel} ${done}/${authTargetIds.size}条，结果：${parts.join("，")}`,
+      done: authTargetIds.size - pending,
+      parts: order.filter((s) => (counts[s] ?? 0) > 0).map((s) => [s, counts[s] as number] as const),
     };
-  }, [authTargetIds, materials, authorizing]);
+  }, [authTargetIds, materials]);
 
   const handleWriteback = async () => {
-    const WRITE: MaterialStatus[] = [
-      "已授权",
-      "代码过期",
-      "代码删除",
-      "代码有误",
-      "代码涉及多素材",
-      "视频不可见",
-      "API错误",
-    ];
-    const targets = materials.filter((m) => WRITE.includes(m.status));
+    const targets = materials.filter((m) => WRITEBACK_STATUSES.includes(m.status));
     if (targets.length === 0) {
       toast.error("没有可回写的素材");
       return;
@@ -728,12 +783,7 @@ function AuthorizePage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold tracking-tight">执行授权</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            从飞书拉取未授权素材，匹配广告户后批量授权并回写。
-          </p>
-        </div>
+        <h2 className="text-xl font-semibold tracking-tight">执行授权</h2>
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={() => handleFetch(true)} disabled={loading}>
             <RotateCw className={cn("h-4 w-4 mr-1.5", loadingMode === "all" && "animate-spin")} />
@@ -772,7 +822,7 @@ function AuthorizePage() {
                     <div className="font-medium mb-1">两种拉取模式</div>
                     <ul className="list-disc pl-5 text-muted-foreground space-y-1">
                       <li><b>获取未授权素材</b>：仅启用中的 BD；须同时满足 V 列（code 授权日期/投放日期）为空、P 列 VID 非空、Q 列授权码格式合法；C 列国家须符合格式，N 列视频登记日期可为空，填写时须为可识别日期。适用于每日授权。</li>
-                      <li><b>获取所有素材</b>：人员表内全部 BD（含未启用）的建联表中 P 列 VID 非空且 Q 列授权码格式合法的行（不看 V 列，国家/日期无效不剔除，国家未匹配广告户时标为「无授权账号」），并合并「授权记录」M:S 列的原始 code 归档（第 3 行起），按 VID+授权码去重。适用于批量授权新账户。</li>
+                      <li><b>获取所有素材</b>：人员表内全部 BD（含未启用）的建联表中 P 列 VID 非空且 Q 列授权码格式合法的行（不看 V 列，国家/日期无效不剔除，国家未匹配广告户时标为「无授权账号」），并合并「授权记录」M:S 列的原始 code 归档（第 3 行起），<b>按授权码去重</b>：同一授权码只保留一条（建联表优先于归档，建联表内按人员表顺序、行号先到先得），同一 VID 不同授权码都保留。一般只授权不回写；如点回写，只写回建联表行的 V/W，归档行只记到「授权记录」A:K。适用于批量授权新账户。</li>
                       <li><b>注意</b>：只有授权码、P 列 VID 为空的行，两种模式都不会返回；仅 V 列为空不足以纳入。</li>
                     </ul>
                   </div>
@@ -796,7 +846,7 @@ function AuthorizePage() {
                   </div>
                   <div>
                     <div className="font-medium mb-1">排序</div>
-                    <p className="text-muted-foreground">拉取后按 状态 → 人员 → 行号 排序，之后冻结不再动态重排。</p>
+                    <p className="text-muted-foreground">拉取后按 状态 → 人员 → 行号 排序，之后冻结不再动态重排。素材列表每页行数按屏幕高度自动计算，页面滚到底时整块列表在一屏内。</p>
                   </div>
                 </TabsContent>
 
@@ -842,7 +892,7 @@ function AuthorizePage() {
                     <ul className="list-disc pl-5 text-muted-foreground space-y-1">
                       <li>Q 列授权码格式合法，且 P 列 VID 非空（两种模式都要求）</li>
                       <li>未授权模式下额外要求：N 列（视频登记日期）若有值必须是可识别日期；C 列国家 1–10 字符（中英文/数字/横杠/空格）；V 列（投放日期）为空</li>
-                      <li>所有素材模式下：仅要求授权码+VID，国家/日期无效不剔除；并合并「授权记录」M:S 归档数据</li>
+                      <li>所有素材模式下：仅要求授权码+VID，国家/日期无效不剔除；并合并「授权记录」M:S 归档数据，按授权码去重</li>
                     </ul>
                   </div>
                 </TabsContent>
@@ -1050,98 +1100,116 @@ function AuthorizePage() {
       </div>
 
 
-      <Card>
-        <CardHeader className="space-y-3">
-          <CardTitle className="text-base">
-            素材列表{" "}
-            <span className="text-xs font-normal text-muted-foreground ml-1">
-              （共 {visibleMaterials.length} / {materials.length} 条）
-            </span>
-          </CardTitle>
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div className="flex flex-wrap items-end gap-3">
-              <MultiSelect
-                label="人员姓名"
-                options={staff.map((s) => s.name)}
-                value={fStaff}
-                onChange={setFStaff}
-                counts={staffCounts}
-              />
-              <MultiSelect
-                label="国家"
-                options={countriesInData}
-                value={fCountry}
-                onChange={setFCountry}
-                counts={countryCounts}
-              />
-              <div className="flex flex-col gap-1">
-                <span className="text-xs text-muted-foreground">VID</span>
-                <Input
-                  value={fVid}
-                  onChange={(e) => setFVid(e.target.value)}
-                  placeholder="模糊搜索"
-                  className="h-8 w-52"
-                />
-              </div>
-              <div className="flex flex-col gap-1">
-                <span className="text-xs text-muted-foreground">授权码</span>
-                <Input
-                  value={fAuth}
-                  onChange={(e) => setFAuth(e.target.value)}
-                  placeholder="模糊搜索"
-                  className="h-8 w-[480px]"
-                />
-              </div>
-              <MultiSelect
-                label="状态"
-                options={statusOptions}
-                value={fStatus}
-                onChange={setFStatus}
-                counts={statusCounts}
-              />
-            </div>
-            <div className="flex flex-col items-end gap-1">
-            {authStats && (
-              <div className="text-xs font-medium tabular-nums text-right max-w-md">{authStats.text}</div>
-            )}
-            <div className="flex items-end gap-2">
-              <Button size="sm" onClick={handleAuthorize} disabled={authorizing}>
+      <Card className="flex flex-col h-[calc(100dvh-3rem)] min-h-[520px]" aria-label="素材列表">
+        <CardHeader className="space-y-2 pb-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CardTitle className="text-base flex items-baseline gap-2">
+              素材列表
+              <span className="text-xs font-normal text-muted-foreground tabular-nums" aria-label="当前显示 / 全部条数">
+                {visibleMaterials.length} / {materials.length}
+              </span>
+            </CardTitle>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Button size="sm" onClick={handleAuthorize} disabled={authorizing || authCandidates.length === 0}>
                 <Send className={cn("h-4 w-4 mr-1.5", authorizing && "animate-pulse")} />
                 执行授权
+                <span className="ml-1.5 rounded bg-primary-foreground/20 px-1.5 text-xs tabular-nums" aria-label="本次将授权条数">
+                  {authCandidates.length}
+                </span>
               </Button>
-              <Button size="sm" variant="outline" onClick={handleWriteback}>
+              <HelpTip label="执行授权范围" text="当前筛选可见、状态为「待授权」或「API错误」、有广告户和授权码，且广告户在「待授权账户」中已开启的素材。" />
+              <Button size="sm" variant="outline" onClick={handleWriteback} disabled={authorizing || writebackCount === 0}>
                 <Upload className="h-4 w-4 mr-1.5" />
                 回写飞书
+                <span className="ml-1.5 text-xs tabular-nums text-muted-foreground" aria-label="待回写条数">{writebackCount}</span>
               </Button>
-              <Button size="sm" variant="outline" onClick={handleDownload}>
-                <Download className="h-4 w-4 mr-1.5" />
-                下载到 Excel
+              <span className="mx-1 h-5 w-px bg-border" aria-hidden="true" />
+              <Button size="icon" variant="ghost" className="h-8 w-8" onClick={handleCopyAuthCodes} aria-label="复制当前筛选的授权码" title="复制当前筛选的授权码">
+                <Copy className="h-4 w-4" />
               </Button>
-              <Button size="sm" variant="outline" onClick={handleCopyAuthCodes}>
-                <Copy className="h-4 w-4 mr-1.5" />
-                复制授权码
+              <Button size="icon" variant="ghost" className="h-8 w-8" onClick={handleDownload} aria-label="下载全部素材到 Excel" title="下载全部素材到 Excel">
+                <Download className="h-4 w-4" />
               </Button>
-            </div>
-            <span className="text-xs text-muted-foreground">
-              执行授权仅作用于：当前筛选可见 <b>且</b> 「待授权账户」中已开启的素材
-            </span>
             </div>
           </div>
+
+          <div role="toolbar" aria-label="素材筛选" className="flex flex-wrap items-center gap-2">
+            <MultiSelect hideLabel label="状态" options={statusOptions} value={fStatus} onChange={setFStatus} counts={statusCounts} />
+            <MultiSelect hideLabel label="人员" options={staff.map((s) => s.name)} value={fStaff} onChange={setFStaff} counts={staffCounts} />
+            <MultiSelect hideLabel label="国家" options={countriesInData} value={fCountry} onChange={setFCountry} counts={countryCounts} />
+            <Input
+              value={fVid}
+              onChange={(e) => setFVid(e.target.value)}
+              placeholder="VID"
+              aria-label="VID 模糊搜索"
+              className="h-8 w-44 font-mono text-xs"
+            />
+            <Input
+              value={fAuth}
+              onChange={(e) => setFAuth(e.target.value)}
+              placeholder="授权码"
+              aria-label="授权码模糊搜索"
+              className="h-8 flex-1 min-w-[10rem] max-w-sm font-mono text-xs"
+            />
+            {filterActive && (
+              <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={clearFilters}>
+                <X className="h-3.5 w-3.5 mr-1" />
+                清空筛选
+              </Button>
+            )}
+          </div>
+
+          {authStats && (
+            <div role="status" aria-live="polite" className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="font-medium">{authorizing ? "授权中" : "授权完毕"}</span>
+                <div
+                  className="h-1.5 w-32 rounded-full bg-muted overflow-hidden"
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={authStats.total}
+                  aria-valuenow={authStats.done}
+                  aria-label="授权进度"
+                >
+                  <div
+                    className="h-full bg-primary transition-[width]"
+                    style={{ width: `${authStats.total ? (authStats.done / authStats.total) * 100 : 0}%` }}
+                  />
+                </div>
+                <span className="tabular-nums text-muted-foreground">
+                  {authStats.done}/{authStats.total}
+                </span>
+              </div>
+              {authStats.parts.map(([st, n]) => (
+                <button
+                  key={st}
+                  type="button"
+                  onClick={() => setFStatus([st])}
+                  aria-label={`只看${st}（${n} 条）`}
+                  className="inline-flex items-center gap-1 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <StatusBadge status={st} />
+                  <span className="tabular-nums">{n}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </CardHeader>
-        <CardContent>
-          <div className="border rounded-md overflow-x-auto">
+
+        <CardContent className="flex-1 min-h-0 flex flex-col pb-3">
+          <div ref={tableBoxRef} className="flex-1 min-h-0 border rounded-md overflow-auto">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>人员姓名</TableHead>
-                  <TableHead>登记日期</TableHead>
+                  <TableHead>人员</TableHead>
+                  <TableHead>状态</TableHead>
                   <TableHead>国家</TableHead>
-                  <TableHead>达人名称</TableHead>
+                  <TableHead>广告户</TableHead>
+                  <TableHead>达人</TableHead>
                   <TableHead>VID</TableHead>
                   <TableHead>授权码</TableHead>
                   <TableHead>产品</TableHead>
-                  <TableHead>广告户</TableHead>
-                  <TableHead>状态</TableHead>
+                  <TableHead>登记日期</TableHead>
                   <TableHead>错误信息</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1149,7 +1217,7 @@ function AuthorizePage() {
                 {visibleMaterials.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={10} className="h-24 text-center text-sm text-muted-foreground">
-                      暂无素材数据
+                      {materials.length === 0 ? "暂无素材数据" : "没有符合筛选的素材"}
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -1180,21 +1248,21 @@ function AuthorizePage() {
               </TableBody>
             </Table>
           </div>
-          {visibleMaterials.length > PAGE_SIZE && (
-            <div className="flex items-center justify-between mt-3 text-xs text-muted-foreground">
-              <div>
-                第 {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, visibleMaterials.length)} / 共 {visibleMaterials.length} 条
+          {visibleMaterials.length > pageSize && (
+            <nav aria-label="素材分页" className="flex items-center justify-between pt-2 text-xs text-muted-foreground">
+              <div className="tabular-nums">
+                {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, visibleMaterials.length)} / {visibleMaterials.length}
               </div>
               <div className="flex items-center gap-2">
-                <Button size="sm" variant="outline" className="h-7" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                <Button size="sm" variant="outline" className="h-7" aria-label="上一页" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
                   <ChevronLeft className="h-3.5 w-3.5" />
                 </Button>
-                <span>{page} / {pageCount}</span>
-                <Button size="sm" variant="outline" className="h-7" disabled={page >= pageCount} onClick={() => setPage((p) => Math.min(pageCount, p + 1))}>
+                <span className="tabular-nums">{page} / {pageCount}</span>
+                <Button size="sm" variant="outline" className="h-7" aria-label="下一页" disabled={page >= pageCount} onClick={() => setPage((p) => Math.min(pageCount, p + 1))}>
                   <ChevronRight className="h-3.5 w-3.5" />
                 </Button>
               </div>
-            </div>
+            </nav>
           )}
         </CardContent>
       </Card>
@@ -1212,14 +1280,17 @@ function MaterialRow({
   onAssignCountry: (country: string) => void;
 }) {
   const isWarn = m.status === "无授权账号";
+  const adv = m.advertiser_name ? `${m.advertiser_name}${m.advertiser_id && m.advertiser_id !== m.advertiser_name ? ` · ${m.advertiser_id}` : ""}` : "";
   return (
-    <TableRow className={cn(isWarn && "bg-red-50/60 hover:bg-red-50")}>
-      <TableCell className="whitespace-nowrap">{m.staff_name}</TableCell>
-      <TableCell className="whitespace-nowrap text-xs">{m.register_date}</TableCell>
+    <TableRow className={cn("h-10 [&>td]:py-1 [&>td]:whitespace-nowrap", isWarn && "bg-red-50/60 hover:bg-red-50")}>
+      <TableCell>{m.staff_name}</TableCell>
+      <TableCell>
+        <StatusBadge status={m.status as MaterialStatus} />
+      </TableCell>
       <TableCell>
         {isWarn ? (
           <Select value="" onValueChange={onAssignCountry}>
-            <SelectTrigger className="h-7 w-28 text-xs">
+            <SelectTrigger className="h-7 w-28 text-xs" aria-label={`为 ${m.vid} 指派国家`}>
               <SelectValue placeholder={m.country || "选择"} />
             </SelectTrigger>
             <SelectContent>
@@ -1234,28 +1305,49 @@ function MaterialRow({
           m.country
         )}
       </TableCell>
-      <TableCell className="whitespace-nowrap">{m.creator_name}</TableCell>
+      <TableCell className="text-xs max-w-[180px] truncate" title={adv || undefined}>
+        {m.advertiser_name ?? <span className="text-muted-foreground">—</span>}
+      </TableCell>
+      <TableCell className="max-w-[160px] truncate" title={m.creator_name}>{m.creator_name}</TableCell>
       <TableCell className="font-mono text-xs">{m.vid}</TableCell>
       <TableCell className="font-mono text-xs max-w-[160px] truncate" title={m.auth_code}>
         {m.auth_code}
       </TableCell>
-      <TableCell className="whitespace-nowrap">{m.product}</TableCell>
-      <TableCell className="text-xs">
-        {m.advertiser_name ? (
-          <>
-            <div>{m.advertiser_name}</div>
-            <div className="text-muted-foreground font-mono">{m.advertiser_id}</div>
-          </>
-        ) : (
-          <span className="text-muted-foreground">—</span>
-        )}
-      </TableCell>
-      <TableCell>
-        <StatusBadge status={m.status as MaterialStatus} />
-      </TableCell>
-      <TableCell className="text-xs text-red-600 max-w-[200px] truncate" title={m.error_message}>
+      <TableCell className="max-w-[120px] truncate" title={m.product}>{m.product}</TableCell>
+      <TableCell className="text-xs tabular-nums">{m.register_date}</TableCell>
+      <TableCell className="text-xs text-red-600 max-w-[220px] truncate" title={m.error_message}>
         {m.error_message ?? ""}
       </TableCell>
     </TableRow>
+  );
+}
+
+/** 局部说明：「?」图标，悬停 / 键盘聚焦 / 点按都能打开。 */
+function HelpTip({ label, text }: { label: string; text: string }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={`${label}：${text}`}
+          className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onMouseEnter={() => setOpen(true)}
+          onMouseLeave={() => setOpen(false)}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setOpen(false)}
+          // 点按只打开：聚焦已打开时 Radix 默认的切换会把它关掉（手机点按 = 聚焦 + 点击）
+          onClick={(e) => {
+            e.preventDefault();
+            setOpen(true);
+          }}
+        >
+          <HelpCircle className="h-3.5 w-3.5" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 text-xs leading-relaxed" onOpenAutoFocus={(e) => e.preventDefault()}>
+        {text}
+      </PopoverContent>
+    </Popover>
   );
 }
