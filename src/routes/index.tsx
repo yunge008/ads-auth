@@ -24,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Download,
   RefreshCw,
@@ -202,6 +203,29 @@ function AuthorizeLogPanel({ refreshKey }: { refreshKey: number }) {
   );
 }
 
+/** 统计表人员行的异常说明：悬停 / 键盘聚焦 / 点按都能打开。 */
+function IssueTip({ text }: { text: string }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={text}
+          className="ml-1 inline-flex h-5 w-5 items-center justify-center rounded align-middle text-amber-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onMouseEnter={() => setOpen(true)}
+          onMouseLeave={() => setOpen(false)}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setOpen(false)}
+        >
+          <AlertTriangle className="h-3.5 w-3.5" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-80 text-xs break-all">{text}</PopoverContent>
+    </Popover>
+  );
+}
+
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
@@ -225,6 +249,10 @@ function AuthorizePage() {
   const [authTargetIds, setAuthTargetIds] = React.useState<Set<string> | null>(null);
   // 「待授权账户」面板开关：与素材列表筛选是 AND 关系，默认每次拉取素材后全部开启
   const [enabledAdvertiserIds, setEnabledAdvertiserIds] = React.useState<Set<string>>(new Set());
+  // 本次拉取每个请求人员的结果：0 条 / sheet 未找到 / 失败的人也要在统计表里出现，不能静默消失
+  const [fetchReport, setFetchReport] = React.useState<
+    Array<{ name: string; sheet: string; count: number; issue?: string }>
+  >([]);
   const toggleAdvertiserEnabled = (id: string) => {
     setEnabledAdvertiserIds((prev) => {
       const next = new Set(prev);
@@ -290,14 +318,18 @@ function AuthorizePage() {
       byStaff.set(m.staff_name, row);
     }
     const countries = Array.from(countrySet).sort();
+    for (const f of fetchReport) {
+      if (!byStaff.has(f.name)) byStaff.set(f.name, { pendingByCountry: new Map(), warning: 0, total: 0 });
+    }
+    const issueByStaff = new Map(fetchReport.filter((f) => f.issue).map((f) => [f.name, f.issue as string]));
     const rows = Array.from(byStaff.entries())
-      .map(([staff_name, v]) => ({ staff_name, ...v }))
+      .map(([staff_name, v]) => ({ staff_name, ...v, issue: issueByStaff.get(staff_name) }))
       .sort((a, b) => a.staff_name.localeCompare(b.staff_name));
     const colTotals = countries.map((c) => rows.reduce((s, r) => s + (r.pendingByCountry.get(c) ?? 0), 0));
     const grandTotal = rows.reduce((s, r) => s + r.total, 0);
     const warningTotal = rows.reduce((s, r) => s + r.warning, 0);
     return { statsRows: rows, statsCountries: countries, colTotals, grandTotal, warningTotal };
-  }, [materials]);
+  }, [materials, fetchReport]);
 
 
   // Filter only (NO dynamic re-sort — order is frozen at fetch time)
@@ -413,6 +445,20 @@ function AuthorizePage() {
         materials: [...staffRows, ...archiveRows.filter((m) => !staffKeys.has(`${m.vid}__${m.auth_code}`))],
         missing_sheets: [...missing],
       };
+      setFetchReport(
+        results.map((r, idx) => {
+          const sheet = activeStaff[idx].resolved_sheet_name || activeStaff[idx].sheet_name;
+          const count = (r.resp?.materials ?? []).filter((m) => m.sheet_name !== ARCHIVE).length;
+          const issue = r.err
+            ? `拉取失败：${r.err}`
+            : r.resp?.missing_sheets?.includes(sheet)
+              ? `飞书无 sheet「${sheet}」`
+              : count === 0
+                ? `sheet「${sheet}」无符合条件的行`
+                : undefined;
+          return { name: r.name, sheet, count, issue };
+        }),
+      );
       if (failed.length) {
         const archiveLost = includeDone && results[0].err ? "（含「授权记录」归档）" : "";
         toast.error(`${failed.length} 人拉取失败${archiveLost}，数据不完整：${failed.map((r) => `${r.name}：${r.err}`).join("；")}`, { duration: 20000 });
@@ -967,6 +1013,7 @@ function AuthorizePage() {
                             {r.warning > 0 && (
                               <span className="ml-1 text-xs text-red-600">({r.warning}警告)</span>
                             )}
+                            {r.issue && <IssueTip text={r.issue} />}
                           </TableCell>
                           {statsCountries.map((c) => {
                             const v = r.pendingByCountry.get(c) ?? 0;
