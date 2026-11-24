@@ -183,6 +183,33 @@ async function returnsFor(shop: Shop, orderIds: string[], errors: string[]): Pro
   return out;
 }
 
+
+/** 入库用：按订单号取**全部**退货退款申请（不按状态过滤），逐 SKU 行保留状态，口径在转换层判断。
+ *  （后台订单导出「Cancelation/Return Type」与只取未拒绝/未取消申请的口径对不上，2026-11-25 TH 8–9 月对账发现，见 docs/AUTO_DATA_PLAN.md） */
+type ReturnLine = { return_id: string; return_status: string; return_type: string; sku_id: string; refund_total: number };
+async function returnsAllFor(shop: Shop, orderIds: string[], errors: string[]): Promise<Map<string, ReturnLine[]>> {
+  const out = new Map<string, ReturnLine[]>();
+  if (!orderIds.length) return out;
+  let tok = "";
+  do {
+    const r = await ttsCall<{ return_orders?: Array<ReturnOrder & { return_id?: string }>; next_page_token?: string }>({
+      method: "POST", path: "/return_refund/202602/returns/search", accessToken: shop.access_token, shopCipher: shop.shop_cipher,
+      query: { page_size: 50, page_token: tok }, body: { order_ids: orderIds },
+    });
+    if (r.code !== 0) { errors.push(apiErr("returns/search", r)); break; }
+    for (const ro of r.data?.return_orders ?? []) {
+      if (!ro.order_id) continue;
+      const list = out.get(ro.order_id) ?? [];
+      for (const li of ro.return_line_items ?? []) {
+        list.push({ return_id: ro.return_id ?? "", return_status: ro.return_status ?? "", return_type: ro.return_type ?? "", sku_id: li.sku_id ?? "", refund_total: money(cents(li.refund_amount?.refund_total)) });
+      }
+      out.set(ro.order_id, list);
+    }
+    tok = r.data?.next_page_token ?? "";
+  } while (tok);
+  return out;
+}
+
 function orderRows(o: Order, shop: Shop, th: boolean, en?: Enrich): Cell[][] {
   const p = o.payment ?? {};
   const [st, sub] = ORDER_STATUS[o.status ?? ""] ?? [o.status ?? "", o.status ?? ""];
@@ -907,7 +934,7 @@ async function syncOrders(shop: Shop, started: number) {
     });
     if (r.code !== 0) { errors.push(apiErr("orders/search", r)); break; }
     const orders = r.data?.orders ?? [];
-    const returns = await returnsFor(shop, orders.map((o) => o.id), errors);
+    const returns = await returnsAllFor(shop, orders.map((o) => o.id), errors);
     if (errors.some((e) => e.startsWith("returns/search"))) break; // 退货信息缺了不入库，下轮重试本页
     const rows = orders.map((o) => {
       unknownOrderFields(o, found);
@@ -915,7 +942,7 @@ async function syncOrders(shop: Shop, started: number) {
       return {
         shop_id: shop.shop_id, order_id: o.id, status: o.status ?? null,
         create_time: iso(o.create_time), update_time: iso((o as { update_time?: number }).update_time),
-        raw: prune(stripBuyerPii(o)), returns: ret ? [...ret.entries()].map(([sku_id, a]) => ({ sku_id, qty: a.qty, refund_total: money(a.refund) })) : null,
+        raw: prune(stripBuyerPii(o)), returns: ret?.length ? ret : null,
         synced_at: new Date().toISOString(),
       };
     });
