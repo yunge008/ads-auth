@@ -8,11 +8,15 @@
 //   products   最新商品信息（在售），列名 = 后台「批量编辑-全部信息」模板，最右加「活动价」（来自 activity_id 指定的活动）
 //   affiliate  月度联盟订单（按下单时间），SKU 级；前端按 group 字段拆成「达人」「服务商」两张表
 //   samples    待审申样 + 审核建议（推荐批准 / 待审核 / 不批准），只读，不调审样接口
+//   sync       每日增量入库（part=orders|finance）：订单按 update_time、结算单按 statement_time 增量拉，原文写入
+//              tts_orders / tts_finance_statements / tts_finance_tx，进度写 tts_sync_state。允许 cron（x-cron-key）调用。
+//              接口里出现口径表未登记、且金额非 0 的字段 → 记入 tts_sync_state.unknown_fields 并返回 new_unknown（由路由发飞书）。
 //
 // 所有 TTS 调用都经 _shared/tts.ts 的只读闸门；本函数只用 GET 和 /search 类 POST。
 // 订单导出另用 Search Returns 补退货件数/退款金额/Return/Refund 标记，用 Get Warehouse List 补仓库名称。
 // 鉴权：requireAdmin（与 tts-p0-probe 一致，仅管理员）。
 import { admin, requireAdmin } from "../_shared/auth.ts";
+import { cronAuthed } from "../_shared/cron.ts";
 import { corsHeaders } from "../_shared/feishu.ts";
 import { ttsCall, type TtsResult } from "../_shared/tts.ts";
 
@@ -775,22 +779,239 @@ async function exportSamples(shop: Shop, b: Record<string, unknown>, started: nu
     meta: { status, unfulfilled_after_days: UNFULFILLED_AFTER_DAYS, missing_currencies: [...missingCur], rate_currencies: [...rates.keys()] }, errors,
   };
 }
+
+// ═══ 6. 每日增量入库（kind=sync）═══════════════════════════════════════════
+// 存接口原文（去空值/0），口径映射放在汇总计算层。首次从 SYNC_FROM 回填，分片续跑；之后每轮只拉增量。
+const SYNC_FROM = "2026-08-01"; // 负责人 2026-11-25：对账用过去三个月
+const ORDER_OVERLAP_S = 2 * 3600; // 订单增量窗口往回重叠 2 小时，防止分页期间被更新的订单漏掉
+const STMT_OVERLAP_S = 2 * 86400; // 结算单往回重叠 2 天
+
+/** 去掉 null / "" / 0 / "0.00" / 空对象，保留数组与布尔 */
+function prune(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(prune);
+  if (v && typeof v === "object") {
+    const o: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+      const p = prune(x);
+      if (p === null || p === undefined || p === "" || p === 0) continue;
+      if (typeof p === "string" && /^-?0+(\.0+)?$/.test(p)) continue;
+      if (typeof p === "object" && !Array.isArray(p) && !Object.keys(p as object).length) continue;
+      o[k] = p;
+    }
+    return o;
+  }
+  return v;
+}
+const nonZero = (v: unknown) => (typeof v === "number" || typeof v === "string") && v !== "" && Number(v) !== 0 && isFinite(Number(v));
+
+// —— 未登记字段检测（不静默：负责人 2026-11-25 要求接口/表头列项变化必须提示）——
+const KNOWN_FIN = new Set(API_KEYS);
+const FIN_TOP_KNOWN = new Set(["settlement_amount", "revenue_amount", "shipping_cost_amount", "fee_tax_amount", "adjustment_amount", "net_sales_amount", "reserve_amount"]);
+function unknownFinFields(t: Tx, out: Map<string, string>) {
+  for (const [g, get] of API_GROUPS) {
+    const src = get(t);
+    if (!src) continue;
+    for (const [k, v] of Object.entries(src)) {
+      if (typeof v === "object") continue;
+      if (nonZero(v) && !KNOWN_FIN.has(`${g}.${k}`)) out.set(`finance.${g}.${k}`, `${t.id ?? ""}=${v}`);
+    }
+  }
+  for (const [k, v] of Object.entries(t)) {
+    if (/_amount$|_fee$/.test(k) && nonZero(v) && !FIN_TOP_KNOWN.has(k)) out.set(`finance.top.${k}`, `${t.id ?? ""}=${v}`);
+  }
+}
+const PAY_KNOWN = new Set(["currency", "sub_total", "shipping_fee", "seller_discount", "platform_discount", "total_amount", "original_total_product_price",
+  "original_shipping_fee", "shipping_fee_seller_discount", "shipping_fee_platform_discount", "shipping_fee_cofunded_discount", "tax",
+  "payment_platform_discount", "product_tax", "shipping_fee_tax"]);
+const LI_MONEY = /price|discount|fee|amount|tax/;
+const LI_KNOWN = new Set(["original_price", "sale_price", "seller_discount", "platform_discount", "currency"]);
+function unknownOrderFields(o: Order, out: Map<string, string>) {
+  for (const [k, v] of Object.entries(o.payment ?? {})) if (nonZero(v) && !PAY_KNOWN.has(k)) out.set(`orders.payment.${k}`, `${o.id}=${v}`);
+  for (const li of o.line_items ?? []) {
+    for (const [k, v] of Object.entries(li as Record<string, unknown>)) {
+      if (LI_MONEY.test(k) && nonZero(v) && !LI_KNOWN.has(k)) out.set(`orders.line_item.${k}`, `${o.id}=${v}`);
+    }
+  }
+}
+
+type SyncState = { watermark: string | null; cursor: Record<string, unknown> | null; unknown_fields: Record<string, unknown> };
+async function loadState(shopId: string, kind: string): Promise<SyncState> {
+  const { data, error } = await admin().from("tts_sync_state").select("watermark,cursor,unknown_fields").eq("shop_id", shopId).eq("kind", kind).maybeSingle();
+  if (error) throw error;
+  return (data as SyncState) ?? { watermark: null, cursor: null, unknown_fields: {} };
+}
+async function saveState(shopId: string, kind: string, st: SyncState, extra: Record<string, unknown>) {
+  const { error } = await admin().from("tts_sync_state").upsert({
+    shop_id: shopId, kind, watermark: st.watermark, cursor: st.cursor, unknown_fields: st.unknown_fields, last_run_at: new Date().toISOString(), ...extra,
+  }, { onConflict: "shop_id,kind" });
+  if (error) throw error;
+}
+/** 合并新发现的未登记字段，返回本次首次出现的 */
+function mergeUnknown(st: SyncState, found: Map<string, string>): string[] {
+  const fresh: string[] = [];
+  for (const [path, sample] of found) {
+    if (st.unknown_fields[path]) continue;
+    st.unknown_fields[path] = { first_seen: new Date().toISOString(), sample };
+    fresh.push(`${path}（例 ${sample}）`);
+  }
+  return fresh;
+}
+const iso = (s: number | undefined) => (s ? new Date(s * 1000).toISOString() : null);
+/** SYNC_FROM（店铺本地 0 点）→ 秒 */
+function syncFromSec(shop: Shop): number {
+  const [y, m, d] = SYNC_FROM.split("-").map(Number);
+  return Date.UTC(y, m - 1, d) / 1000 - offsetOf(shop) * 3600;
+}
+
+type OrdCur = { ge: number; lt: number; page_token: string; done: number };
+async function syncOrders(shop: Shop, started: number) {
+  const st = await loadState(shop.shop_id, "orders");
+  const errors: string[] = [];
+  const found = new Map<string, string>();
+  let cur = st.cursor as OrdCur | null;
+  if (!cur) {
+    const wm = st.watermark ? Date.parse(st.watermark) / 1000 - ORDER_OVERLAP_S : syncFromSec(shop);
+    cur = { ge: Math.floor(wm), lt: Math.floor(Date.now() / 1000) - 60, page_token: "", done: 0 };
+  }
+  let finished = false;
+  do {
+    const r = await ttsCall<{ orders?: Order[]; next_page_token?: string }>({
+      method: "POST", path: "/order/202309/orders/search", accessToken: shop.access_token, shopCipher: shop.shop_cipher,
+      query: { page_size: 100, sort_field: "update_time", sort_order: "ASC", page_token: cur.page_token },
+      body: { update_time_ge: cur.ge, update_time_lt: cur.lt },
+    });
+    if (r.code !== 0) { errors.push(apiErr("orders/search", r)); break; }
+    const orders = r.data?.orders ?? [];
+    const returns = await returnsFor(shop, orders.map((o) => o.id), errors);
+    if (errors.some((e) => e.startsWith("returns/search"))) break; // 退货信息缺了不入库，下轮重试本页
+    const rows = orders.map((o) => {
+      unknownOrderFields(o, found);
+      const ret = returns.get(o.id);
+      return {
+        shop_id: shop.shop_id, order_id: o.id, status: o.status ?? null,
+        create_time: iso(o.create_time), update_time: iso((o as { update_time?: number }).update_time),
+        raw: prune(o), returns: ret ? [...ret.entries()].map(([sku_id, a]) => ({ sku_id, qty: a.qty, refund_total: money(a.refund) })) : null,
+        synced_at: new Date().toISOString(),
+      };
+    });
+    for (let i = 0; i < rows.length; i += 200) {
+      const { error } = await admin().from("tts_orders").upsert(rows.slice(i, i + 200), { onConflict: "shop_id,order_id" });
+      if (error) { errors.push(`tts_orders 写入失败：${error.message}`); break; }
+    }
+    if (errors.length) break;
+    cur.done += orders.length;
+    cur.page_token = r.data?.next_page_token ?? "";
+    if (!cur.page_token) finished = true;
+  } while (!finished && Date.now() - started < SOFT_MS);
+  const fresh = mergeUnknown(st, found);
+  if (finished) { st.watermark = new Date(cur.lt * 1000).toISOString(); st.cursor = null; } else st.cursor = cur;
+  await saveState(shop.shop_id, "orders", st, errors.length ? { last_error: errors.join("；").slice(0, 2000) } : { last_error: null, ...(finished ? { last_ok_at: new Date().toISOString() } : {}) });
+  return { part: "orders", finished: finished && !errors.length, done: cur.done, window: [iso(cur.ge), iso(cur.lt)], errors, new_unknown: fresh };
+}
+
+type FinSyncCur = { lt: number; pending: Array<{ id: string; time: number; currency: string }>; idx: number; page_token: string; tx: number };
+async function syncFinance(shop: Shop, started: number) {
+  const st = await loadState(shop.shop_id, "finance");
+  const errors: string[] = [];
+  const found = new Map<string, string>();
+  let cur = st.cursor as FinSyncCur | null;
+  if (!cur) {
+    const ge = st.watermark ? Math.floor(Date.parse(st.watermark) / 1000) - STMT_OVERLAP_S : syncFromSec(shop);
+    const lt = Math.floor(Date.now() / 1000);
+    const list: Stmt[] = [];
+    let tok = "";
+    do {
+      const r = await ttsCall<{ statements?: Stmt[]; next_page_token?: string }>({
+        method: "GET", path: "/finance/202309/statements", accessToken: shop.access_token, shopCipher: shop.shop_cipher,
+        query: { statement_time_ge: ge, statement_time_lt: lt, page_size: 100, sort_field: "statement_time", sort_order: "ASC", page_token: tok },
+      });
+      if (r.code !== 0) { errors.push(apiErr("statements", r)); break; }
+      list.push(...(r.data?.statements ?? []));
+      tok = r.data?.next_page_token ?? "";
+    } while (tok);
+    if (errors.length) {
+      await saveState(shop.shop_id, "finance", st, { last_error: errors.join("；").slice(0, 2000) });
+      return { part: "finance", finished: false, done: 0, errors, new_unknown: [] as string[] };
+    }
+    if (list.length) {
+      const { error } = await admin().from("tts_finance_statements").upsert(list.map((s) => ({
+        shop_id: shop.shop_id, statement_id: s.id, statement_time: iso(s.statement_time ?? s.create_time), currency: s.currency ?? null, raw: prune(s),
+      })), { onConflict: "shop_id,statement_id", ignoreDuplicates: false });
+      if (error) throw new Error(`tts_finance_statements 写入失败：${error.message}`);
+    }
+    // 只拉交易明细还没入库的结算单（结算单生成后内容不变）
+    const ids = list.map((s) => s.id);
+    const synced = new Set<string>();
+    for (let i = 0; i < ids.length; i += 200) {
+      const { data, error } = await admin().from("tts_finance_statements").select("statement_id")
+        .eq("shop_id", shop.shop_id).in("statement_id", ids.slice(i, i + 200)).not("tx_synced_at", "is", null);
+      if (error) throw error;
+      for (const d of data ?? []) synced.add((d as { statement_id: string }).statement_id);
+    }
+    cur = { lt, idx: 0, page_token: "", tx: 0, pending: list.filter((s) => !synced.has(s.id)).map((s) => ({ id: s.id, time: Number(s.statement_time ?? s.create_time ?? 0), currency: s.currency ?? "" })) };
+  }
+  while (cur.idx < cur.pending.length && Date.now() - started < SOFT_MS && !errors.length) {
+    const sm = cur.pending[cur.idx];
+    const r = await ttsCall<{ transactions?: Tx[]; next_page_token?: string }>({
+      method: "GET", path: `/finance/202501/statements/${sm.id}/statement_transactions`, accessToken: shop.access_token, shopCipher: shop.shop_cipher,
+      query: { page_size: 100, sort_field: "order_create_time", sort_order: "ASC", page_token: cur.page_token },
+    });
+    if (r.code !== 0) { errors.push(apiErr(`statement_transactions ${sm.id}`, r)); break; }
+    const txs = r.data?.transactions ?? [];
+    const rows = txs.map((t) => {
+      unknownFinFields(t, found);
+      const isOrder = (t.type ?? "ORDER") === "ORDER";
+      return {
+        shop_id: shop.shop_id, tx_id: String(t.id ?? `${sm.id}:${t.order_id ?? ""}:${t.adjustment_id ?? ""}`), statement_id: sm.id,
+        statement_time: iso(sm.time), tx_type: t.type ?? null,
+        order_id: isOrder ? (t.order_id ?? null) : (t.adjustment_order_id ?? t.associated_order_id ?? t.order_id ?? null),
+        order_create_time: iso(Number((t as { order_create_time?: number }).order_create_time ?? 0) || undefined),
+        raw: prune(t), synced_at: new Date().toISOString(),
+      };
+    });
+    if (rows.length) {
+      const { error } = await admin().from("tts_finance_tx").upsert(rows, { onConflict: "shop_id,tx_id" });
+      if (error) { errors.push(`tts_finance_tx 写入失败：${error.message}`); break; }
+    }
+    cur.tx += rows.length;
+    cur.page_token = r.data?.next_page_token ?? "";
+    if (!cur.page_token) {
+      const { count } = await admin().from("tts_finance_tx").select("tx_id", { count: "exact", head: true }).eq("shop_id", shop.shop_id).eq("statement_id", sm.id);
+      const { error } = await admin().from("tts_finance_statements").update({ tx_synced_at: new Date().toISOString(), tx_count: count ?? null })
+        .eq("shop_id", shop.shop_id).eq("statement_id", sm.id);
+      if (error) { errors.push(`结算单 ${sm.id} 标记失败：${error.message}`); break; }
+      cur.idx++;
+    }
+  }
+  const fresh = mergeUnknown(st, found);
+  const finished = cur.idx >= cur.pending.length && !errors.length;
+  if (finished) { st.watermark = new Date(cur.lt * 1000).toISOString(); st.cursor = null; } else st.cursor = cur;
+  await saveState(shop.shop_id, "finance", st, errors.length ? { last_error: errors.join("；").slice(0, 2000) } : { last_error: null, ...(finished ? { last_ok_at: new Date().toISOString() } : {}) });
+  return { part: "finance", finished, done: cur.idx, total: cur.pending.length, tx: cur.tx, errors, new_unknown: fresh };
+}
+
 const normHandle = (h: string) => String(h ?? "").trim().replace(/^@+/, "").replace(/\s+/g, "").toLowerCase();
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   const started = Date.now();
   try {
-    await requireAdmin(req);
     const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
-    const shop = await loadShop(b.shop_id);
     const kind = String(b.kind ?? "");
+    // cron 只放行 sync；其余一律管理员口令
+    if (!(kind === "sync" && (await cronAuthed(req)))) await requireAdmin(req);
+    const shop = await loadShop(b.shop_id);
+    if (kind === "sync") {
+      if (b.part === "orders") return json(await syncOrders(shop, started));
+      if (b.part === "finance") return json(await syncFinance(shop, started));
+      bad("sync 的 part 只能是 orders / finance");
+    }
     if (kind === "orders") return json(await exportOrders(shop, b, started));
     if (kind === "finance") return json(await exportFinance(shop, b, started));
     if (kind === "products") return json(await exportProducts(shop, b, started));
     if (kind === "affiliate") return json(await exportAffiliate(shop, b, started));
     if (kind === "samples") return json(await exportSamples(shop, b, started));
-    bad("kind 只能是 orders / finance / products / affiliate / samples");
+    bad("kind 只能是 orders / finance / products / affiliate / samples / sync");
   } catch (error) {
     const status = (error as Error & { status?: number }).status ?? 400;
     return json({ error: (error as Error).message }, status);

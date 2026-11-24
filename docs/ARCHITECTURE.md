@@ -213,3 +213,9 @@ GMV Max 导入记录，逐商品一行：batch_id / kind(excel|single|copy) / so
 - `ai_reader`：按列授 SELECT，列名匹配 token/secret/passcode/password/cookie/credential/api_key/app_key/device_id 的不授；开 RLS 的表加 `ai_reader_select` 只读策略（首次执行：834 列授权、61 条策略、10 列屏蔽）。
 - 本地 PG16 实测：正确口令可读；错/空口令、敏感列、关闭只读、借 SECURITY DEFINER 函数删数据、CTE 写均被拒；anon 直接读表与调 ai_key_ok 被拒。
 - 第一版「网站服务端路由 /api/public/hooks/ai-db-read」已删除（需发布才生效，不符合「核验后台最新版本」）。
+
+### TikTok Shop 订单/财务每日入库（2026-11-25，migration 20261125120000；规则见 docs/AUTO_DATA_PLAN.md）
+- pg_cron `tts-daily-sync`（每小时第 17 分）→ `/api/public/hooks/tts-sync-cron`（x-cron-key；管理员可带口令手动触发，body `{shop_ids?, parts?}`）→ 逐店逐部分循环调 `tts-export` `kind=sync part=orders|finance`（cron 只放行 sync），单轮 8 分钟，未完成的从 `tts_sync_state.cursor` 下轮续跑。
+- 范围：`tts_shops.daily_sync = true`（先 PH、TH）。首次从 2026-08-01（店铺本地 0 点）回填。
+- 订单：`/order/202309/orders/search` 按 `update_time` 增量（往回重叠 2 小时），附 Search Returns 退货汇总，原文 upsert `tts_orders`。结算：`/finance/202309/statements` 按 `statement_time`（重叠 2 天）upsert `tts_finance_statements`；交易明细未入库的结算单逐张拉 `/finance/202501/statements/{id}/statement_transactions` upsert `tts_finance_tx`，完成后标 `tx_synced_at`。
+- 原文去空值/0 存 jsonb；口径映射在汇总计算层。未登记且非 0 的字段（结算分项、订单 payment / line_item 金额字段）记入 `tts_sync_state.unknown_fields`，首次出现时路由发飞书；有报错也发飞书。
