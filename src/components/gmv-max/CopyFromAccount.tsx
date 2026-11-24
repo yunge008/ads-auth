@@ -4,7 +4,7 @@
 // 不复制、标「手动」：手选视频组。全店商品组以 商品ID=ALL 复制。商品 >50 / 视频账号 >20 由服务端先降级建组再 update 补全。
 import * as React from "react";
 import * as XLSX from "xlsx";
-import { Copy, Download, Play, HelpCircle, PackageSearch } from "lucide-react";
+import { Copy, Download, Play, HelpCircle, PackageSearch, RotateCcw } from "lucide-react";
 import { MultiSelect } from "@/components/MultiSelect";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -159,6 +159,7 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
     }
   };
   const [rows, setRows] = React.useState<CopyRow[]>([]);
+  const rowsState = rows;
   const [loading, setLoading] = React.useState("");
   const [running, setRunning] = React.useState(false);
   const [rawDump, setRawDump] = React.useState<unknown[]>([]);
@@ -234,12 +235,22 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
   const allSelected = copyable.length > 0 && copyable.every((r) => r.selected);
   const toggleAll = () => setRows((p) => p.map((r) => (r.status === "pending" ? { ...r, selected: !allSelected } : r)));
   const selectedCount = rows.filter((r) => r.selected && r.status === "pending").length;
+  const failedCount = rows.filter((r) => r.status === "error").length;
   const visible = rows.filter((r) => showAll || matchFilter(r, filters) || r.status !== "pending");
 
-  const run = async () => {
+  // retryFailed：把上次失败的组恢复为待复制并只勾它们，直接再跑一遍（不用重新读取）
+  const run = async (retryFailed = false) => {
     if (!dstId) return toast.error("请选择目标广告户");
     if (dstId === srcId) return toast.error("目标户不能和源户相同");
     if (!dstBc) return toast.error("目标户没有可用的 BC");
+    let rows = rowsState;
+    if (retryFailed) {
+      rows = rowsState.map((r) => (r.status === "error"
+        ? { ...r, status: "pending" as Status, selected: true, note: "", newId: undefined, products: undefined }
+        : r.status === "pending" ? { ...r, selected: false } : r));
+      setRows(rows);
+    }
+    const selectedCount = rows.filter((r) => r.selected && r.status === "pending").length;
     if (!selectedCount) return;
     setRunning(true);
     let ok = 0;
@@ -367,9 +378,14 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
               {authBusy ? "授权查询中…" : holder?.err ? `授权：${holder.err}` : dstHolds ? "已独占授权" : `授权在：${holder?.name ?? holder?.id ?? "无"}`}
             </span>
           )}
-          <Button size="sm" onClick={run} disabled={running || !!loading || !selectedCount || !dstId || !dstBc}>
+          <Button size="sm" onClick={() => run()} disabled={running || !!loading || !selectedCount || !dstId || !dstBc}>
             <Play className="h-4 w-4 mr-1" />{running ? "复制中…" : `复制（${selectedCount}）`}
           </Button>
+          {failedCount > 0 && (
+            <Button size="sm" variant="outline" onClick={() => run(true)} disabled={running || !!loading || !dstId || !dstBc}>
+              <RotateCcw className="h-4 w-4 mr-1" />重试失败（{failedCount}）
+            </Button>
+          )}
           {rows.length > 0 && (
             <Button size="sm" variant="outline" onClick={download}><Download className="h-4 w-4 mr-1" />下载</Button>
           )}

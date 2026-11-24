@@ -188,7 +188,8 @@ export async function spendReport(db: SupabaseClient, advertiserId: string, days
         method: "GET",
         params: {
           advertiser_id: advertiserId, store_ids: JSON.stringify([storeId]),
-          dimensions: JSON.stringify(["campaign_id", "item_group_id"]), metrics: JSON.stringify(["cost"]),
+          // 实测：带 item_group_id 维度时必须用 campaign_id 过滤，筛选只需组级消耗 → 只按 campaign_id 查
+          dimensions: JSON.stringify(["campaign_id"]), metrics: JSON.stringify(["cost"]),
           start_date: start, end_date: end, page: String(page), page_size: "1000", filtering: "{}",
         },
       });
