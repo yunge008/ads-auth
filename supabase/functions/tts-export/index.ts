@@ -802,6 +802,17 @@ function prune(v: unknown): unknown {
   }
   return v;
 }
+/** 买家个人信息不入库（与订单导出口径一致：买家用户名/收件人/电话/详细地址不导出）。
+ *  只保留收件地址的 postal_code（接口已打码）、region_code、district_info（省市区，用于 Country/Province/District 列）。 */
+const ADDR_KEEP = new Set(["postal_code", "region_code", "district_info"]);
+function stripBuyerPii(o: Order): Order {
+  const { buyer_email: _e, user_id: _u, ...rest } = o as Order & { buyer_email?: unknown; user_id?: unknown };
+  const addr = o.recipient_address as Record<string, unknown> | undefined;
+  return {
+    ...rest,
+    recipient_address: addr ? Object.fromEntries(Object.entries(addr).filter(([k]) => ADDR_KEEP.has(k))) : undefined,
+  } as Order;
+}
 const nonZero = (v: unknown) => (typeof v === "number" || typeof v === "string") && v !== "" && Number(v) !== 0 && isFinite(Number(v));
 
 // —— 未登记字段检测（不静默：负责人 2026-11-25 要求接口/表头列项变化必须提示）——
@@ -890,7 +901,7 @@ async function syncOrders(shop: Shop, started: number) {
       return {
         shop_id: shop.shop_id, order_id: o.id, status: o.status ?? null,
         create_time: iso(o.create_time), update_time: iso((o as { update_time?: number }).update_time),
-        raw: prune(o), returns: ret ? [...ret.entries()].map(([sku_id, a]) => ({ sku_id, qty: a.qty, refund_total: money(a.refund) })) : null,
+        raw: prune(stripBuyerPii(o)), returns: ret ? [...ret.entries()].map(([sku_id, a]) => ({ sku_id, qty: a.qty, refund_total: money(a.refund) })) : null,
         synced_at: new Date().toISOString(),
       };
     });
