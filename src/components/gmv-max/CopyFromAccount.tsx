@@ -4,7 +4,8 @@
 // 不复制、标「手动」：手选视频组。全店商品组以 商品ID=ALL 复制。商品 >50 / 视频账号 >20 由服务端先降级建组再 update 补全。
 import * as React from "react";
 import * as XLSX from "xlsx";
-import { Copy, Download, Play, HelpCircle } from "lucide-react";
+import { Copy, Download, Play, HelpCircle, PackageSearch } from "lucide-react";
+import { MultiSelect } from "@/components/MultiSelect";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,6 +39,7 @@ type CopyRow = {
   nameRoi: number | null;
   infoRoi: number;
   selected: boolean;
+  spend3d: number | null; // 近 3 天消耗（null = 未取到）
   status: Status;
   note: string;
   newId?: string;
@@ -79,6 +81,7 @@ function toRow(c: { campaign_id: string; campaign_name: string; operation_status
     storeBc: info.store_authorized_bc_id != null ? String(info.store_authorized_bc_id) : undefined,
     nameRoi: roiFromName(name),
     selected: false,
+    spend3d: null,
     status: "pending",
     note: "",
   };
@@ -97,6 +100,14 @@ function toRow(c: { campaign_id: string; campaign_name: string; operation_status
   row.selected = c.operation_status === "ENABLE";
   return row;
 }
+
+const FILTER_SPEND = "近3天有消耗";
+const FILTER_ENABLE = "启用中";
+const matchFilter = (r: CopyRow, f: string[]) =>
+  !f.length || (f.includes(FILTER_SPEND) && (r.spend3d ?? 0) > 0) || (f.includes(FILTER_ENABLE) && r.srcStatus === "ENABLE");
+// 筛选决定勾选：符合任一所选条件的可复制组勾上，其余取消
+const applyFilter = (rows: CopyRow[], f: string[]) =>
+  rows.map((r) => (r.status === "pending" ? { ...r, selected: matchFilter(r, f) } : r));
 
 const statusLabel: Record<Status, string> = { manual: "手动", pending: "待复制", running: "复制中…", ok: "成功", partial: "已建·需处理", error: "失败" };
 
@@ -117,6 +128,32 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
   const [srcId, setSrcId] = React.useState("");
   const [dstId, setDstId] = React.useState("");
   const [dstBc, setDstBc] = React.useState("");
+  const [filters, setFilters] = React.useState<string[]>([]);
+  const [showAll, setShowAll] = React.useState(false);
+  const [prodBusy, setProdBusy] = React.useState(false);
+  const changeFilters = (f: string[]) => { setFilters(f); setRows((p) => applyFilter(p, f)); };
+
+  // 目标户店铺里「可投且不在任何启用中 GMV Max 组」的商品
+  const downloadFreeProducts = async () => {
+    if (!dstId) return toast.error("请先选目标广告户");
+    setProdBusy(true);
+    try {
+      const d = await callGmvMaxWrite<{ store_id: string; products: { item_group_id: string; title?: string; status?: string; gmv_max_ads_status?: string }[] }>(
+        { action: "products", advertiser_id: dstId, bc_id: dstBc });
+      const free = d.products.filter((p) => p.status === "AVAILABLE" && p.gmv_max_ads_status !== "OCCUPIED");
+      const aoa = [["商品ID", "商品名称", "状态", "GMV Max 占用"],
+        ...d.products.map((p) => [p.item_group_id, p.title ?? "", p.status ?? "", p.gmv_max_ads_status ?? ""])];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["商品ID", "商品名称"], ...free.map((p) => [p.item_group_id, p.title ?? ""])]), "未在广告组");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), "全部商品");
+      XLSX.writeFile(wb, `店铺商品-${d.store_id}-${Date.now()}.xlsx`);
+      toast.success(`共 ${d.products.length} 个商品，未在广告组 ${free.length} 个`);
+    } catch (e) {
+      toast.error(`读取商品失败：${(e as Error).message}`);
+    } finally {
+      setProdBusy(false);
+    }
+  };
   const [rows, setRows] = React.useState<CopyRow[]>([]);
   const [loading, setLoading] = React.useState("");
   const [running, setRunning] = React.useState(false);
@@ -161,9 +198,22 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
         if (!data.campaigns.length || !data.infos.length) break;
         offset = data.next_offset;
       }
-      setRows(out);
+      // 近 3 天消耗：有消耗的组默认按消耗筛，全为 0 再按状态筛
+      let spendErr = "";
+      try {
+        setLoading("读取近 3 天消耗…");
+        const sp = await callGmvMaxWrite<{ campaigns: Record<string, number> }>({ action: "spend", advertiser_id: srcId, days: 3 });
+        for (const r of out) r.spend3d = Math.round((sp.campaigns[r.srcId] ?? 0) * 100) / 100;
+      } catch (e) {
+        spendErr = (e as Error).message;
+      }
+      const anySpend = out.some((r) => (r.spend3d ?? 0) > 0);
+      const nextFilter = anySpend ? [FILTER_SPEND] : [FILTER_ENABLE];
+      setFilters(nextFilter);
+      setRows(applyFilter(out, nextFilter));
       setRawDump(dump);
-      toast.success(`读取 ${out.length} 个广告组`);
+      if (spendErr) toast.error(`近 3 天消耗读取失败，按启用状态筛：${spendErr}`);
+      else toast.success(`读取 ${out.length} 个广告组`);
     } catch (e) {
       setRows(out);
       setRawDump(dump);
@@ -178,6 +228,7 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
   const allSelected = copyable.length > 0 && copyable.every((r) => r.selected);
   const toggleAll = () => setRows((p) => p.map((r) => (r.status === "pending" ? { ...r, selected: !allSelected } : r)));
   const selectedCount = rows.filter((r) => r.selected && r.status === "pending").length;
+  const visible = rows.filter((r) => showAll || matchFilter(r, filters) || r.status !== "pending");
 
   const run = async () => {
     if (!dstId) return toast.error("请选择目标广告户");
@@ -227,8 +278,8 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
       ]),
     ];
     const aoa = [
-      ["源CampaignID", "名称", "源状态", "商品数", "商品ID", "ROI", "预算", "identity数", "新素材测试", "状态", "新CampaignID", "备注"],
-      ...rows.map((r) => [r.srcId, r.name, r.srcStatus, r.itemGroupIds.length, r.itemGroupIds.join(","), r.roasBid, r.budget,
+      ["源CampaignID", "名称", "源状态", "近3天消耗", "商品数", "商品ID", "ROI", "预算", "identity数", "新素材测试", "状态", "新CampaignID", "备注"],
+      ...rows.map((r) => [r.srcId, r.name, r.srcStatus, r.spend3d ?? "", r.itemGroupIds.length, r.itemGroupIds.join(","), r.roasBid, r.budget,
         r.identityList.length, r.accelTesting ?? "", statusLabel[r.status], r.newId ?? "", r.note]),
     ];
     const wb = XLSX.utils.book_new();
@@ -296,7 +347,23 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
           {rows.length > 0 && (
             <Button size="sm" variant="outline" onClick={download}><Download className="h-4 w-4 mr-1" />下载</Button>
           )}
+          {dstId && (
+            <Button size="sm" variant="outline" onClick={downloadFreeProducts} disabled={prodBusy} aria-label="下载目标户未在广告组的商品">
+              <PackageSearch className="h-4 w-4 mr-1" />{prodBusy ? "读取中…" : "未投商品"}
+            </Button>
+          )}
         </div>
+        {rows.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <div className="w-56" aria-label="筛选广告组">
+              <MultiSelect label="筛选" options={[FILTER_SPEND, FILTER_ENABLE]} value={filters} onChange={changeFilters} placeholder="不筛选" />
+            </div>
+            <label className="flex items-center gap-1 text-muted-foreground">
+              <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />显示未命中筛选的组
+            </label>
+            <span className="text-muted-foreground">{visible.length} / {rows.length}</span>
+          </div>
+        )}
         <FailureList items={rows.filter((r) => r.status === "error" || r.status === "partial" || (r.status === "manual" && r.srcStatus === "ENABLE"))
           .map((r) => ({ key: r.srcId, name: r.name, label: statusLabel[r.status], reason: r.note }))} />
         {rows.length > 0 && (
@@ -309,6 +376,7 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
                   </TableHead>
                   <TableHead>名称</TableHead>
                   <TableHead>源状态</TableHead>
+                  <TableHead className="text-right">近3天消耗</TableHead>
                   <TableHead className="text-right">商品</TableHead>
                   <TableHead className="text-right">ROI</TableHead>
                   <TableHead className="text-right">预算</TableHead>
@@ -318,7 +386,7 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.map((r, i) => (
+                {rows.map((r, i) => [r, i] as const).filter(([r]) => visible.includes(r)).map(([r, i]) => (
                   <TableRow key={r.srcId}>
                     <TableCell>
                       <input type="checkbox" aria-label={`选择 ${r.name}`} checked={r.selected}
@@ -326,6 +394,7 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
                     </TableCell>
                     <TableCell className="text-xs">{r.name}</TableCell>
                     <TableCell className="text-xs">{r.srcStatus}</TableCell>
+                    <TableCell className="text-right text-xs">{r.spend3d ?? "—"}</TableCell>
                     <TableCell className="text-right text-xs">{r.itemGroupIds.length}</TableCell>
                     <TableCell className="text-right text-xs">{Number.isFinite(r.roasBid) ? r.roasBid : ""}</TableCell>
                     <TableCell className="text-right text-xs">{Number.isFinite(r.budget) ? r.budget : ""}</TableCell>

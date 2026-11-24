@@ -131,6 +131,90 @@ async function targetIdentities(conns: Conn[], advertiserId: string, storeId: st
   return byId;
 }
 
+// 店铺商品状态（/store/product/get/，ad_creation_eligible=GMV_MAX）：status（AVAILABLE 才能投）、gmv_max_ads_status（OCCUPIED=已在启用中的 GMV Max 组）。
+// 参数按文档描述推断（bc_id/store_id/advertiser_id/filtering/page/page_size），未逐字核验。缓存 10 分钟。
+export type StoreProduct = { item_group_id: string; title?: string; status?: string; gmv_max_ads_status?: string };
+const productCache = new Map<string, { at: number; byId: Map<string, StoreProduct> }>();
+export async function storeProducts(conns: Conn[], advertiserId: string, storeId: string, bcId: string, fresh = false) {
+  const key = `${advertiserId}:${storeId}:${bcId}`;
+  const hit = productCache.get(key);
+  if (!fresh && hit && Date.now() - hit.at < 600_000) return hit.byId;
+  const byId = new Map<string, StoreProduct>();
+  await withConns(conns, async (token) => {
+    for (let page = 1; page <= 50; page++) {
+      const data = await tt(token, "/store/product/get/", {
+        method: "GET",
+        params: {
+          bc_id: bcId, store_id: storeId, advertiser_id: advertiserId,
+          filtering: JSON.stringify({ ad_creation_eligible: "GMV_MAX" }),
+          page: String(page), page_size: "100",
+        },
+      });
+      const list = (data.store_products ?? data.products ?? data.list ?? []) as Record<string, unknown>[];
+      for (const p of list) {
+        const id = String(p.item_group_id ?? p.spu_id ?? "");
+        if (!id) continue;
+        byId.set(id, {
+          item_group_id: id,
+          title: p.title != null ? String(p.title) : undefined,
+          status: p.status != null ? String(p.status) : undefined,
+          gmv_max_ads_status: p.gmv_max_ads_status != null ? String(p.gmv_max_ads_status) : undefined,
+        });
+      }
+      const pi = (data.page_info ?? {}) as Record<string, unknown>;
+      const totalPage = Number(pi.total_page ?? 0);
+      if (!list.length || !totalPage || page >= totalPage) break;
+    }
+  });
+  productCache.set(key, { at: Date.now(), byId });
+  return byId;
+}
+
+// 近 N 天消耗（按 广告组×商品），日期按 UTC+8 自然日（PH/MY/TH/北京同为 UTC+8；其他时区站点会有偏差）
+export async function spendReport(db: SupabaseClient, advertiserId: string, days: number) {
+  const { storeId, conns } = await loadAdv(db, advertiserId);
+  if (!storeId) throw new Error(`广告户 ${advertiserId} 未配置店铺 ID`);
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  const now = new Date(Date.now() + 8 * 3600_000);
+  const end = fmt(now);
+  const start = fmt(new Date(now.getTime() - (Math.max(1, days) - 1) * 86400_000));
+  const campaigns: Record<string, number> = {};
+  const products: Record<string, Record<string, number>> = {};
+  await withConns(conns, async (token) => {
+    for (let page = 1; page <= 50; page++) {
+      const data = await tt(token, "/gmv_max/report/get/", {
+        method: "GET",
+        params: {
+          advertiser_id: advertiserId, store_ids: JSON.stringify([storeId]),
+          dimensions: JSON.stringify(["campaign_id", "item_group_id"]), metrics: JSON.stringify(["cost"]),
+          start_date: start, end_date: end, page: String(page), page_size: "1000", filtering: "{}",
+        },
+      });
+      const list = (data.list ?? []) as Record<string, Record<string, unknown>>[];
+      for (const row of list) {
+        const c = String(row.dimensions?.campaign_id ?? "");
+        const it = String(row.dimensions?.item_group_id ?? "");
+        const cost = Number(row.metrics?.cost ?? 0) || 0;
+        if (!c) continue;
+        campaigns[c] = (campaigns[c] ?? 0) + cost;
+        if (it) (products[c] ??= {})[it] = ((products[c] ??= {})[it] ?? 0) + cost;
+      }
+      const pi = (data.page_info ?? {}) as Record<string, unknown>;
+      const totalPage = Number(pi.total_page ?? 0);
+      if (!list.length || !totalPage || page >= totalPage) break;
+    }
+  });
+  return { start, end, campaigns, products };
+}
+
+// 店铺商品清单（含是否在 GMV Max 组内），给页面下载「未在广告组的商品」
+export async function listStoreProducts(db: SupabaseClient, advertiserId: string, preferBc?: string) {
+  const { storeId, conns, bcId } = await loadAdv(db, advertiserId, preferBc);
+  if (!storeId || !bcId) throw new Error(`广告户 ${advertiserId} 缺店铺 ID 或 BC`);
+  const m = await storeProducts(conns, advertiserId, storeId, bcId, true);
+  return { store_id: storeId, bc_id: bcId, products: Array.from(m.values()) };
+}
+
 export type CreateRow = {
   advertiser_id?: unknown; campaign_name?: unknown; item_group_ids?: unknown; roas_bid?: unknown; budget?: unknown;
   start_time?: unknown; end_time?: unknown; identity_list?: unknown; affiliate_posts_enabled?: unknown;
@@ -167,6 +251,36 @@ export async function createOne(db: SupabaseClient, r: CreateRow): Promise<Creat
   if (!storeId) return { ok: false, error: `广告户 ${advertiserId} 未配置店铺 ID（设置页 → 店铺ID）` };
   if (!bcId) return { ok: false, error: `广告户 ${advertiserId} 找不到 BC ID` };
 
+  // 商品预检：不可用（下架/删除/不可投）的去掉并在备注列出；被启用中的组占用的 → 整行失败（说明已有组在投，避免拆出半重复组）
+  const preNotes: string[] = [];
+  let useIds = ids;
+  if (!(ids.length === 1 && ids[0].toUpperCase() === "ALL")) {
+    try {
+      const catalog = await storeProducts(conns, advertiserId, storeId, bcId);
+      if (catalog.size) {
+        const occupied = ids.filter((id) => catalog.get(id)?.gmv_max_ads_status === "OCCUPIED");
+        if (occupied.length) {
+          return { ok: false, error: `商品已在启用中的 GMV Max 组里（目标户可能已建过此组）：${occupied.join(",")}` };
+        }
+        // 查不到 = 不在「可建 GMV Max」商品目录里（通常已下架/删除）；查到但 status≠AVAILABLE = 不可投
+        const notFound = ids.filter((id) => !catalog.has(id));
+        const badStatus = ids.filter((id) => { const p = catalog.get(id); return !!p && p.status != null && p.status !== "AVAILABLE"; });
+        const unavailable = [...notFound, ...badStatus];
+        if (unavailable.length) {
+          useIds = ids.filter((id) => !unavailable.includes(id));
+          const detail = [
+            notFound.length ? `店铺可投目录查不到 ${notFound.length} 个：${notFound.join(",")}` : "",
+            badStatus.length ? `状态不可投 ${badStatus.length} 个：${badStatus.map((id) => `${id}(${catalog.get(id)?.status})`).join(",")}` : "",
+          ].filter(Boolean).join("；");
+          if (!useIds.length) return { ok: false, error: `全部商品不可投：${detail}` };
+          preNotes.push(`去掉不可投商品 ${unavailable.length} 个（${detail}）`);
+        }
+      }
+    } catch (e) {
+      preNotes.push(`商品状态预检失败，未过滤：${(e as Error).message}`);
+    }
+  }
+
   const endTime = String(r.end_time ?? "").trim();
   const body: Record<string, unknown> = {
     advertiser_id: advertiserId,
@@ -175,7 +289,7 @@ export async function createOne(db: SupabaseClient, r: CreateRow): Promise<Creat
     store_authorized_bc_id: bcId,
     shopping_ads_type: "PRODUCT",
     product_specific_type: allProducts ? "ALL" : "CUSTOMIZED_PRODUCTS",
-    ...(allProducts ? {} : { item_group_ids: ids }),
+    ...(allProducts ? {} : { item_group_ids: useIds }),
     optimization_goal: "VALUE",
     deep_bid_type: "VO_MIN_ROAS",
     roas_bid: roas,
@@ -222,8 +336,8 @@ export async function createOne(db: SupabaseClient, r: CreateRow): Promise<Creat
   if (accel === "ON" || accel === "OFF") body.accelerate_testing_for_new_videos = accel;
 
   // 先按源组原样建；商品 >50 被拒时降到 50 个建组，再用 update 补全到与源组一致。
-  const fullIds = ids;
-  const notes: string[] = [];
+  const fullIds = useIds;
+  const notes: string[] = [...preNotes];
   let lastErr = "";
   let campaignId: string | undefined;
   let trimmedIds = false;
@@ -248,7 +362,7 @@ export async function createOne(db: SupabaseClient, r: CreateRow): Promise<Creat
   if (!campaignId) return { ok: false, error: notes.length ? `${lastErr}｜${notes.join("；")}` : lastErr };
 
   // 补全：update 参数（advertiser_id / campaign_id + 要改的字段）按 create 惯例推断，未见文档。
-  let partial = notes.some((n) => n.includes("需后台手动开"));
+  let partial = notes.some((n) => n.includes("需后台手动开") || n.includes("去掉不可投商品"));
   const update = async (patch: Record<string, unknown>) =>
     withConns(conns, (token) => tt(token, "/campaign/gmv_max/update/", {
       method: "POST", body: { advertiser_id: advertiserId, campaign_id: campaignId, ...patch },
