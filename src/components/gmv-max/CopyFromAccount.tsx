@@ -20,7 +20,7 @@ type InfoResp = {
   infos: { campaign_id: string; ok: boolean; info?: Record<string, unknown>; error?: string }[];
   next_offset: number | null;
 };
-type ResultRow = { ok: boolean; campaign_id?: string; error?: string };
+type ResultRow = { ok: boolean; campaign_id?: string; error?: string; notes?: string[] };
 
 type Status = "manual" | "pending" | "running" | "ok" | "error";
 type CopyRow = {
@@ -32,6 +32,7 @@ type CopyRow = {
   budget: number;
   identityList: unknown[];
   affiliatePostsEnabled?: boolean;
+  accelTesting?: string;
   nameRoi: number | null;
   selected: boolean;
   status: Status;
@@ -67,6 +68,8 @@ function toRow(c: { campaign_id: string; campaign_name: string; operation_status
     budget: Number(info.budget),
     identityList: Array.isArray(info.identity_list) ? (info.identity_list as unknown[]) : [],
     affiliatePostsEnabled: typeof info.affiliate_posts_enabled === "boolean" ? info.affiliate_posts_enabled : undefined,
+    accelTesting: info.accelerate_testing_for_new_videos === "ON" || info.accelerate_testing_for_new_videos === "OFF"
+      ? String(info.accelerate_testing_for_new_videos) : undefined,
     nameRoi: roiFromName(name),
     selected: false,
     status: "pending",
@@ -152,12 +155,14 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
             budget: r.budget,
             identity_list: r.identityList,
             ...(r.affiliatePostsEnabled != null ? { affiliate_posts_enabled: r.affiliatePostsEnabled } : {}),
+            ...(r.accelTesting ? { accelerate_testing_for_new_videos: r.accelTesting } : {}),
           }],
         });
         const r0 = res.results?.[0];
         if (r0?.ok) ok++;
         setRows((p) => p.map((x, idx) => (idx === i ? {
-          ...x, status: r0?.ok ? "ok" : "error", newId: r0?.campaign_id, note: r0?.ok ? x.note : (r0?.error ?? "未知错误"),
+          ...x, status: r0?.ok ? "ok" : "error", newId: r0?.campaign_id,
+          note: r0?.ok ? [x.note, ...(r0.notes ?? [])].filter(Boolean).join("；") : (r0?.error ?? "未知错误"),
         } : x)));
       } catch (e) {
         setRows((p) => p.map((x, idx) => (idx === i ? { ...x, status: "error", note: (e as Error).message } : x)));
@@ -169,9 +174,9 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
 
   const download = () => {
     const aoa = [
-      ["源CampaignID", "名称", "源状态", "商品数", "商品ID", "ROI", "预算", "identity数", "状态", "新CampaignID", "备注"],
+      ["源CampaignID", "名称", "源状态", "商品数", "商品ID", "ROI", "预算", "identity数", "新素材测试", "状态", "新CampaignID", "备注"],
       ...rows.map((r) => [r.srcId, r.name, r.srcStatus, r.itemGroupIds.length, r.itemGroupIds.join(","), r.roasBid, r.budget,
-        r.identityList.length, statusLabel[r.status], r.newId ?? "", r.note]),
+        r.identityList.length, r.accelTesting ?? "", statusLabel[r.status], r.newId ?? "", r.note]),
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), "复制");
@@ -202,10 +207,11 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
                 <button type="button" aria-label="说明" className="text-muted-foreground"><HelpCircle className="h-4 w-4" /></button>
               </TooltipTrigger>
               <TooltipContent className="max-w-sm text-xs leading-relaxed">
-                复制名称、商品、ROI、预算、视频来源账号；立即开始，不开促销日、不开自动加预算。
+                复制名称、商品、ROI、预算、视频来源账号、新素材优先测试；立即开始，不开促销日、不开自动加预算。
+                视频账号超过 20 个时先按原样建，被拒再保留前 20 个（店铺官方号优先），备注列出被去掉的账号。
                 全店商品组、手选视频组、商品超过 50 个的组标「手动」不复制。
                 目标户须已拿到该店铺 GMV Max 独占授权，且商品未被启用中的广告组占用，否则单行失败。
-                AI 素材 / 新素材优先测试接口无法设置，建完需后台手动开。
+                AI 素材（审核后发布）接口无此字段，建完需后台手动开。
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>

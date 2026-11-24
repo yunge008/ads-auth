@@ -15,7 +15,12 @@
 //                   start_time?: "YYYY-MM-DD HH:MM:SS",
 //                   end_time?: "YYYY-MM-DD HH:MM:SS",
 //                   identity_list?: [{identity_id, identity_type, ...}] (<=20, copied from a source campaign),
-//                   affiliate_posts_enabled?: boolean }] }
+//                   affiliate_posts_enabled?: boolean,
+//                   accelerate_testing_for_new_videos?: "ON" | "OFF" }] }
+// identity_list > 20 (TikTok create limit; UI-created campaigns can hold more): try as-is first,
+// on failure retry with 20 (TTS_TT first). accelerate_testing_for_new_videos is returned by
+// /campaign/gmv_max/info/ but not documented for create: if TikTok rejects it, retry without.
+// Each retry uses a fresh request_id; ttPost only throws on code != 0, so no double create.
 // promotion_days / auto_budget are deliberately never sent: both default to off, and per TikTok docs
 // passing a promotion_days object auto-sets is_enabled=true.
 // Returns: { results: [{ row, advertiser_id, campaign_name, ok, campaign_id?, error? }] }
@@ -33,6 +38,7 @@ type RowInput = {
   end_time?: unknown;
   identity_list?: unknown;
   affiliate_posts_enabled?: unknown;
+  accelerate_testing_for_new_videos?: unknown;
 };
 
 const IDENTITY_KEYS = ["identity_id", "identity_type", "identity_authorized_bc_id", "identity_authorized_shop_id", "store_id"];
@@ -57,6 +63,7 @@ type Result = {
   ok: boolean;
   campaign_id?: string;
   error?: string;
+  notes?: string[];
 };
 
 function pad(n: number) {
@@ -115,7 +122,7 @@ Deno.serve(async (req) => {
       if (!itemGroupIds.length) { fail("商品ID 至少一个"); continue; }
       if (itemGroupIds.length > 50) { fail(`商品 ${itemGroupIds.length} 个，超过单组上限 50，不新建（请手动处理）`); continue; }
       const identityList = cleanIdentityList(r.identity_list);
-      if (identityList && identityList.length > 20) { fail("identity_list 超过 20 个"); continue; }
+      if (identityList && identityList.length > 50) { fail("identity_list 超过 50 个"); continue; }
       if (!Number.isFinite(roasBid) || roasBid <= 0) { fail("ROI 必须是大于 0 的数字"); continue; }
       if (!Number.isFinite(budget) || budget <= 0) { fail("预算必须是大于 0 的数字"); continue; }
 
@@ -146,18 +153,40 @@ Deno.serve(async (req) => {
       if (endTime) ttBody.schedule_end_time = endTime;
       if (identityList && identityList.length) ttBody.identity_list = identityList;
       if (typeof r.affiliate_posts_enabled === "boolean") ttBody.affiliate_posts_enabled = r.affiliate_posts_enabled;
+      const accel = r.accelerate_testing_for_new_videos;
+      if (accel === "ON" || accel === "OFF") ttBody.accelerate_testing_for_new_videos = accel;
 
-      try {
-        const data = await createGmvMaxCampaign(conns, ttBody);
+      const notes: string[] = [];
+      let lastError = "";
+      let created: Record<string, unknown> | null = null;
+      for (let attempt = 0; attempt < 3 && !created; attempt++) {
+        try {
+          created = await createGmvMaxCampaign(conns, { ...ttBody, request_id: genRequestId(i) });
+        } catch (e) {
+          lastError = (e as Error).message;
+          const il = ttBody.identity_list as Record<string, string>[] | undefined;
+          if ("accelerate_testing_for_new_videos" in ttBody && /accelerate/i.test(lastError)) {
+            delete ttBody.accelerate_testing_for_new_videos;
+            notes.push("接口不收新素材优先测试，需后台手动开");
+          } else if (il && il.length > 20) {
+            const sorted = [...il.filter((x) => x.identity_type === "TTS_TT"), ...il.filter((x) => x.identity_type !== "TTS_TT")];
+            const dropped = sorted.slice(20).map((x) => x.identity_id);
+            ttBody.identity_list = sorted.slice(0, 20);
+            notes.push(`视频账号 ${il.length}→20，去掉：${dropped.join(",")}`);
+          } else break;
+        }
+      }
+      if (created) {
         results.push({
           row: i + 1,
           advertiser_id: advertiserId,
           campaign_name: campaignName,
           ok: true,
-          campaign_id: data.campaign_id ? String(data.campaign_id) : undefined,
+          campaign_id: created.campaign_id ? String(created.campaign_id) : undefined,
+          ...(notes.length ? { notes } : {}),
         });
-      } catch (e) {
-        fail((e as Error).message);
+      } else {
+        fail(notes.length ? `${lastError}｜${notes.join("；")}` : lastError);
       }
     }
 
