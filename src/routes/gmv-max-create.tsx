@@ -16,7 +16,7 @@ import { toast } from "sonner";
 import { callGmvMaxWrite } from "@/lib/api";
 import { useConnections, useBCAdvertisers } from "@/lib/store";
 import { CopyFromAccount, FailureList } from "@/components/gmv-max/CopyFromAccount";
-import { TargetPicker } from "@/components/gmv-max/TargetPicker";
+import { TargetPicker, useBcOptions } from "@/components/gmv-max/TargetPicker";
 
 export const Route = createFileRoute("/gmv-max-create")({
   head: () => ({ meta: [{ title: "GMV MAX新建 - TikTok授权工具" }] }),
@@ -220,6 +220,11 @@ function GmvMaxCreatePage() {
 
   // ---- 单个新建 ----
   const [advertiserId, setAdvertiserId] = React.useState("");
+  const [singleBc, setSingleBc] = React.useState("");
+  const singleBcs = useBcOptions(advertiserId);
+  React.useEffect(() => {
+    if (!singleBcs.some((b) => b.bcId === singleBc)) setSingleBc(singleBcs[0]?.bcId ?? "");
+  }, [singleBcs, singleBc]);
   const [campaignName, setCampaignName] = React.useState("");
   const [itemGroupIdsText, setItemGroupIdsText] = React.useState("");
   const [roasBid, setRoasBid] = React.useState("");
@@ -252,6 +257,7 @@ function GmvMaxCreatePage() {
         budget: bud,
         start_time: toTikTokTime(startTime),
         end_time: toTikTokTime(endTime),
+        ...(singleBc ? { store_authorized_bc_id: singleBc } : {}),
       };
       const res = await runBatch([row]);
       setResults(res);
@@ -434,7 +440,7 @@ function GmvMaxCreatePage() {
       <Card>
         <CardHeader><CardTitle className="text-base">单个新建</CardTitle></CardHeader>
         <CardContent className="space-y-3">
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
             <div className="space-y-1">
               <span className="text-xs text-muted-foreground">广告户</span>
               <Select value={advertiserId} onValueChange={setAdvertiserId}>
@@ -452,6 +458,21 @@ function GmvMaxCreatePage() {
                   <AlertTriangle className="h-3 w-3" />
                   该广告户缺少{!selectedAdv?.shopId ? "店铺ID" : ""}{!selectedAdv?.shopId && !selectedAdv?.bcId ? "、" : ""}{!selectedAdv?.bcId ? "BC ID" : ""}，请先去「设置」补齐
                 </p>
+              )}
+            </div>
+            <div className="space-y-1">
+              <span className="text-xs text-muted-foreground">店铺授权 BC</span>
+              {singleBcs.length > 1 ? (
+                <Select value={singleBc} onValueChange={setSingleBc}>
+                  <SelectTrigger aria-label="店铺授权 BC"><SelectValue placeholder="选择 BC" /></SelectTrigger>
+                  <SelectContent>
+                    {singleBcs.map((b) => <SelectItem key={b.bcId} value={b.bcId}>{b.bcName}（{b.bcId}）</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <div className="h-9 flex items-center text-xs text-muted-foreground truncate" aria-label="店铺授权 BC">
+                  {singleBcs[0] ? `${singleBcs[0].bcName}（${singleBcs[0].bcId}）` : "—"}
+                </div>
               )}
             </div>
             <div className="space-y-1">
