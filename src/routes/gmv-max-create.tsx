@@ -594,7 +594,7 @@ function GmvMaxCreatePage() {
               <span>商品ID</span>
               <span>（一行一个，也支持用逗号分隔，中英文逗号均可，框内自动换行）</span>
             </span>
-            <Textarea value={itemGroupIdsText} onChange={(e) => setItemGroupIdsText(e.target.value)} rows={2} className="w-full font-mono text-xs" placeholder={"1731973887448024673\n1731912594758796897"} />
+            <Textarea value={itemGroupIdsText} onChange={(e) => setItemGroupIdsText(e.target.value)} rows={12} className="w-full min-h-[45vh] resize-y font-mono text-xs" placeholder={"1731973887448024673\n1731912594758796897"} />
           </div>
           <Button onClick={handleSubmit} disabled={submitting}>
             <Play className="h-4 w-4 mr-1" />{submitting ? "创建中…" : "创建广告组"}
