@@ -87,6 +87,21 @@ function fmtTime(ts: unknown, shop: Shop): string {
   }
   return `${D}/${M}/${Y} ${p2(h)}:${mi}:${s}`;
 }
+/** 结算单日期：后台显示 = statement_time（UTC，均为 0 点）的日期 + 1 天。
+ *  2026-11-25 TH 8–9 月 60/60 张结算单与后台财务表核对一致；原按店铺本地时区显示，每月 1 号的结算单会被记成上月最后一天（原有问题，已修）。 */
+function fmtStatementDate(ts: unknown): string {
+  const n = Number(ts ?? 0);
+  if (!n) return "";
+  const d = new Date((n + 86400) * 1000);
+  return `${d.getUTCFullYear()}/${p2(d.getUTCMonth() + 1)}/${p2(d.getUTCDate())}`;
+}
+/** 财务按结算月取数的窗口：结算日期在 month 内 ⇔ statement_time ∈ [当月 1 日 − 1 天, 下月 1 日 − 1 天)（UTC） */
+function statementMonthWindow(month: unknown) {
+  const m = String(month ?? "");
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(m)) bad("month 格式应为 YYYY-MM");
+  const [y, mo] = m.split("-").map(Number);
+  return { from: Date.UTC(y, mo - 1, 1) / 1000 - 86400, to: Date.UTC(y, mo, 1) / 1000 - 86400 };
+}
 function fmtDate(ts: unknown, shop: Shop): string {
   const n = Number(ts ?? 0);
   if (!n) return "";
@@ -361,7 +376,7 @@ function txGet(t: Tx, path: string): Cell {
 function finRow(t: Tx, stmt: { id: string; time: number; currency: string }, shop: Shop, apiKeys: string[]): Cell[] {
   const isOrder = (t.type ?? "ORDER") === "ORDER";
   const head: Cell[] = [
-    fmtDate(stmt.time, shop), stmt.id, stmt.currency, TX_TYPE[t.type ?? ""] ?? (t.type ?? ""),
+    fmtStatementDate(stmt.time), stmt.id, stmt.currency, TX_TYPE[t.type ?? ""] ?? (t.type ?? ""),
     isOrder ? (t.order_id ?? "") : (t.adjustment_id ?? t.id ?? ""), "", null, "", "", num(t.settlement_amount), num(t.revenue_amount),
   ];
   const mid = FIN_MAP.map(([, p]) => txGet(t, p));
@@ -412,7 +427,7 @@ type Stmt = {
 type FinCursor = { stmts: Array<{ id: string; time: number; currency: string }>; idx: number; page_token: string; done: number };
 
 async function exportFinance(shop: Shop, b: Record<string, unknown>, started: number): Promise<Chunk> {
-  const win = monthWindow(shop, b.month);
+  const win = statementMonthWindow(b.month);
   const errors: string[] = [];
   let cur = b.cursor as FinCursor | undefined;
   let statements: Cell[][] | undefined;
@@ -430,7 +445,7 @@ async function exportFinance(shop: Shop, b: Record<string, unknown>, started: nu
       tok = r.data?.next_page_token ?? "";
     } while (tok);
     statements = list.map((s) => [
-      fmtDate(s.statement_time ?? s.create_time, shop), s.id, num(s.settlement_amount), num(s.revenue_amount), num(s.fee_amount),
+      fmtStatementDate(s.statement_time ?? s.create_time), s.id, num(s.settlement_amount), num(s.revenue_amount), num(s.fee_amount),
       num(s.adjustment_amount), num(s.shipping_cost_amount), s.payment_id ?? "", s.payment_status ?? "", s.currency ?? "",
     ]);
     cur = { stmts: list.map((s) => ({ id: s.id, time: Number(s.statement_time ?? s.create_time ?? 0), currency: s.currency ?? "" })), idx: 0, page_token: "", done: 0 };
@@ -968,7 +983,8 @@ async function syncFinance(shop: Shop, started: number) {
   const found = new Map<string, string>();
   let cur = st.cursor as FinSyncCur | null;
   if (!cur) {
-    const ge = st.watermark ? Math.floor(Date.parse(st.watermark) / 1000) - STMT_OVERLAP_S : syncFromSec(shop);
+    // 结算日期 = statement_time + 1 天（UTC），回填起点按结算日期 SYNC_FROM 往前 1 天
+    const ge = st.watermark ? Math.floor(Date.parse(st.watermark) / 1000) - STMT_OVERLAP_S : statementMonthWindow(SYNC_FROM.slice(0, 7)).from;
     const lt = Math.floor(Date.now() / 1000);
     const list: Stmt[] = [];
     let tok = "";
