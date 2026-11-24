@@ -210,6 +210,41 @@ export async function spendReport(db: SupabaseClient, advertiserId: string, days
   return { start, end, campaigns, products };
 }
 
+// 某个广告组近 N 天有数据的商品（全店组 ALL 没有 item_group_ids，只能从报表取它实际投到的商品）。
+// 商品维度必须带 campaign_id 过滤（实测 40002）；过滤字段名 campaign_ids 按报错提示推断，未核验。
+export async function campaignProducts(db: SupabaseClient, advertiserId: string, campaignId: string, days: number) {
+  const { storeId, conns } = await loadAdv(db, advertiserId);
+  if (!storeId) throw new Error(`广告户 ${advertiserId} 未配置店铺 ID`);
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  const now = new Date(Date.now() + 8 * 3600_000);
+  const end = fmt(now);
+  const start = fmt(new Date(now.getTime() - (Math.max(1, days) - 1) * 86400_000));
+  const products: Record<string, number> = {};
+  await withConns(conns, async (token) => {
+    for (let page = 1; page <= 20; page++) {
+      const data = await tt(token, "/gmv_max/report/get/", {
+        method: "GET",
+        params: {
+          advertiser_id: advertiserId, store_ids: JSON.stringify([storeId]),
+          dimensions: JSON.stringify(["campaign_id", "item_group_id"]), metrics: JSON.stringify(["cost"]),
+          start_date: start, end_date: end, page: String(page), page_size: "1000",
+          filtering: JSON.stringify({ campaign_ids: [campaignId] }),
+        },
+      });
+      const list = (data.list ?? []) as Record<string, Record<string, unknown>>[];
+      for (const row of list) {
+        if (String(row.dimensions?.campaign_id ?? "") !== campaignId) continue;
+        const it = String(row.dimensions?.item_group_id ?? "");
+        if (it) products[it] = (products[it] ?? 0) + (Number(row.metrics?.cost ?? 0) || 0);
+      }
+      const pi = (data.page_info ?? {}) as Record<string, unknown>;
+      const totalPage = Number(pi.total_page ?? 0);
+      if (!list.length || !totalPage || page >= totalPage) break;
+    }
+  });
+  return { start, end, products };
+}
+
 // 店铺商品清单（含是否在 GMV Max 组内），给页面下载「未在广告组的商品」
 export async function listStoreProducts(db: SupabaseClient, advertiserId: string, preferBc?: string) {
   const { storeId, conns, bcId } = await loadAdv(db, advertiserId, preferBc);

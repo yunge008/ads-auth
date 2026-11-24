@@ -250,6 +250,24 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
         : r.status === "pending" ? { ...r, selected: false } : r));
       setRows(rows);
     }
+    // 规则（负责人）：一个商品只能在一个启用组；全店组(ALL)转为指定商品 = 它近 30 天实际投到的商品，
+    // 去掉本次其他组已有的商品，避免和其他组冲突（店铺有其他启用组时 API 也建不了 ALL 组）
+    const takenByOthers = new Set(rows.filter((r) => r.status === "ok" || r.status === "partial" || (r.selected && r.status === "pending"))
+      .filter((r) => !(r.itemGroupIds.length === 1 && r.itemGroupIds[0] === "ALL")).flatMap((r) => r.itemGroupIds));
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r.selected || r.status !== "pending" || !(r.itemGroupIds.length === 1 && r.itemGroupIds[0] === "ALL")) continue;
+      try {
+        const d = await callGmvMaxWrite<{ products: Record<string, number> }>({ action: "campaign_products", advertiser_id: srcId, campaign_id: r.srcId, days: 30 });
+        const all = Object.keys(d.products);
+        const keep = all.filter((id) => !takenByOthers.has(id));
+        const note = `全店组转指定商品：近30天有数据 ${all.length} 个，去掉其他组已有 ${all.length - keep.length} 个，保留 ${keep.length} 个`;
+        rows = rows.map((x, idx) => (idx === i ? (keep.length ? { ...x, itemGroupIds: keep, note } : { ...x, status: "error" as Status, note: `${note}，无可建商品` }) : x));
+      } catch (e) {
+        rows = rows.map((x, idx) => (idx === i ? { ...x, status: "error" as Status, note: `全店组读取商品失败：${(e as Error).message}` } : x));
+      }
+    }
+    setRows(rows);
     const selectedCount = rows.filter((r) => r.selected && r.status === "pending").length;
     if (!selectedCount) return;
     setRunning(true);
@@ -356,7 +374,7 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
                 流程：读取源户 →（下载存档）→ 在 TikTok 后台切户（需对方同意）→ 复制；也可下载后用「Excel 批量新建」上传首个 sheet「导入」。
                 复制名称、商品、ROI（按名称 R 后最后一个数，解析不出用 info）、预算、视频来源账号；新素材优先测试全开；立即开始，不开促销日、不开自动加预算。
                 视频账号与源组完全一致（不截断）。商品超过 50 被拒时先建 50 个再自动补全；补全失败标「已建·需处理」并列出缺的商品。
-                全店商品组按全店商品复制（同一店铺只能有一个启用中的全店组）；手选视频组标「手动」不复制。所有未成功的组在上方红框列出。
+                全店商品组转为指定商品（近 30 天有数据的商品，去掉其他组已有的），因为一个商品只能在一个启用组；手选视频组标「手动」不复制。所有未成功的组在上方红框列出。
                 AI 素材（审核后发布）接口无此字段，建完需后台手动开。
               </TooltipContent>
             </Tooltip>
