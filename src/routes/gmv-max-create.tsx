@@ -42,6 +42,7 @@ type BatchRow = {
   end_time?: string;
   identity_list?: unknown[];
   accelerate_testing_for_new_videos?: "ON" | "OFF";
+  store_authorized_bc_id?: string;
 };
 type BatchRowStatus = "invalid" | "pending" | "running" | "ok" | "partial" | "error";
 type BatchRowState = BatchRow & {
@@ -332,6 +333,7 @@ function GmvMaxCreatePage() {
         }
         const accelRaw = String(get("新素材优先测试", "accelerate_testing_for_new_videos") ?? "").trim().toUpperCase();
         const accelerate_testing_for_new_videos = accelRaw === "ON" || accelRaw === "OFF" ? accelRaw : undefined;
+        const store_authorized_bc_id = String(get("店铺授权BC", "store_authorized_bc_id") ?? "").trim() || undefined;
         const rowNo = idx + 2; // header is row 1
         if (!advertiser_id && !campaign_name && !item_group_ids.length) return; // skip fully blank row
         const issues: string[] = [];
@@ -348,6 +350,7 @@ function GmvMaxCreatePage() {
           end_time: endTimeVal,
           ...(identity_list ? { identity_list } : {}),
           ...(accelerate_testing_for_new_videos ? { accelerate_testing_for_new_videos } : {}),
+          ...(store_authorized_bc_id ? { store_authorized_bc_id } : {}),
           rowNo,
           issues,
           status: issues.length ? "invalid" : "pending",
@@ -372,9 +375,9 @@ function GmvMaxCreatePage() {
         setBatchRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, status: "running" } : r)));
         try {
           const { advertiser_id, campaign_name, item_group_ids, roas_bid, budget, start_time, end_time,
-            identity_list, accelerate_testing_for_new_videos } = batchRows[i];
+            identity_list, accelerate_testing_for_new_videos, store_authorized_bc_id } = batchRows[i];
           const res = await runBatch([{ advertiser_id, campaign_name, item_group_ids, roas_bid, budget, start_time, end_time,
-            identity_list, accelerate_testing_for_new_videos }]);
+            identity_list, accelerate_testing_for_new_videos, store_authorized_bc_id }]);
           const r0 = res[0];
           if (r0?.ok && !r0.partial) ok++;
           setBatchRows((prev) => prev.map((r, idx) => (idx === i ? {
@@ -484,7 +487,7 @@ function GmvMaxCreatePage() {
         <CardContent className="space-y-3">
           <p className="text-xs text-muted-foreground">
             列：广告户ID / 广告组名称 / 商品ID（多个用逗号或换行分隔）/ ROI / 预算 / 开始时间（可空）/ 结束时间（可空）。设置逻辑同「单个新建」。
-            可选列：视频账号JSON / 新素材优先测试（ON/OFF）。
+            可选列：视频账号JSON / 新素材优先测试（ON/OFF）/ 店铺授权BC。开始/结束时间按 UTC+0 填（北京时间减 8 小时）。
             模板 A:C 列固定为文本格式，F:G 列固定为日期时间格式。
           </p>
           <div className="flex flex-wrap items-center gap-2">

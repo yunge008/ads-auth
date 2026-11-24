@@ -33,6 +33,7 @@ type CopyRow = {
   identityList: unknown[];
   affiliatePostsEnabled?: boolean;
   accelTesting?: string;
+  storeBc?: string;
   nameRoi: number | null;
   infoRoi: number;
   selected: boolean;
@@ -73,6 +74,7 @@ function toRow(c: { campaign_id: string; campaign_name: string; operation_status
     identityList: Array.isArray(info.identity_list) ? (info.identity_list as unknown[]) : [],
     affiliatePostsEnabled: typeof info.affiliate_posts_enabled === "boolean" ? info.affiliate_posts_enabled : undefined,
     accelTesting: "ON", // 负责人决定：新素材优先测试全开
+    storeBc: info.store_authorized_bc_id != null ? String(info.store_authorized_bc_id) : undefined,
     nameRoi: roiFromName(name),
     selected: false,
     status: "pending",
@@ -195,6 +197,7 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
             identity_list: r.identityList,
             ...(r.affiliatePostsEnabled != null ? { affiliate_posts_enabled: r.affiliatePostsEnabled } : {}),
             ...(r.accelTesting ? { accelerate_testing_for_new_videos: r.accelTesting } : {}),
+            ...(r.storeBc ? { store_authorized_bc_id: r.storeBc } : {}),
           },
         });
         if (r0?.ok && !r0.partial) ok++;
@@ -213,9 +216,9 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
 
   const download = () => {
     const importAoa = [
-      ["广告户ID", "广告组名称", "商品ID", "ROI", "预算", "开始时间", "结束时间", "视频账号JSON", "新素材优先测试", "源CampaignID"],
+      ["广告户ID", "广告组名称", "商品ID", "ROI", "预算", "开始时间", "结束时间", "视频账号JSON", "新素材优先测试", "源CampaignID", "店铺授权BC"],
       ...rows.filter((r) => r.selected && r.status === "pending").map((r) => [
-        dstId, r.name, r.itemGroupIds.join(","), r.roasBid, r.budget, "", "", JSON.stringify(r.identityList), r.accelTesting ?? "", r.srcId,
+        dstId, r.name, r.itemGroupIds.join(","), r.roasBid, r.budget, "", "", JSON.stringify(r.identityList), r.accelTesting ?? "", r.srcId, r.storeBc ?? "",
       ]),
     ];
     const aoa = [
@@ -225,7 +228,7 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
     ];
     const wb = XLSX.utils.book_new();
     const importWs = XLSX.utils.aoa_to_sheet(importAoa);
-    for (let r = 1; r < importAoa.length; r++) for (const c of [0, 2, 9]) {
+    for (let r = 1; r < importAoa.length; r++) for (const c of [0, 2, 9, 10]) {
       const cell = importWs[XLSX.utils.encode_cell({ r, c })];
       if (cell) { cell.t = "s"; cell.z = "@"; }
     }

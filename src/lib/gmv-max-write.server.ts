@@ -46,15 +46,21 @@ function genRequestId(): string {
   return `${Date.now()}${Math.floor(Math.random() * 900000 + 100000)}`; // 19 位，< int64 上限
 }
 
-async function loadAdv(db: SupabaseClient, advertiserId: string) {
+// preferBc：指定店铺授权 BC（同一广告户挂在多个授权连接下时用），对应连接的 token 排最前。
+async function loadAdv(db: SupabaseClient, advertiserId: string, preferBc?: string) {
   const [{ data: shop, error: e1 }, { data: conns, error: e2 }] = await Promise.all([
     db.from("advertiser_countries").select("shop_id").eq("advertiser_id", advertiserId).maybeSingle(),
     db.from("tiktok_connections").select("access_token, advertiser_ids, bc_id").contains("advertiser_ids", [advertiserId]),
   ]);
   if (e1) throw new Error(e1.message);
   if (e2) throw new Error(e2.message);
-  const list = (conns ?? []) as Conn[];
-  return { storeId: (shop?.shop_id as string | null) ?? null, conns: list, bcId: list.find((c) => c.bc_id)?.bc_id ?? null };
+  let list = (conns ?? []) as Conn[];
+  if (preferBc) list = [...list.filter((c) => c.bc_id === preferBc), ...list.filter((c) => c.bc_id !== preferBc)];
+  return {
+    storeId: (shop?.shop_id as string | null) ?? null,
+    conns: list,
+    bcId: preferBc || (list.find((c) => c.bc_id)?.bc_id ?? null),
+  };
 }
 
 // 依次尝试该户的每个授权 token（有的 token 缺写权限 40001）
@@ -127,6 +133,7 @@ export type CreateRow = {
   advertiser_id?: unknown; campaign_name?: unknown; item_group_ids?: unknown; roas_bid?: unknown; budget?: unknown;
   start_time?: unknown; end_time?: unknown; identity_list?: unknown; affiliate_posts_enabled?: unknown;
   accelerate_testing_for_new_videos?: unknown;
+  store_authorized_bc_id?: unknown;
 };
 // ok=true 且 partial=true：组已建，但没能与源组完全一致（notes 说明差异），需人工处理
 export type CreateResult = { ok: boolean; partial?: boolean; campaign_id?: string; error?: string; notes?: string[] };
@@ -150,7 +157,9 @@ export async function createOne(db: SupabaseClient, r: CreateRow): Promise<Creat
   if (!(roas > 0)) return { ok: false, error: "ROI 必须大于 0" };
   if (!(budget > 0)) return { ok: false, error: "预算必须大于 0" };
 
-  const { storeId, conns, bcId } = await loadAdv(db, advertiserId);
+  const preferBc = String(r.store_authorized_bc_id ?? "").trim();
+  if (preferBc && !/^\d+$/.test(preferBc)) return { ok: false, error: "店铺授权BC 只能是数字" };
+  const { storeId, conns, bcId } = await loadAdv(db, advertiserId, preferBc || undefined);
   if (!storeId) return { ok: false, error: `广告户 ${advertiserId} 未配置店铺 ID（设置页 → 店铺ID）` };
   if (!bcId) return { ok: false, error: `广告户 ${advertiserId} 找不到 BC ID` };
 
