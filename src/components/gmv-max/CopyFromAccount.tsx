@@ -132,6 +132,7 @@ export function FailureList({ items }: { items: { key: string; name: string; lab
 
 export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[]; onDone?: () => void }) {
   const [srcId, setSrcId] = React.useState("");
+  const [srcBcSel, setSrcBcSel] = React.useState("");
   const [rows, setRows] = React.useState<CopyRow[]>([]);
   const rowsState = rows;
   const [dstId, setDstId] = React.useState("");
@@ -153,11 +154,8 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
   const [identChecked, setIdentChecked] = React.useState<Set<string>>(new Set());
   const [identLoading, setIdentLoading] = React.useState(false);
   // 来源 BC = 源组 info 里最常见的 store_authorized_bc_id
-  const srcBc = React.useMemo(() => {
-    const cnt = new Map<string, number>();
-    for (const r of rows) if (r.storeBc) cnt.set(r.storeBc, (cnt.get(r.storeBc) ?? 0) + 1);
-    return Array.from(cnt.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
-  }, [rows]);
+  // 来源 BC = 源户 BC 下拉所选（读取源组、查来源 BC 视频账号都用它）
+  const srcBc = srcBcSel;
   const identItems: IdentityRow[] = React.useMemo(() => {
     const m = new Map<string, IdentityRow>();
     for (const r of rows) {
@@ -243,7 +241,7 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
 
   const load = async () => {
     if (!srcId) return toast.error("请选择源广告户");
-    if (!dstBc) return toast.error("先选目标广告户和 BC：按该 BC 的授权读取源组，视频账号才与目标户一致");
+    if (!srcBcSel) return toast.error("先选源广告户的 BC");
     setRows([]);
     setRawDump([]);
     const out: CopyRow[] = [];
@@ -253,7 +251,7 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
       while (offset != null) {
         setLoading(`读取中… ${out.length}`);
         // 按导入目标 BC 对应连接的授权读取（不同 BC 读到的视频账号集合不同）
-        const data: InfoResp = await callGmvMaxWrite<InfoResp>({ action: "info", advertiser_id: srcId, bc_id: dstBc, offset, limit: 20 });
+        const data: InfoResp = await callGmvMaxWrite<InfoResp>({ action: "info", advertiser_id: srcId, bc_id: srcBcSel, offset, limit: 20 });
         const byId = new Map(data.campaigns.map((c) => [c.campaign_id, c]));
         for (const i of data.infos) {
           dump.push(i);
@@ -352,8 +350,8 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
           },
           log: {
             batch_id: batchId, kind: "copy", source: `源户 ${srcId}`, source_campaign_id: r.srcId,
-            source_advertiser_id: srcId, source_advertiser_name: advName(srcId), source_bc_id: r.storeBc ?? srcBc,
-            source_bc_name: bcNameOf(r.storeBc ?? srcBc), advertiser_name: advName(dstId), bc_name: dstBcName,
+            source_advertiser_id: srcId, source_advertiser_name: advName(srcId), source_bc_id: srcBc,
+            source_bc_name: bcNameOf(srcBc), advertiser_name: advName(dstId), bc_name: dstBcName,
           },
         });
         if (r0?.log_error) logErr = r0.log_error;
@@ -413,14 +411,6 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
     XLSX.writeFile(wb, `gmv-max-复制-${srcId}-${Date.now()}.xlsx`);
   };
 
-  const advSelect = (value: string, onChange: (v: string) => void, label: string) => (
-    <Select value={value} onValueChange={onChange}>
-      <SelectTrigger aria-label={label} className="w-72"><SelectValue placeholder={label} /></SelectTrigger>
-      <SelectContent>
-        {advOptions.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}（{a.id}）</SelectItem>)}
-      </SelectContent>
-    </Select>
-  );
 
   return (
     <Card>
@@ -445,12 +435,13 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
-          {advSelect(srcId, setSrcId, "源广告户")}
+          <TargetPicker advOptions={advOptions} advertiserId={srcId} onAdvertiserChange={setSrcId}
+            bcId={srcBcSel} onBcChange={setSrcBcSel} advLabel="源广告户" disabled={running || !!loading} />
           <span aria-hidden className="text-muted-foreground">→</span>
           <TargetPicker advOptions={advOptions} advertiserId={dstId} onAdvertiserChange={setDstId}
             bcId={dstBc} onBcChange={setDstBc} disabled={running} />
           {/* 读取按目标 BC 的授权读源组（视频账号与目标户一致），所以放在选完目标户/BC 之后 */}
-          <Button size="sm" variant="outline" onClick={load} disabled={!!loading || running || !srcId || !dstBc}>
+          <Button size="sm" variant="outline" onClick={load} disabled={!!loading || running || !srcId || !srcBcSel}>
             <Copy className="h-4 w-4 mr-1" />{loading || "读取广告组"}
           </Button>
           {dstId && (
