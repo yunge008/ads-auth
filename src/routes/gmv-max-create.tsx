@@ -15,7 +15,7 @@ import {
 import { toast } from "sonner";
 import { callGmvMaxWrite } from "@/lib/api";
 import { useConnections, useBCAdvertisers } from "@/lib/store";
-import { CopyFromAccount } from "@/components/gmv-max/CopyFromAccount";
+import { CopyFromAccount, FailureList } from "@/components/gmv-max/CopyFromAccount";
 
 export const Route = createFileRoute("/gmv-max-create")({
   head: () => ({ meta: [{ title: "GMV MAX新建 - TikTok授权工具" }] }),
@@ -30,6 +30,7 @@ type ResultRow = {
   campaign_id?: string;
   error?: string;
   notes?: string[];
+  partial?: boolean;
 };
 type BatchRow = {
   advertiser_id: string;
@@ -42,7 +43,7 @@ type BatchRow = {
   identity_list?: unknown[];
   accelerate_testing_for_new_videos?: "ON" | "OFF";
 };
-type BatchRowStatus = "invalid" | "pending" | "running" | "ok" | "error";
+type BatchRowStatus = "invalid" | "pending" | "running" | "ok" | "partial" | "error";
 type BatchRowState = BatchRow & {
   rowNo: number;
   issues: string[];
@@ -146,6 +147,7 @@ function BatchPreviewTable({
     pending: "text-muted-foreground",
     running: "text-blue-600",
     ok: "text-emerald-600",
+    partial: "text-amber-600",
     error: "text-destructive",
   };
   return (
@@ -180,7 +182,7 @@ function BatchPreviewTable({
               <TableCell className="text-xs font-mono">
                 {r.status === "invalid" ? (
                   <span className="text-amber-600 font-sans">{r.issues.join("；")}</span>
-                ) : r.status === "ok" ? [r.campaignId, r.error].filter(Boolean).join(" · ") : r.status === "error" ? (
+                ) : r.status === "ok" || r.status === "partial" ? [r.campaignId, r.error].filter(Boolean).join(" · ") : r.status === "error" ? (
                   <span className="text-destructive font-sans">{r.error}</span>
                 ) : ""}
               </TableCell>
@@ -336,7 +338,6 @@ function GmvMaxCreatePage() {
         if (!advertiser_id) issues.push("广告户ID 为空");
         if (!campaign_name) issues.push("广告组名称为空");
         if (!item_group_ids.length) issues.push("商品ID 为空");
-        if (item_group_ids.length > 50) issues.push(`商品 ${item_group_ids.length} 个，超过上限 50`);
         if (identityBad) issues.push("视频账号JSON 格式错误");
         if (accelRaw && !accelerate_testing_for_new_videos) issues.push("新素材优先测试只能填 ON/OFF");
         if (!Number.isFinite(roas_bid) || roas_bid <= 0) issues.push("ROI 必须是大于 0 的数字");
@@ -375,10 +376,10 @@ function GmvMaxCreatePage() {
           const res = await runBatch([{ advertiser_id, campaign_name, item_group_ids, roas_bid, budget, start_time, end_time,
             identity_list, accelerate_testing_for_new_videos }]);
           const r0 = res[0];
-          if (r0?.ok) ok++;
+          if (r0?.ok && !r0.partial) ok++;
           setBatchRows((prev) => prev.map((r, idx) => (idx === i ? {
             ...r,
-            status: r0?.ok ? "ok" : "error",
+            status: r0?.ok ? (r0.partial ? "partial" : "ok") : "error",
             campaignId: r0?.ok ? r0.campaign_id : undefined,
             error: r0?.ok ? (r0.notes?.join("；") || undefined) : (r0?.error ?? "未知错误"),
           } : r)));
@@ -388,12 +389,13 @@ function GmvMaxCreatePage() {
       }
     } finally {
       setBatchSubmitting(false);
-      toast.success(`批量创建完成：成功 ${ok} / 共 ${total}`);
+      if (ok === total) toast.success(`批量创建完成：全部成功 ${ok} / ${total}`);
+      else toast.error(`批量创建完成：成功 ${ok} / ${total}，其余 ${total - ok} 行见下方「未成功」列表`, { duration: 15000 });
     }
   };
 
   const batchStatusLabel = (s: BatchRowStatus) =>
-    ({ invalid: "校验未通过", pending: "待创建", running: "创建中…", ok: "成功", error: "失败" }[s]);
+    ({ invalid: "校验未通过", pending: "待创建", running: "创建中…", ok: "成功", partial: "已建·需处理", error: "失败" }[s]);
 
   const downloadBatchResults = () => {
     const aoa = [
@@ -401,7 +403,7 @@ function GmvMaxCreatePage() {
       ...batchRows.map((r) => [
         r.rowNo, r.advertiser_id, r.campaign_name, r.item_group_ids.join(","), r.roas_bid, r.budget,
         r.start_time ?? "", r.end_time ?? "", batchStatusLabel(r.status),
-        r.status === "ok" ? [r.campaignId ?? "", r.error ?? ""].filter(Boolean).join(" · ") : r.status === "invalid" ? r.issues.join("；") : (r.error ?? ""),
+        r.status === "ok" || r.status === "partial" ? [r.campaignId ?? "", r.error ?? ""].filter(Boolean).join(" · ") : r.status === "invalid" ? r.issues.join("；") : (r.error ?? ""),
       ]),
     ];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -514,6 +516,10 @@ function GmvMaxCreatePage() {
               {batchRows.some((r) => r.status === "invalid") ? `，${batchRows.filter((r) => r.status === "invalid").length} 行校验未通过` : ""}
             </p>
           )}
+          <FailureList items={batchRows.filter((r) => r.status === "error" || r.status === "partial" || r.status === "invalid").map((r) => ({
+            key: String(r.rowNo), name: `#${r.rowNo} ${r.campaign_name}`, label: batchStatusLabel(r.status),
+            reason: r.status === "invalid" ? r.issues.join("；") : (r.error ?? ""),
+          }))} />
           <BatchPreviewTable rows={batchRows} statusLabel={batchStatusLabel} />
           <Button onClick={executeBatch} disabled={!batchRows.length || batchRows.every((r) => r.status === "invalid") || batchSubmitting}>
             <Play className="h-4 w-4 mr-1" />{batchSubmitting ? "批量创建中…" : `执行创建（${batchRows.filter((r) => r.status !== "invalid").length} 行）`}

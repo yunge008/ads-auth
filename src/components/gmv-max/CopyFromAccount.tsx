@@ -1,7 +1,7 @@
 // 「从账户复制」：读源广告户全部 Product GMV Max 广告组（gmv-max-campaign-info），
 // 勾选后逐个在目标广告户新建（gmv-max-adgroup-batch-create，每次 1 行）。
 // 复制：名称 / 商品 / ROI / 预算 / identity_list / affiliate_posts_enabled。
-// 不复制、标「手动」：全店商品组、手选视频组、商品 >50 的组。
+// 不复制、标「手动」：全店商品组、手选视频组。商品 >50 / 视频账号 >20 由服务端先降级建组再 update 补全。
 import * as React from "react";
 import * as XLSX from "xlsx";
 import { Copy, Download, Play, HelpCircle, ArrowRightLeft } from "lucide-react";
@@ -24,9 +24,9 @@ type InfoResp = {
   infos: { campaign_id: string; ok: boolean; info?: Record<string, unknown>; error?: string }[];
   next_offset: number | null;
 };
-type ResultRow = { ok: boolean; campaign_id?: string; error?: string; notes?: string[] };
+type ResultRow = { ok: boolean; partial?: boolean; campaign_id?: string; error?: string; notes?: string[] };
 
-type Status = "manual" | "pending" | "running" | "ok" | "error";
+type Status = "manual" | "pending" | "running" | "ok" | "partial" | "error";
 type CopyRow = {
   srcId: string;
   name: string;
@@ -87,7 +87,6 @@ function toRow(c: { campaign_id: string; campaign_name: string; operation_status
   if (info.product_specific_type === "ALL") return manual("全店商品组");
   if (info.product_video_specific_type === "CUSTOM_SELECTION") return manual("手选视频组");
   if (!ids.length) return manual("无商品");
-  if (ids.length > 50) return manual(`商品 ${ids.length} 个 >50`);
   // 负责人决定：ROI 以名称为准，名称里解析不出才用 info
   if (row.nameRoi != null) {
     if (Math.abs(row.nameRoi - row.infoRoi) > 1e-6) row.note = `ROI 按名称 ${row.nameRoi}（info ${row.infoRoi}）`;
@@ -98,7 +97,20 @@ function toRow(c: { campaign_id: string; campaign_name: string; operation_status
   return row;
 }
 
-const statusLabel: Record<Status, string> = { manual: "手动", pending: "待复制", running: "复制中…", ok: "成功", error: "失败" };
+const statusLabel: Record<Status, string> = { manual: "手动", pending: "待复制", running: "复制中…", ok: "成功", partial: "已建·需处理", error: "失败" };
+
+// 未成功（失败 / 已建但未与源组完全一致 / 校验未通过）清单：执行后常驻显示，直到下次读取/上传
+export function FailureList({ items }: { items: { key: string; name: string; label: string; reason: string }[] }) {
+  if (!items.length) return null;
+  return (
+    <div role="alert" className="rounded border border-destructive/40 bg-destructive/5 p-2 text-xs space-y-1 max-h-60 overflow-auto">
+      <div className="font-medium text-destructive">未成功 {items.length} 个</div>
+      {items.map((it) => (
+        <div key={it.key}><span className="font-medium">{it.name}</span> · {it.label} · <span className="break-all">{it.reason}</span></div>
+      ))}
+    </div>
+  );
+}
 
 export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
   const [srcId, setSrcId] = React.useState("");
@@ -203,9 +215,9 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
             ...(r.accelTesting ? { accelerate_testing_for_new_videos: r.accelTesting } : {}),
           },
         });
-        if (r0?.ok) ok++;
+        if (r0?.ok && !r0.partial) ok++;
         setRows((p) => p.map((x, idx) => (idx === i ? {
-          ...x, status: r0?.ok ? "ok" : "error", newId: r0?.campaign_id,
+          ...x, status: r0?.ok ? (r0.partial ? "partial" : "ok") : "error", newId: r0?.campaign_id,
           note: r0?.ok ? [x.note, ...(r0.notes ?? [])].filter(Boolean).join("；") : (r0?.error ?? "未知错误"),
         } : x)));
       } catch (e) {
@@ -213,7 +225,8 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
       }
     }
     setRunning(false);
-    toast.success(`复制完成：成功 ${ok} / ${selectedCount}`);
+    if (ok === selectedCount) toast.success(`复制完成：全部成功 ${ok} / ${selectedCount}`);
+    else toast.error(`复制完成：成功 ${ok} / ${selectedCount}，其余见「未成功」列表`, { duration: 15000 });
   };
 
   const download = () => {
@@ -265,8 +278,8 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
               <TooltipContent className="max-w-sm text-xs leading-relaxed">
                 流程：读取源户 →（下载存档）→ 切户 → 复制；也可下载后用「Excel 批量新建」上传首个 sheet「导入」。
                 复制名称、商品、ROI（按名称 R 后最后一个数，解析不出用 info）、预算、视频来源账号；新素材优先测试全开；立即开始，不开促销日、不开自动加预算。
-                视频账号超过 20 个时先按原样建，被拒再保留前 20 个（店铺官方号优先），备注列出被去掉的账号。
-                全店商品组、手选视频组、商品超过 50 个的组标「手动」不复制。
+                视频账号按源组 info 原顺序取前 20（原组上限 20）。商品超过 50 被拒时先建 50 个再自动补全；补全失败标「已建·需处理」并列出缺的商品。
+                全店商品组、手选视频组标「手动」不复制。所有未成功的组在上方红框列出。
                 切户后原持有户在该店铺的 GMV Max 广告组全部自动暂停。
                 AI 素材（审核后发布）接口无此字段，建完需后台手动开。
               </TooltipContent>
@@ -299,6 +312,8 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
             <Button size="sm" variant="outline" onClick={download}><Download className="h-4 w-4 mr-1" />下载</Button>
           )}
         </div>
+        <FailureList items={rows.filter((r) => r.status === "error" || r.status === "partial" || (r.status === "manual" && r.srcStatus === "ENABLE"))
+          .map((r) => ({ key: r.srcId, name: r.name, label: statusLabel[r.status], reason: r.note }))} />
         {rows.length > 0 && (
           <div className="max-h-[480px] overflow-auto border rounded">
             <Table>
@@ -330,7 +345,7 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
                     <TableCell className="text-right text-xs">{Number.isFinite(r.roasBid) ? r.roasBid : ""}</TableCell>
                     <TableCell className="text-right text-xs">{Number.isFinite(r.budget) ? r.budget : ""}</TableCell>
                     <TableCell className="text-right text-xs">{r.identityList.length}</TableCell>
-                    <TableCell className={`text-xs ${r.status === "ok" ? "text-green-600" : r.status === "error" ? "text-destructive" : r.status === "manual" ? "text-amber-600" : ""}`}>
+                    <TableCell className={`text-xs ${r.status === "ok" ? "text-green-600" : r.status === "error" ? "text-destructive" : r.status === "manual" || r.status === "partial" ? "text-amber-600" : ""}`}>
                       {statusLabel[r.status]}
                     </TableCell>
                     <TableCell className="text-xs font-mono">{r.newId ?? ""}{r.newId && r.note ? " · " : ""}{r.note}</TableCell>

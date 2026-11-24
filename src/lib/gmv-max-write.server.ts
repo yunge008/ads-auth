@@ -89,7 +89,8 @@ export type CreateRow = {
   start_time?: unknown; end_time?: unknown; identity_list?: unknown; affiliate_posts_enabled?: unknown;
   accelerate_testing_for_new_videos?: unknown;
 };
-export type CreateResult = { ok: boolean; campaign_id?: string; error?: string; notes?: string[] };
+// ok=true 且 partial=true：组已建，但没能与源组完全一致（notes 说明差异），需人工处理
+export type CreateResult = { ok: boolean; partial?: boolean; campaign_id?: string; error?: string; notes?: string[] };
 
 const pad = (n: number) => String(n).padStart(2, "0");
 function nowPlus5Utc(): string {
@@ -107,7 +108,6 @@ export async function createOne(db: SupabaseClient, r: CreateRow): Promise<Creat
   if (!/^\d+$/.test(advertiserId)) return { ok: false, error: "advertiser_id 必填" };
   if (!name) return { ok: false, error: "campaign_name 必填" };
   if (!ids.length) return { ok: false, error: "商品ID 至少一个" };
-  if (ids.length > 50) return { ok: false, error: `商品 ${ids.length} 个，超过单组上限 50，不新建（请手动处理）` };
   if (!(roas > 0)) return { ok: false, error: "ROI 必须大于 0" };
   if (!(budget > 0)) return { ok: false, error: "预算必须大于 0" };
 
@@ -133,33 +133,60 @@ export async function createOne(db: SupabaseClient, r: CreateRow): Promise<Creat
     product_video_specific_type: "AUTO_SELECTION",
   };
   if (endTime) body.schedule_end_time = endTime;
-  const identityList = cleanIdentityList(r.identity_list);
+  // 原组在后台最多选 20 个视频账号；info 偶尔多返回几个（实测 PH 户 20 个组返回 23 个，多的 3 个固定排在末尾），
+  // 负责人确认原组 ≤20 → 按 info 原顺序取前 20，多出的不建、在备注列出。
+  const identityAll = cleanIdentityList(r.identity_list);
+  const identityList = identityAll.slice(0, 20);
   if (identityList.length) body.identity_list = identityList;
+  const droppedIdentities = identityAll.slice(20).map((x) => x.identity_id);
   if (typeof r.affiliate_posts_enabled === "boolean") body.affiliate_posts_enabled = r.affiliate_posts_enabled;
   const accel = r.accelerate_testing_for_new_videos;
   if (accel === "ON" || accel === "OFF") body.accelerate_testing_for_new_videos = accel;
 
-  const notes: string[] = [];
+  // 先按源组原样建；商品 >50 被拒时降到 50 个建组，再用 update 补全到与源组一致。
+  const fullIds = ids;
+  const notes: string[] = droppedIdentities.length
+    ? [`源组 info 返回 ${identityAll.length} 个视频账号，按原顺序取前 20，未带：${droppedIdentities.join(",")}`]
+    : [];
   let lastErr = "";
-  for (let attempt = 0; attempt < 3; attempt++) {
+  let campaignId: string | undefined;
+  let trimmedIds = false;
+  for (let attempt = 0; attempt < 4 && !campaignId; attempt++) {
     try {
       const data = await withConns(conns, (token) =>
         tt(token, "/campaign/gmv_max/create/", { method: "POST", body: { ...body, request_id: genRequestId() } }));
-      return { ok: true, campaign_id: data.campaign_id ? String(data.campaign_id) : undefined, ...(notes.length ? { notes } : {}) };
+      campaignId = data.campaign_id ? String(data.campaign_id) : undefined;
+      if (!campaignId) return { ok: false, error: "建组返回无 campaign_id" };
     } catch (e) {
       lastErr = (e as Error).message;
-      const il = body.identity_list as Record<string, string>[] | undefined;
+      const curIds = body.item_group_ids as string[];
       if ("accelerate_testing_for_new_videos" in body && /accelerate/i.test(lastErr)) {
         delete body.accelerate_testing_for_new_videos;
-        notes.push("接口不收新素材优先测试，需后台手动开");
-      } else if (il && il.length > 20) {
-        const sorted = [...il.filter((x) => x.identity_type === "TTS_TT"), ...il.filter((x) => x.identity_type !== "TTS_TT")];
-        body.identity_list = sorted.slice(0, 20);
-        notes.push(`视频账号 ${il.length}→20，去掉：${sorted.slice(20).map((x) => x.identity_id).join(",")}`);
+        notes.push("接口不收「新素材优先测试」，需后台手动开");
+      } else if (curIds.length > 50 && !trimmedIds) {
+        body.item_group_ids = curIds.slice(0, 50);
+        trimmedIds = true;
       } else break;
     }
   }
-  return { ok: false, error: notes.length ? `${lastErr}｜${notes.join("；")}` : lastErr };
+  if (!campaignId) return { ok: false, error: notes.length ? `${lastErr}｜${notes.join("；")}` : lastErr };
+
+  // 补全：update 参数（advertiser_id / campaign_id + 要改的字段）按 create 惯例推断，未见文档。
+  let partial = notes.some((n) => n.includes("需后台手动开"));
+  const update = async (patch: Record<string, unknown>) =>
+    withConns(conns, (token) => tt(token, "/campaign/gmv_max/update/", {
+      method: "POST", body: { advertiser_id: advertiserId, campaign_id: campaignId, ...patch },
+    }));
+  if (trimmedIds) {
+    try {
+      await update({ item_group_ids: fullIds });
+      notes.push(`商品先建 50 个，已补全到 ${fullIds.length} 个`);
+    } catch (e) {
+      partial = true;
+      notes.push(`商品只建了 50/${fullIds.length} 个，补全失败：${(e as Error).message}；未加入的商品：${fullIds.slice(50).join(",")}`);
+    }
+  }
+  return { ok: true, campaign_id: campaignId, ...(partial ? { partial: true } : {}), ...(notes.length ? { notes } : {}) };
 }
 
 export async function exclusiveAuth(db: SupabaseClient, advertiserId: string, grant: boolean) {
