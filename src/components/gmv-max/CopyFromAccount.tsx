@@ -15,7 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { invokeFn } from "@/lib/api";
+import { invokeFn, callGmvMaxWrite } from "@/lib/api";
 
 export type AdvOption = { id: string; name: string; shopId: string | null; bcId: string | null };
 
@@ -116,7 +116,7 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
     if (!adv) return setHolder(null);
     setAuthBusy(true);
     try {
-      const d = await invokeFn<AuthCheck>("gmv-max-exclusive-auth", { advertiser_id: adv, action: "check" });
+      const d = await callGmvMaxWrite<AuthCheck>({ action: "auth_check", advertiser_id: adv });
       setHolder({ id: d.holder_advertiser_id, name: d.holder_advertiser_name, err: d.store_found ? undefined : "店铺未在列表中" });
     } catch (e) {
       setHolder({ id: null, name: null, err: (e as Error).message });
@@ -130,7 +130,7 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
     setConfirmOpen(false);
     setAuthBusy(true);
     try {
-      await invokeFn("gmv-max-exclusive-auth", { advertiser_id: dstId, action: "grant" });
+      await callGmvMaxWrite({ action: "auth_grant", advertiser_id: dstId });
       toast.success("已切换独占授权");
     } catch (e) {
       toast.error(`切户失败：${(e as Error).message}`);
@@ -190,8 +190,9 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
       if (!r.selected || r.status !== "pending") continue;
       setRows((p) => p.map((x, idx) => (idx === i ? { ...x, status: "running" } : x)));
       try {
-        const res = await invokeFn<{ results: ResultRow[] }>("gmv-max-adgroup-batch-create", {
-          rows: [{
+        const r0 = await callGmvMaxWrite<ResultRow>({
+          action: "create",
+          row: {
             advertiser_id: dstId,
             campaign_name: r.name,
             item_group_ids: r.itemGroupIds,
@@ -200,9 +201,8 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
             identity_list: r.identityList,
             ...(r.affiliatePostsEnabled != null ? { affiliate_posts_enabled: r.affiliatePostsEnabled } : {}),
             ...(r.accelTesting ? { accelerate_testing_for_new_videos: r.accelTesting } : {}),
-          }],
+          },
         });
-        const r0 = res.results?.[0];
         if (r0?.ok) ok++;
         setRows((p) => p.map((x, idx) => (idx === i ? {
           ...x, status: r0?.ok ? "ok" : "error", newId: r0?.campaign_id,

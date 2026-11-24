@@ -13,7 +13,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
-import { invokeFn } from "@/lib/api";
+import { callGmvMaxWrite } from "@/lib/api";
 import { useConnections, useBCAdvertisers } from "@/lib/store";
 import { CopyFromAccount } from "@/components/gmv-max/CopyFromAccount";
 
@@ -79,8 +79,13 @@ function excelTimeToTikTok(v: unknown): string | undefined {
 }
 
 async function runBatch(rows: BatchRow[]): Promise<ResultRow[]> {
-  const data = await invokeFn<{ results: ResultRow[] }>("gmv-max-adgroup-batch-create", { rows });
-  return data.results ?? [];
+  // 走服务端路由 gmv-max-write（Edge Function 部署要耗 Lovable 积分）；逐行调用
+  const out: ResultRow[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const r = await callGmvMaxWrite<Omit<ResultRow, "row" | "advertiser_id" | "campaign_name">>({ action: "create", row: rows[i] });
+    out.push({ row: i + 1, advertiser_id: rows[i].advertiser_id, campaign_name: rows[i].campaign_name, ...r });
+  }
+  return out;
 }
 
 function ResultsTable({ results }: { results: ResultRow[] }) {

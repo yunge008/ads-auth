@@ -84,3 +84,19 @@ export async function callEcoRoute<T = unknown>(body: Record<string, unknown>): 
   if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
   return j;
 }
+
+/** 调 GMV Max 写操作服务端路由（建组 / 独占授权；不走 Edge Function，免部署积分） */
+export async function callGmvMaxWrite<T = unknown>(body: Record<string, unknown>): Promise<T> {
+  const res = await fetch("/api/public/hooks/gmv-max-write", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-admin-passcode": getPasscode(),
+      "x-admin-name": encodeURIComponent(getAdminName()),
+    },
+    body: JSON.stringify(body),
+  });
+  const j = (await res.json().catch(() => ({}))) as T & { error?: string };
+  if (!res.ok) throw new Error((j as { error?: string }).error ?? `HTTP ${res.status}`);
+  return j;
+}

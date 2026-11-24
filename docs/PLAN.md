@@ -19,12 +19,13 @@
 
 | 函数 | 待上线的改动 | 核验方式 |
 | --- | --- | --- |
+| gmv-max-exclusive-auth、gmv-max-adgroup-batch-create（1124.209~211 改动） | **暂不部署（积分用完）**：页面建组/切户已改走免费的服务端路由 `/api/public/hooks/gmv-max-write`，这两个 Edge Function 线上仍是旧版/不存在，前端已不调用 | 无需核验，以后有积分可部署或删除 |
 | attribution-upload | 快照重算心跳（1123.203） | 外部无法探测；下次大月份重算超 10 分钟不再误报失败即确认 |
 | attribution-identity-build | 身份合并让出签名、区间不再出 0 长度（1123.203） | 外部无法探测；下次「重建身份与区间」不报错即确认 |
 | tts-listing | 图片白名单补火山引擎 TOS（1123.202） | 外部无法探测；下次 API 上架传 TOS 图不报「域名不在允许列表」即确认 |
 
 2026-11-23 核验：`tools/check-deploy.sh` 显示 39 个函数全部已是新版 `_shared/auth.ts`（口令注入修复已上线）。
-同时说明 Lovable 在同步 main 后会自动重新部署 Edge Function（推断，依据：只要求部署了 4 个，实测 39 个全是新版）。
+~~同时说明 Lovable 在同步 main 后会自动重新部署 Edge Function~~ **2026-11-24 证伪**：新函数 gmv-max-exclusive-auth 推 main 后仍 404，Edge Function 只在 Lovable 手动部署（耗积分）时更新；前端与服务端路由随 main 同步免费上线。
 
 ## 任务板
 
