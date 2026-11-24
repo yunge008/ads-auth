@@ -251,12 +251,33 @@ export async function listIdentities(db: SupabaseClient, advertiserId: string, b
   if (!storeId) throw new Error(`广告户 ${advertiserId} 未配置店铺 ID`);
   if (!bcId) throw new Error("bc_id 必填");
   const m = await targetIdentities(conns, advertiserId, storeId, [bcId]);
-  return Array.from(m.values()).map((x) => ({
+  const nameOf = (x: Record<string, unknown>) => String(x.display_name ?? x.user_name ?? x.identity_name ?? x.username ?? "");
+  const identities = Array.from(m.values()).map((x) => ({
     identity_id: String(x.identity_id ?? ""),
     identity_type: String(x.identity_type ?? ""),
-    name: String(x.display_name ?? x.user_name ?? x.identity_name ?? x.username ?? ""),
+    name: nameOf(x),
     product_gmv_max_available: x.product_gmv_max_available !== false,
   }));
+  // 昵称补充：GMV Max identity/get 不返回的 BC_AUTH_TT 账号，用通用 /identity/get/（按 BC）查昵称，只用于显示名称、不代表可用。
+  // 接口权限与参数（identity_type / identity_authorized_bc_id）未核验，失败忽略。
+  const names: Record<string, string> = {};
+  const ordered = [...conns.filter((c) => c.bc_id === bcId), ...conns.filter((c) => c.bc_id !== bcId)];
+  try {
+    await withConns(ordered, async (token) => {
+      for (let page = 1; page <= 10; page++) {
+        const data = await tt(token, "/identity/get/", {
+          method: "GET",
+          params: { advertiser_id: advertiserId, identity_type: "BC_AUTH_TT", identity_authorized_bc_id: bcId, page: String(page), page_size: "100" },
+        });
+        const list = (data.identity_list ?? data.list ?? []) as Record<string, unknown>[];
+        for (const x of list) { const n = nameOf(x); if (x.identity_id != null && n) names[String(x.identity_id)] = n; }
+        const pi = (data.page_info ?? {}) as Record<string, unknown>;
+        if (!list.length || page >= Number(pi.total_page ?? 1)) break;
+      }
+    });
+  } catch { /* 无权限或参数不对：只显示 ID */ }
+  for (const i of identities) if (!i.name && names[i.identity_id]) i.name = names[i.identity_id];
+  return { identities, names };
 }
 
 // 店铺商品清单（含是否在 GMV Max 组内），给页面下载「未在广告组的商品」

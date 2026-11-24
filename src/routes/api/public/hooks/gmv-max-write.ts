@@ -51,7 +51,7 @@ export const Route = createFileRoute("/api/public/hooks/gmv-max-write")({
               return jsonRes(await campaignProducts(db, String(body.advertiser_id ?? "").trim(),
                 String(body.campaign_id ?? "").trim(), Number(body.days ?? 30) || 30));
             case "identities": // 只读：某户在某 BC 下可用视频账号
-              return jsonRes({ identities: await listIdentities(db, String(body.advertiser_id ?? "").trim(), String(body.bc_id ?? "").trim()) });
+              return jsonRes(await listIdentities(db, String(body.advertiser_id ?? "").trim(), String(body.bc_id ?? "").trim()));
             case "bc_list": // 只读：授权回调页用新 token 查可访问 BC
               return jsonRes({ bcs: await bcListForToken(String(body.access_token ?? "")) });
             case "info": // 只读：广告组列表 + 逐个 info，按 bc_id 对应连接的授权读取

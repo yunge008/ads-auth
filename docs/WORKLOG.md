@@ -333,3 +333,4 @@
 2026-11-24 | claude | [1124.237] 首页「抓取数据统计」行顺序改为按「设置 → 人员表」行顺序（原为按姓名排序），归档里不在人员表的名字排最后；0 条的 BD（如建联-陈晓桃、阿喜：有 VID 无授权码）照常显示 0 行，⚠ 原因写明「无 P 列 VID 非空且 Q 列授权码合法的行」。
 2026-11-24 | claude | [1124.238] 账户复制：源户也配 BC 下拉（同 TargetPicker，默认匹配该户的最新授权 BC，可选全部 BC）；读取源组用源户 BC 的授权，视频账号面板「来源 BC」也按它查；目标户 BC 独立选择。
 2026-11-24 | claude | [1124.239] ①账户复制授权状态文案：「已独占授权」→「店铺已授权为新账号」，「授权在」→「店铺授权在」；②导入记录显示时补名：服务端 log_batches/log_get 用 advertiser_countries.advertiser_name、tiktok_connections.bc_name 补户名/BC 名，旧复制记录从 source「源户 <id>」解析来源户 ID，前端再用页面广告户名兜底；来源 BC 旧记录未存，显示「BC —」。
+2026-11-24 | claude | [1124.240] 视频账号面板补昵称：GMV Max identity/get 不返回的 BC_AUTH_TT 账号，再用通用 /identity/get/（identity_type=BC_AUTH_TT + identity_authorized_bc_id，参数与权限未核验，失败忽略）按 BC 查 display_name，仅用于显示名称。

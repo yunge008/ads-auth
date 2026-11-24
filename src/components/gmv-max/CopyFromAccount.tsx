@@ -175,13 +175,14 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
     if (!rows.length || !srcId || !dstId || !dstBc) return;
     let stop = false;
     setIdentLoading(true);
-    type Resp = { identities: { identity_id: string; name: string; product_gmv_max_available: boolean }[] };
+    type Resp = { identities: { identity_id: string; name: string; product_gmv_max_available: boolean }[]; names?: Record<string, string> };
     const q = (adv: string, bc: string) => bc
       ? callGmvMaxWrite<Resp>({ action: "identities", advertiser_id: adv, bc_id: bc }).catch(() => null)
       : Promise.resolve(null);
     Promise.all([q(srcId, srcBc), q(dstId, dstBc)]).then(([s1, d1]) => {
       if (stop) return;
       const names: Record<string, string> = {};
+      Object.assign(names, s1?.names ?? {}, d1?.names ?? {});
       for (const x of [...(s1?.identities ?? []), ...(d1?.identities ?? [])]) if (x.name) names[x.identity_id] = x.name;
       setIdentNames(names);
       setSrcIdents(s1 ? new Set(s1.identities.map((x) => x.identity_id)) : null);
