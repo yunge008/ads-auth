@@ -458,6 +458,16 @@ export async function campaignInfo(db: SupabaseClient, advertiserId: string, pre
   });
 }
 
+// 授权回调用：用刚换到的 access_token 查它可访问的 BC 列表（/bc/get/ 不带 bc_ids），授权未返回 bc_id 时让用户选
+export async function bcListForToken(accessToken: string) {
+  const data = await tt(accessToken, "/bc/get/", { method: "GET", params: { page: "1", page_size: "50" } });
+  const list = (data.list ?? []) as Record<string, unknown>[];
+  return list.map((x) => {
+    const info = (x.bc_info ?? x) as Record<string, unknown>;
+    return { bc_id: String(info.bc_id ?? ""), bc_name: String(info.name ?? info.bc_name ?? "") };
+  }).filter((b) => b.bc_id);
+}
+
 // 导入记录：每个商品一行写 gmv_max_import_logs（表由 migration 20261124120000 创建；表不存在时不影响建组）
 export type LogMeta = { batch_id?: unknown; source?: unknown; kind?: unknown; source_campaign_id?: unknown };
 export async function logImport(db: SupabaseClient, meta: LogMeta, row: CreateRow, res: CreateResult, operator: string) {

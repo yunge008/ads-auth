@@ -9,7 +9,7 @@
 // 鉴权：x-admin-passcode，需 gmv-max-create 页面权限。
 import { createFileRoute } from "@tanstack/react-router";
 import {
-  adminDb, campaignInfo, checkGmvMaxPasscode, createOne, exclusiveAuth, getImportBatch, listImportBatches, listStoreProducts, logImport,
+  adminDb, bcListForToken, campaignInfo, checkGmvMaxPasscode, createOne, exclusiveAuth, getImportBatch, listImportBatches, listStoreProducts, logImport,
   spendReport, type CreateRow, type LogMeta,
 } from "@/lib/gmv-max-write.server";
 
@@ -24,7 +24,7 @@ export const Route = createFileRoute("/api/public/hooks/gmv-max-write")({
         if (authErr) return jsonRes({ error: authErr }, 401);
         const body = (await request.json().catch(() => ({}))) as {
           action?: string; row?: CreateRow; advertiser_id?: unknown; days?: unknown; bc_id?: unknown; log?: LogMeta; batch_id?: unknown;
-          offset?: unknown; limit?: unknown;
+          offset?: unknown; limit?: unknown; access_token?: unknown;
         };
         try {
           const db = adminDb();
@@ -47,6 +47,8 @@ export const Route = createFileRoute("/api/public/hooks/gmv-max-write")({
               return jsonRes(await exclusiveAuth(db, String(body.advertiser_id ?? "").trim(), false));
             case "auth_grant":
               return jsonRes(await exclusiveAuth(db, String(body.advertiser_id ?? "").trim(), true));
+            case "bc_list": // 只读：授权回调页用新 token 查可访问 BC
+              return jsonRes({ bcs: await bcListForToken(String(body.access_token ?? "")) });
             case "info": // 只读：广告组列表 + 逐个 info，按 bc_id 对应连接的授权读取
               return jsonRes(await campaignInfo(db, String(body.advertiser_id ?? "").trim(), String(body.bc_id ?? "").trim() || undefined,
                 Number(body.offset ?? 0) || 0, Number(body.limit ?? 20) || 20));

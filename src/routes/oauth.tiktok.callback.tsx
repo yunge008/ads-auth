@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Loader2, CheckCircle2, XCircle } from "lucide-react";
-import { invokeFn } from "@/lib/api";
+import { invokeFn, callGmvMaxWrite } from "@/lib/api";
 
 export const Route = createFileRoute("/oauth/tiktok/callback")({
   head: () => ({
@@ -30,6 +30,10 @@ function CallbackPage() {
   const [resp, setResp] = useState<ExchangeResp | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState("");
+  // BC 必填：授权返回了就带入；没返回就用新 token 查可访问 BC（一个自动填，多个下拉选）
+  const [bcId, setBcId] = useState("");
+  const [bcName, setBcName] = useState("");
+  const [bcOptions, setBcOptions] = useState<{ bc_id: string; bc_name: string }[]>([]);
 
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
@@ -48,6 +52,16 @@ function CallbackPage() {
         });
         setResp(data);
         setSelected(new Set(data.advertisers.map((a) => a.advertiser_id)));
+        setBcId(data.bc_id ?? "");
+        setBcName(data.bc_name ?? "");
+        if (!data.bc_id) {
+          callGmvMaxWrite<{ bcs: { bc_id: string; bc_name: string }[] }>({ action: "bc_list", access_token: data.access_token })
+            .then((r) => {
+              setBcOptions(r.bcs);
+              if (r.bcs.length === 1) { setBcId(r.bcs[0].bc_id); setBcName(r.bcs[0].bc_name); }
+            })
+            .catch(() => setBcOptions([]));
+        }
         setStage("choose");
         setMsg(`授权成功，共 ${data.advertisers.length} 个广告户，请勾选要保存的`);
       } catch (e) {
@@ -67,15 +81,15 @@ function CallbackPage() {
   };
 
   const handleSave = async () => {
-    if (!resp || selected.size === 0) return;
+    if (!resp || selected.size === 0 || !/^\d+$/.test(bcId.trim())) return;
     setStage("saving");
     setMsg("正在保存所选广告户 …");
     try {
       await invokeFn("tiktok-connection-save", {
         label: resp.label,
         access_token: resp.access_token,
-        bc_id: resp.bc_id,
-        bc_name: resp.bc_name,
+        bc_id: bcId.trim(),
+        bc_name: bcName.trim() || null,
         expires_at: resp.expires_at,
         advertiser_ids: Array.from(selected),
       });
@@ -131,6 +145,39 @@ function CallbackPage() {
                   清空
                 </Button>
               </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {bcOptions.length > 1 ? (
+                  <select
+                    aria-label="BC（必填）"
+                    value={bcId}
+                    onChange={(e) => {
+                      const b = bcOptions.find((x) => x.bc_id === e.target.value);
+                      setBcId(e.target.value);
+                      setBcName(b?.bc_name ?? "");
+                    }}
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+                  >
+                    <option value="">选择 BC（必填）</option>
+                    {bcOptions.map((b) => <option key={b.bc_id} value={b.bc_id}>{b.bc_name}（{b.bc_id}）</option>)}
+                  </select>
+                ) : (
+                  <input
+                    aria-label="BC ID（必填）"
+                    value={bcId}
+                    onChange={(e) => setBcId(e.target.value.replace(/\s/g, ""))}
+                    placeholder="BC ID（必填）"
+                    inputMode="numeric"
+                    className={`flex h-9 w-full rounded-md border bg-background px-3 py-1 text-sm ${bcId && !/^\d+$/.test(bcId) ? "border-destructive" : "border-input"}`}
+                  />
+                )}
+                <input
+                  aria-label="BC 名称"
+                  value={bcName}
+                  onChange={(e) => setBcName(e.target.value)}
+                  placeholder="BC 名称"
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+                />
+              </div>
               <div className="max-h-[50vh] overflow-y-auto rounded-md border divide-y">
                 {visible.map((a) => (
                   <label
@@ -164,7 +211,7 @@ function CallbackPage() {
                   <Button variant="outline" size="sm" onClick={() => navigate({ to: "/settings" })}>
                     取消
                   </Button>
-                  <Button size="sm" disabled={selected.size === 0} onClick={handleSave}>
+                  <Button size="sm" disabled={selected.size === 0 || !/^\d+$/.test(bcId.trim())} onClick={handleSave}>
                     保存所选
                   </Button>
                 </div>
