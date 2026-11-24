@@ -346,7 +346,9 @@ async function createCore(db: SupabaseClient, r: CreateRow, ctx: Ctx): Promise<C
         }
       }
     } catch (e) {
-      preNotes.push(`商品状态预检失败，未过滤：${(e as Error).message}`);
+      // 授权缺 /store/product/get/ 权限（40001）是长期状态，不算异常，不写备注；其他错误才提示
+      const m = (e as Error).message;
+      if (!/40001|permission/i.test(m)) preNotes.push(`商品预检失败：${m}`);
     }
   }
 

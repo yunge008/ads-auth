@@ -261,7 +261,7 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
         const d = await callGmvMaxWrite<{ products: Record<string, number> }>({ action: "campaign_products", advertiser_id: srcId, campaign_id: r.srcId, days: 30 });
         const all = Object.keys(d.products);
         const keep = all.filter((id) => !takenByOthers.has(id));
-        const note = `全店组转指定商品：近30天有数据 ${all.length} 个，去掉其他组已有 ${all.length - keep.length} 个，保留 ${keep.length} 个`;
+        const note = `全店→指定 ${keep.length} 个${all.length - keep.length ? `（去重 ${all.length - keep.length}）` : ""}`;
         rows = rows.map((x, idx) => (idx === i ? (keep.length ? { ...x, itemGroupIds: keep, note } : { ...x, status: "error" as Status, note: `${note}，无可建商品` }) : x));
       } catch (e) {
         rows = rows.map((x, idx) => (idx === i ? { ...x, status: "error" as Status, note: `全店组读取商品失败：${(e as Error).message}` } : x));
@@ -462,7 +462,10 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
                     <TableCell className={`text-xs ${r.status === "ok" ? "text-green-600" : r.status === "error" ? "text-destructive" : r.status === "manual" || r.status === "partial" ? "text-amber-600" : ""}`}>
                       {statusLabel[r.status]}
                     </TableCell>
-                    <TableCell className="text-xs font-mono">{r.newId ?? ""}{r.newId && r.note ? " · " : ""}{r.note}</TableCell>
+                    <TableCell className="text-xs" title={r.note || undefined}>
+                      {r.newId && <span className="font-mono">{r.newId}</span>}
+                      {r.note && <span className={`block truncate max-w-md ${r.status === "error" ? "text-destructive" : "text-muted-foreground"}`}>{r.note}</span>}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
