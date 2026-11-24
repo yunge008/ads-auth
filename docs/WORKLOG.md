@@ -311,3 +311,4 @@
 2026-11-24 | claude | [1124.217] 目标户 identity/get 查不到源组 16 个 BC_AUTH_TT 账号（TTS_TT 4 个查到）：identity/get 返回范围随 store_authorized_bc_id 变化，改为用「目标户连接 BC + 源账号 identity_authorized_bc_id」逐个查后合并；报错带上已查 BC。根因未核实（BC 不同 / 跨 BC identity_id 不同），待负责人在 API 测试页跑 gmv-max-identity-get 对比。
 2026-11-24 | claude | [1124.218] 负责人更正：后台视频账号可选 23 个 → 撤销「取前 20」，视频账号与源组完全一致不截断；接口拒收则整行失败。
 2026-11-24 | claude | [1124.219] 测试 5 组建组成功（含 23 个视频账号的组）。同一广告户挂多个授权连接时可指定店铺授权 BC：建组路由新增可选 store_authorized_bc_id（优先用该 BC 连接的 token），Excel 新增可选列「店铺授权BC」，从账户复制自动带源组 info 的 store_authorized_bc_id；PH 迁移按负责人指定用 ARTPHRO-2023 7255936733156556801。说明文字注明开始/结束时间按 UTC+0 填。
+2026-11-24 | claude | [1124.220] GMV Max 目标户+BC 选择：新组件 TargetPicker（先选广告户，BC 从其授权连接带出，唯一直接显示、多个下拉，默认授权时间最新的连接），「从账户复制」「Excel 批量新建」都用；批量新建选了目标户时覆盖文件里的广告户ID/店铺授权BC，Excel 广告户ID 列不再必填。服务端未指定 BC 时默认取授权时间最新的连接。说明：设置页「启用」开关按广告户存（同户多连接共用），无法据此区分 BC，故用授权时间作默认。

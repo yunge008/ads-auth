@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { callGmvMaxWrite } from "@/lib/api";
 import { useConnections, useBCAdvertisers } from "@/lib/store";
 import { CopyFromAccount, FailureList } from "@/components/gmv-max/CopyFromAccount";
+import { TargetPicker } from "@/components/gmv-max/TargetPicker";
 
 export const Route = createFileRoute("/gmv-max-create")({
   head: () => ({ meta: [{ title: "GMV MAX新建 - TikTok授权工具" }] }),
@@ -268,6 +269,9 @@ function GmvMaxCreatePage() {
   const [batchRows, setBatchRows] = React.useState<BatchRowState[]>([]);
   const [fileName, setFileName] = React.useState("");
   const [batchSubmitting, setBatchSubmitting] = React.useState(false);
+  // 页面选的目标户 + BC：选了就覆盖 Excel 里的「广告户ID」「店铺授权BC」
+  const [batchAdv, setBatchAdv] = React.useState("");
+  const [batchBc, setBatchBc] = React.useState("");
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const TEMPLATE_HEADERS = ["广告户ID", "广告组名称", "商品ID", "ROI", "预算", "开始时间", "结束时间"];
@@ -337,7 +341,6 @@ function GmvMaxCreatePage() {
         const rowNo = idx + 2; // header is row 1
         if (!advertiser_id && !campaign_name && !item_group_ids.length) return; // skip fully blank row
         const issues: string[] = [];
-        if (!advertiser_id) issues.push("广告户ID 为空");
         if (!campaign_name) issues.push("广告组名称为空");
         if (!item_group_ids.length) issues.push("商品ID 为空");
         if (identityBad) issues.push("视频账号JSON 格式错误");
@@ -376,8 +379,11 @@ function GmvMaxCreatePage() {
         try {
           const { advertiser_id, campaign_name, item_group_ids, roas_bid, budget, start_time, end_time,
             identity_list, accelerate_testing_for_new_videos, store_authorized_bc_id } = batchRows[i];
-          const res = await runBatch([{ advertiser_id, campaign_name, item_group_ids, roas_bid, budget, start_time, end_time,
-            identity_list, accelerate_testing_for_new_videos, store_authorized_bc_id }]);
+          const adv = batchAdv || advertiser_id;
+          if (!adv) throw new Error("未选目标广告户，且该行广告户ID 为空");
+          const res = await runBatch([{ advertiser_id: adv, campaign_name, item_group_ids, roas_bid, budget, start_time, end_time,
+            identity_list, accelerate_testing_for_new_videos,
+            store_authorized_bc_id: batchAdv ? batchBc : store_authorized_bc_id }]);
           const r0 = res[0];
           if (r0?.ok && !r0.partial) ok++;
           setBatchRows((prev) => prev.map((r, idx) => (idx === i ? {
@@ -487,10 +493,12 @@ function GmvMaxCreatePage() {
         <CardContent className="space-y-3">
           <p className="text-xs text-muted-foreground">
             列：广告户ID / 广告组名称 / 商品ID（多个用逗号或换行分隔）/ ROI / 预算 / 开始时间（可空）/ 结束时间（可空）。设置逻辑同「单个新建」。
-            可选列：视频账号JSON / 新素材优先测试（ON/OFF）/ 店铺授权BC。开始/结束时间按 UTC+0 填（北京时间减 8 小时）。
+            可选列：视频账号JSON / 新素材优先测试（ON/OFF）/ 店铺授权BC。上方选了目标广告户时，覆盖文件里的广告户ID和店铺授权BC。开始/结束时间按 UTC+0 填（北京时间减 8 小时）。
             模板 A:C 列固定为文本格式，F:G 列固定为日期时间格式。
           </p>
           <div className="flex flex-wrap items-center gap-2">
+            <TargetPicker advOptions={advOptions} advertiserId={batchAdv} onAdvertiserChange={setBatchAdv}
+              bcId={batchBc} onBcChange={setBatchBc} disabled={batchSubmitting} />
             <Button size="sm" variant="outline" onClick={downloadTemplate}><Download className="h-4 w-4 mr-1" />下载模板</Button>
             <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={batchSubmitting}>
               <Upload className="h-4 w-4 mr-1" />上传文件

@@ -50,11 +50,13 @@ function genRequestId(): string {
 async function loadAdv(db: SupabaseClient, advertiserId: string, preferBc?: string) {
   const [{ data: shop, error: e1 }, { data: conns, error: e2 }] = await Promise.all([
     db.from("advertiser_countries").select("shop_id").eq("advertiser_id", advertiserId).maybeSingle(),
-    db.from("tiktok_connections").select("access_token, advertiser_ids, bc_id").contains("advertiser_ids", [advertiserId]),
+    db.from("tiktok_connections").select("access_token, advertiser_ids, bc_id, created_at").contains("advertiser_ids", [advertiserId]),
   ]);
   if (e1) throw new Error(e1.message);
   if (e2) throw new Error(e2.message);
-  let list = (conns ?? []) as Conn[];
+  // 默认授权时间最新的连接在前（切户后 BC 可能换成新授权的那个）
+  let list = ((conns ?? []) as (Conn & { created_at?: string })[])
+    .sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? ""))) as Conn[];
   if (preferBc) list = [...list.filter((c) => c.bc_id === preferBc), ...list.filter((c) => c.bc_id !== preferBc)];
   return {
     storeId: (shop?.shop_id as string | null) ?? null,
