@@ -4,11 +4,7 @@
 // 不复制、标「手动」：全店商品组、手选视频组。商品 >50 / 视频账号 >20 由服务端先降级建组再 update 补全。
 import * as React from "react";
 import * as XLSX from "xlsx";
-import { Copy, Download, Play, HelpCircle, ArrowRightLeft } from "lucide-react";
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
-  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { Copy, Download, Play, HelpCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -121,7 +117,6 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
   const [rawDump, setRawDump] = React.useState<unknown[]>([]);
   const [holder, setHolder] = React.useState<{ id: string | null; name: string | null; err?: string } | null>(null);
   const [authBusy, setAuthBusy] = React.useState(false);
-  const [confirmOpen, setConfirmOpen] = React.useState(false);
 
   type AuthCheck = { holder_advertiser_id: string | null; holder_advertiser_name: string | null; store_found: boolean };
   const checkAuth = React.useCallback(async (adv: string) => {
@@ -138,19 +133,6 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
   }, []);
   React.useEffect(() => { void checkAuth(dstId); }, [dstId, checkAuth]);
 
-  const grantAuth = async () => {
-    setConfirmOpen(false);
-    setAuthBusy(true);
-    try {
-      await callGmvMaxWrite({ action: "auth_grant", advertiser_id: dstId });
-      toast.success("已切换独占授权");
-    } catch (e) {
-      toast.error(`切户失败：${(e as Error).message}`);
-    } finally {
-      setAuthBusy(false);
-      void checkAuth(dstId);
-    }
-  };
   const dstHolds = !!dstId && holder?.id === dstId;
 
   const load = async () => {
@@ -276,11 +258,10 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
                 <button type="button" aria-label="说明" className="text-muted-foreground"><HelpCircle className="h-4 w-4" /></button>
               </TooltipTrigger>
               <TooltipContent className="max-w-sm text-xs leading-relaxed">
-                流程：读取源户 →（下载存档）→ 切户 → 复制；也可下载后用「Excel 批量新建」上传首个 sheet「导入」。
+                流程：读取源户 →（下载存档）→ 在 TikTok 后台切户（需对方同意）→ 复制；也可下载后用「Excel 批量新建」上传首个 sheet「导入」。
                 复制名称、商品、ROI（按名称 R 后最后一个数，解析不出用 info）、预算、视频来源账号；新素材优先测试全开；立即开始，不开促销日、不开自动加预算。
                 视频账号按源组 info 原顺序取前 20（原组上限 20）。商品超过 50 被拒时先建 50 个再自动补全；补全失败标「已建·需处理」并列出缺的商品。
                 全店商品组、手选视频组标「手动」不复制。所有未成功的组在上方红框列出。
-                切户后原持有户在该店铺的 GMV Max 广告组全部自动暂停。
                 AI 素材（审核后发布）接口无此字段，建完需后台手动开。
               </TooltipContent>
             </Tooltip>
@@ -299,11 +280,6 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
             <span className={`text-xs ${dstHolds ? "text-green-600" : "text-amber-600"}`} aria-live="polite">
               {authBusy ? "授权查询中…" : holder?.err ? `授权：${holder.err}` : dstHolds ? "已独占授权" : `授权在：${holder?.name ?? holder?.id ?? "无"}`}
             </span>
-          )}
-          {dstId && !dstHolds && !authBusy && (
-            <Button size="sm" variant="destructive" onClick={() => setConfirmOpen(true)} disabled={running || !!loading}>
-              <ArrowRightLeft className="h-4 w-4 mr-1" />切户
-            </Button>
           )}
           <Button size="sm" onClick={run} disabled={running || !!loading || !selectedCount || !dstId}>
             <Play className="h-4 w-4 mr-1" />{running ? "复制中…" : `复制（${selectedCount}）`}
@@ -356,21 +332,6 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
           </div>
         )}
       </CardContent>
-      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>把店铺 GMV Max 独占授权切到 {dstId}？</AlertDialogTitle>
-            <AlertDialogDescription>
-              当前持有方 {holder?.name ?? holder?.id ?? "未知"} 在该店铺的所有 GMV Max 广告组会被 TikTok 自动暂停。
-              {rows.length ? "" : " 还没读取源户广告组，切户后旧户可能读不到。"}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={grantAuth}>确认切户</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </Card>
   );
 }

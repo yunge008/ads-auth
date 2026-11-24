@@ -88,16 +88,16 @@ function cleanIdentityList(v: unknown): Record<string, string>[] {
 // 而 /campaign/gmv_max/info/ 不返回它，只能从这里补。按 advertiser 缓存 10 分钟（批量逐行调用时省请求）。
 type IdentityInfo = Record<string, unknown>;
 const identityCache = new Map<string, { at: number; byId: Map<string, IdentityInfo> }>();
-async function targetIdentities(conns: Conn[], advertiserId: string, storeId: string) {
+async function targetIdentities(conns: Conn[], advertiserId: string, storeId: string, bcId: string) {
   const key = `${advertiserId}:${storeId}`;
   const hit = identityCache.get(key);
   if (hit && Date.now() - hit.at < 600_000) return hit.byId;
   const byId = new Map<string, IdentityInfo>();
   await withConns(conns, async (token) => {
-    // 只用 gmv-max-identity-get 已验证可用的参数（advertiser_id + store_id）
+    // 实测必填：advertiser_id + store_id + store_authorized_bc_id
     const data = await tt(token, "/gmv_max/identity/get/", {
       method: "GET",
-      params: { advertiser_id: advertiserId, store_id: storeId },
+      params: { advertiser_id: advertiserId, store_id: storeId, store_authorized_bc_id: bcId },
     });
     const add = (d: Record<string, unknown>) => {
       const list = (d.identity_list ?? d.list ?? []) as IdentityInfo[];
@@ -110,7 +110,7 @@ async function targetIdentities(conns: Conn[], advertiserId: string, storeId: st
     for (let page = 2; page <= totalPage; page++) {
       add(await tt(token, "/gmv_max/identity/get/", {
         method: "GET",
-        params: { advertiser_id: advertiserId, store_id: storeId, page: String(page), ...(pi.page_size ? { page_size: String(pi.page_size) } : {}) },
+        params: { advertiser_id: advertiserId, store_id: storeId, store_authorized_bc_id: bcId, page: String(page), ...(pi.page_size ? { page_size: String(pi.page_size) } : {}) },
       }));
     }
   });
@@ -177,7 +177,7 @@ export async function createOne(db: SupabaseClient, r: CreateRow): Promise<Creat
   if (identityList.length) {
     let avail: Map<string, IdentityInfo>;
     try {
-      avail = await targetIdentities(conns, advertiserId, storeId);
+      avail = await targetIdentities(conns, advertiserId, storeId, bcId);
     } catch (e) {
       return { ok: false, error: `查询目标户视频账号失败：${(e as Error).message}` };
     }
