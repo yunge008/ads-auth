@@ -155,7 +155,9 @@ export async function createOne(db: SupabaseClient, r: CreateRow): Promise<Creat
   const budget = Number(r.budget);
   if (!/^\d+$/.test(advertiserId)) return { ok: false, error: "advertiser_id 必填" };
   if (!name) return { ok: false, error: "campaign_name 必填" };
-  if (!ids.length) return { ok: false, error: "商品ID 至少一个" };
+  if (!ids.length) return { ok: false, error: "商品ID 至少一个（全店商品填 ALL）" };
+  // 商品ID 只填 ALL = 全店商品组（product_specific_type=ALL，不传 item_group_ids）
+  const allProducts = ids.length === 1 && ids[0].toUpperCase() === "ALL";
   if (!(roas > 0)) return { ok: false, error: "ROI 必须大于 0" };
   if (!(budget > 0)) return { ok: false, error: "预算必须大于 0" };
 
@@ -172,8 +174,8 @@ export async function createOne(db: SupabaseClient, r: CreateRow): Promise<Creat
     store_id: storeId,
     store_authorized_bc_id: bcId,
     shopping_ads_type: "PRODUCT",
-    product_specific_type: "CUSTOMIZED_PRODUCTS",
-    item_group_ids: ids,
+    product_specific_type: allProducts ? "ALL" : "CUSTOMIZED_PRODUCTS",
+    ...(allProducts ? {} : { item_group_ids: ids }),
     optimization_goal: "VALUE",
     deep_bid_type: "VO_MIN_ROAS",
     roas_bid: roas,
@@ -233,7 +235,7 @@ export async function createOne(db: SupabaseClient, r: CreateRow): Promise<Creat
       if (!campaignId) return { ok: false, error: "建组返回无 campaign_id" };
     } catch (e) {
       lastErr = (e as Error).message;
-      const curIds = body.item_group_ids as string[];
+      const curIds = (body.item_group_ids as string[] | undefined) ?? [];
       if ("accelerate_testing_for_new_videos" in body && /accelerate/i.test(lastErr)) {
         delete body.accelerate_testing_for_new_videos;
         notes.push("接口不收「新素材优先测试」，需后台手动开");

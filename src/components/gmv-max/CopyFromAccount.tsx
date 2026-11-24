@@ -1,7 +1,7 @@
 // 「从账户复制」：读源广告户全部 Product GMV Max 广告组（gmv-max-campaign-info），
 // 勾选后逐个在目标广告户新建（gmv-max-adgroup-batch-create，每次 1 行）。
 // 复制：名称 / 商品 / ROI / 预算 / identity_list / affiliate_posts_enabled。
-// 不复制、标「手动」：全店商品组、手选视频组。商品 >50 / 视频账号 >20 由服务端先降级建组再 update 补全。
+// 不复制、标「手动」：手选视频组。全店商品组以 商品ID=ALL 复制。商品 >50 / 视频账号 >20 由服务端先降级建组再 update 补全。
 import * as React from "react";
 import * as XLSX from "xlsx";
 import { Copy, Download, Play, HelpCircle } from "lucide-react";
@@ -54,7 +54,8 @@ function pickCampaign(info: Record<string, unknown> | undefined): Record<string,
 }
 // 名称 R 后连续数字串的最后一个 = ROI：807-R3.4-5.5-7.5-5.0 → 5.0；观察六11.19-R5.0 → 5.0
 function roiFromName(name: string): number | null {
-  const m = name.match(/R(\d+(?:\.\d+)?(?:-+\d+(?:\.\d+)?)*)/); // 容忍 "4.4--5.7" 双横线
+  // R 前不能紧挨字母（AR333 不算，ROI 算）；带 % 的数不算（-3%券）；容忍 "4.4--5.7" 双横线
+  const m = name.match(/(?:ROI|(?<![A-Za-z])R)(\d+(?:\.\d+)?(?:-+\d+(?:\.\d+)?(?![\d.%]))*)/);
   if (!m) return null;
   const v = Number(m[1].split(/-+/).pop());
   return v > 0 ? v : null;
@@ -83,9 +84,10 @@ function toRow(c: { campaign_id: string; campaign_name: string; operation_status
   };
   const manual = (why: string) => Object.assign(row, { status: "manual" as Status, note: why });
   if (err) return manual(`读取失败：${err}`);
-  if (info.product_specific_type === "ALL") return manual("全店商品组");
   if (info.product_video_specific_type === "CUSTOM_SELECTION") return manual("手选视频组");
-  if (!ids.length) return manual("无商品");
+  if (info.product_specific_type === "ALL") {
+    row.itemGroupIds = ["ALL"]; // 全店商品组：建组时 product_specific_type=ALL
+  } else if (!ids.length) return manual("无商品");
   // 负责人决定：ROI 以名称为准，名称里解析不出才用 info
   if (row.nameRoi != null) {
     if (Math.abs(row.nameRoi - row.infoRoi) > 1e-6) row.note = `ROI 按名称 ${row.nameRoi}（info ${row.infoRoi}）`;
@@ -267,7 +269,7 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
                 流程：读取源户 →（下载存档）→ 在 TikTok 后台切户（需对方同意）→ 复制；也可下载后用「Excel 批量新建」上传首个 sheet「导入」。
                 复制名称、商品、ROI（按名称 R 后最后一个数，解析不出用 info）、预算、视频来源账号；新素材优先测试全开；立即开始，不开促销日、不开自动加预算。
                 视频账号与源组完全一致（不截断）。商品超过 50 被拒时先建 50 个再自动补全；补全失败标「已建·需处理」并列出缺的商品。
-                全店商品组、手选视频组标「手动」不复制。所有未成功的组在上方红框列出。
+                全店商品组按全店商品复制（同一店铺只能有一个启用中的全店组）；手选视频组标「手动」不复制。所有未成功的组在上方红框列出。
                 AI 素材（审核后发布）接口无此字段，建完需后台手动开。
               </TooltipContent>
             </Tooltip>

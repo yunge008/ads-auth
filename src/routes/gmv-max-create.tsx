@@ -514,7 +514,7 @@ function GmvMaxCreatePage() {
         <CardContent className="space-y-3">
           <p className="text-xs text-muted-foreground">
             列：广告户ID / 广告组名称 / 商品ID（多个用逗号或换行分隔）/ ROI / 预算 / 开始时间（可空）/ 结束时间（可空）。设置逻辑同「单个新建」。
-            可选列：视频账号JSON / 新素材优先测试（ON/OFF）/ 店铺授权BC。上方选了目标广告户时，覆盖文件里的广告户ID和店铺授权BC。开始/结束时间按 UTC+0 填（北京时间减 8 小时）。
+            商品ID 填 ALL = 全店商品组。可选列：视频账号JSON / 新素材优先测试（ON/OFF）/ 店铺授权BC。上方选了目标广告户时，覆盖文件里的广告户ID和店铺授权BC。开始/结束时间按 UTC+0 填（北京时间减 8 小时）。
             模板 A:C 列固定为文本格式，F:G 列固定为日期时间格式。
           </p>
           <div className="flex flex-wrap items-center gap-2">
