@@ -31,3 +31,8 @@ git show <提交号>:supabase/migrations/<文件名>
 | 2026-11-18 | `20261118150000_sea_inventory_file_wh_names.sql` | `68a0637` | SEA库存监控：各仓导出文件仓库名（file_config.warehouse_value）；TH-NEW 改 BigSeller「AR thailand 泰国」 |
 | 2026-11-19 | `20261118210000_sea_inventory_sales_daily.sql` | `331fa0f` | SEA库存监控：新表 `sea_inv_sales_daily`（店铺 × SKU ID × 仓库 × 本地日 的件数，保留 60 天，RLS 仅 service role）+ `sea_inv_shop_sync.sales_synced_day` |
 | 2026-11-19 | `20261118230000_sea_inventory_target_days.sql` | `d96a401` | SEA库存监控：`sea_inv_settings.target_days`（补到目标天数，默认 30） |
+| ≤2026-11-24 | `20261117120000_outreach_core.sql` | `538dbce` | 达人建联核心 5 表（outreach_touches / creator_state / creator_events / conflicts / settings）。执行日未记录，2026-11-24 检查 SQL 确认已存在 |
+| ≤2026-11-24 | `20261123120000_tts_multi_app.sql` | `538dbce` | TikTok Shop 多应用：`tts_apps` + `tts_shops.app_code` + pg_cron `tts-token-refresh`。同上确认 |
+| ≤2026-11-24 | `20261123130000_outreach_settings_rls.sql` | `538dbce` | `outreach_settings` 开 RLS。同上确认 |
+| ≤2026-11-24 | `20261124120000_gmv_max_import_logs.sql` | `b82e5cf` | GMV Max 导入记录表 `gmv_max_import_logs`。同上确认 |
+| ≤2026-11-24 | `20261124130000_gmv_max_import_logs_src_dst.sql` | `aedd688` | 导入记录加来源/去向户名与 BC 6 列。同上确认 |

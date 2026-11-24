@@ -7,20 +7,19 @@
 > 标记：✅ 已核验 ｜ ⚠️ 未核验（代码写了但没实测或无权限确认）｜ 🙋 需负责人决策/提供 ｜ 🔧 需负责人手动操作（跑 SQL / 让 Lovable 部署）
 > 优先级：P0 本轮必须做 ｜ P1 本轮争取 ｜ P2 之后
 
-最后更新：2026-11-24（1124.252）
+最后更新：2026-11-24（1124.254）
 
 ---
 
 ## 0. 全局：先处理的人工事项
 
-Lovable 积分已充值 → **Edge Function 改动现在可以部署**。部署后跑 `bash tools/check-deploy.sh` 核对（目前只能探测 `_shared/auth.ts` 版本，其余靠实测）。
+Lovable 积分已充值 → Edge Function 改动可以部署（B 类：给 Lovable 指令）。部署后跑 `bash tools/check-deploy.sh` 核对（目前只能探测 `_shared/auth.ts` 版本，其余靠实测）。
 
 | # | 事项 | 类型 | 状态 |
 |---|---|---|---|
-| G1 | 部署：`attribution-upload`（快照心跳）、`attribution-identity-build`（身份合并/区间修复）、`tts-listing`（图片白名单补火山 TOS） | 🔧 Lovable | 待部署（PLAN 待部署清单） |
-| G2 | 部署：`feishu-read`（skip_archive + 飞书瞬时错误重试，1124.227/231）。前端已兜底，不部署也能用，部署后更快更稳 | 🔧 Lovable | 待部署（**上轮遗漏：未列入 PLAN 待部署清单，本次补上**） |
-| G3 | 确认下列 migration 是否已在 SQL Editor 执行：`20261117120000_outreach_core`、`20261123120000_tts_multi_app`、`20261123130000_outreach_settings_rls`、`20261124120000_gmv_max_import_logs`、`20261124130000_gmv_max_import_logs_src_dst` | 🔧 SQL | ⚠️ 未核验（AI 无该库读权限，`docs/MIGRATIONS.md` 台账未登记这几条） |
-| G4 | 是否给 AI 开数据库只读通道（例如把 Lovable Cloud 项目接到 Supabase MCP，或提供只读查询路由） | 🙋 | 没有它，所有「表里数据是否正确」只能靠你截图核对 |
+| G1 | 部署 `attribution-upload`、`attribution-identity-build`、`tts-listing`、`feishu-read` | 🔧 Lovable | ✅ 1124.253 已部署，四个均在线应答 |
+| G2 | 5 个 migration 是否已执行（outreach_core / tts_multi_app / outreach_settings_rls / gmv_max_import_logs / _src_dst） | 🔧 SQL | ✅ 2026-11-24 负责人跑检查 SQL，6 项全部 true，已登记 `docs/MIGRATIONS.md` |
+| G3 | AI 数据库只读通道（只读查询路由 + 专用只读角色 + 专用口令） | 🙋 | 方案已给，待负责人确认后实施 |
 
 ---
 
@@ -30,7 +29,7 @@ Lovable 积分已充值 → **Edge Function 改动现在可以部署**。部署�
 
 | 优先 | 待办 | 备注 |
 |---|---|---|
-| P1 | G2 部署后，验证「获取所有素材」整批耗时与失败率 | 当前按人拆请求并发 3 |
+| P1 | `feishu-read` 新版已上线，验证「获取所有素材」整批耗时与失败率 | 当前按人拆请求并发 3 |
 | P2 | 素材成效页：GMV Max 取数恢复后（见 §2）才有新数据 | 依赖 §2 |
 | P2 | 评论内容 tab（已隐藏） | TikTok API 不支持，暂不做 |
 
@@ -75,7 +74,7 @@ Lovable 积分已充值 → **Edge Function 改动现在可以部署**。部署�
 
 | 优先 | 待办 | 备注 |
 |---|---|---|
-| P0 | G1 部署 `attribution-upload`、`attribution-identity-build`，然后点一次重新计算核对 | 3 个 bug 修复未上线 |
+| P0 | 修复已上线（1124.253）：点一次「重新计算」与「重建身份与区间」核对不再报错 | 🔧 负责人点按钮 |
 | P1 | 阶段 3 ②–⑨ 引擎切换（**会改归因数字**，逐项单独提交、单独验收）：②发样/回收双事件 ④交接并入事件流 ⑤站点权限校验 ⑥Pass 2 改 creator_key ⑦PENDING/EXCLUDED 两桶 ⑧人工判定接入 ⑨pickVidOwner 去重键 | 每项提交前给 before/after 对账 |
 | P1 | 阶段 4：事实层维护页（都不算规则 / 站点权限 / 交接） | 表已建，缺 UI |
 | P2 🙋 | 「建联-自动」sheet 的 GMV 是否计入：A 当作同事「自动」（不改代码）/ B 收尾交给站点 BD | 负责人倾向 A，需在人员表登记「自动」 |
@@ -102,7 +101,7 @@ Lovable 积分已充值 → **Edge Function 改动现在可以部署**。部署�
 | 老达人维护（S5） | ⬜ | 依赖 S0 | P2 |
 | 后台管理（账号/模板/密码/BD 权限） | 账号体系沿用 `app_accounts` + tab 权限 | outreach 子权限（谁能发、谁能审）、话术模板、佣金审批密码 | P1 |
 | 多账户（= 多个登录用户，负责人 2026-11-24 确认） | 登录账号体系已有：`app_accounts` 每人一个口令 + 按页面分配权限 | 建联数据按用户隔离（BD 只看/只操作自己的达人与会话，管理员看全部）；动作级权限（发私信 / 建计划 / 审样 / 超佣金审批）；操作日志记操作人 | P0 |
-| 多店铺 × 多应用 | 多应用代码完成（sea / mx-ar / mx-ne / mx-sj / jp）⚠️ 未实测 | 跑 G3 migration → 设置页填 5 个应用凭据 → 各店授权 → 实测 token 刷新 | P0 🔧 |
+| 多店铺 × 多应用 | 多应用代码完成（sea / mx-ar / mx-ne / mx-sj / jp），migration 已执行 ✅；授权流程 ⚠️ 未实测 | 设置页填 5 个应用凭据 → 各店授权 → 实测 token 刷新（pg_cron `tts-token-refresh` 已在） | P0 🔧 |
 | Chrome 插件（`tiktok-plug-kol`，独立仓库） | 已有「已发标签」注入 | 先做本后台只读接口（按 handle/open_id 批量查归属 TAG）；轮到插件侧改动时 AI 提醒负责人把仓库加进会话，插件侧在 `dev-test` 分支开发 | P1 |
 | 飞书输出（建联-自动 sheet、多维表日志/总表/历史归属/月度订单/触达记录） | 表已建，未写 | 随 S0/S1 接入写入 | P1 |
 
@@ -122,7 +121,7 @@ Lovable 积分已充值 → **Edge Function 改动现在可以部署**。部署�
 |---|---|---|---|
 | 店铺数据导出 | 订单/结算/联盟订单/商品活动价 已部署；PH/TH 与后台对账一致 ✅ | GMV Max 素材维度、每晚自动汇总写飞书（表1 两张日 sheet 已建） | P2 |
 | SEA 库存监控 | 千易 MY/PH、顶妙 TH1 API ✅；BigSeller 手动上传；一键改库存代码完成但开关关闭 | 🙋 统计窗口/保底/目标天数口径；🔧 PH 另两店授权后绑仓；提供泰国新仓系统 | P2 |
-| 饰品上架工具链 | Excel 三步 + TOS ✅ | 🔧 部署 tts-listing（G1）；AR140 PH 导入实测；🙋 JP 模板与包装 | P2 |
+| 饰品上架工具链 | Excel 三步 + TOS ✅ | tts-listing 已部署 ✅；AR140 PH 导入实测；🙋 JP 模板与包装 | P2 |
 | 视频发布 | 文档核验完 | 🔧 申请视频发布 scope 后才能开工 | P2（阻塞） |
 
 ---
