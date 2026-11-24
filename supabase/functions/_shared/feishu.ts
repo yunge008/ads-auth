@@ -94,14 +94,40 @@ async function readRangeOnce(
   range: string,
   valueRenderOption: ValueRenderOption = "ToString",
 ) {
-  const res = await fetch(
-    `${FEISHU_BASE}/sheets/v2/spreadsheets/${spreadsheetToken}/values/${encodeURIComponent(range)}` +
-      `?valueRenderOption=${valueRenderOption}`,
-    { headers: { Authorization: `Bearer ${token}` } },
-  );
-  const json = await res.json();
-  if (json.code !== 0) throw new Error(`读取 ${range} 失败: ${json.msg}`);
-  return (json.data?.valueRange?.values as unknown[][]) ?? [];
+  // 飞书对大表会间歇返回「data not ready, retry later」/限频/5xx，属瞬时错误：退避重试，
+  // 不重试的话一个分块失败就让整次「获取所有素材」报错。退避 1/2/4/8/8s，共最多 6 次。
+  const MAX_ATTEMPTS = 6;
+  let lastMsg = "";
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let json: { code?: number; msg?: string; data?: { valueRange?: { values?: unknown[][] } } } | null = null;
+    try {
+      const res = await fetch(
+        `${FEISHU_BASE}/sheets/v2/spreadsheets/${spreadsheetToken}/values/${encodeURIComponent(range)}` +
+          `?valueRenderOption=${valueRenderOption}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      const text = await res.text();
+      try {
+        json = JSON.parse(text);
+      } catch {
+        lastMsg = `HTTP ${res.status} 非 JSON 响应`;
+      }
+    } catch (e) {
+      lastMsg = `网络错误 ${(e as Error).message}`;
+    }
+    if (json && json.code === 0) return (json.data?.valueRange?.values as unknown[][]) ?? [];
+    if (json) lastMsg = json.msg ?? `code ${json.code}`;
+    const transient = !json || isTransientFeishuError(json.code, lastMsg);
+    if (!transient || attempt === MAX_ATTEMPTS) break;
+    await new Promise((r) => setTimeout(r, Math.min(8000, 1000 * 2 ** (attempt - 1))));
+  }
+  throw new Error(`读取 ${range} 失败: ${lastMsg}`);
+}
+
+function isTransientFeishuError(code: number | undefined, msg: string): boolean {
+  // 99991400 = 请求频率超限；90235 等 data not ready 类按 msg 识别（不同接口 code 不统一）
+  if (code === 99991400) return true;
+  return /not ready|retry later|too many|frequen|timeout|internal error|busy/i.test(msg);
 }
 
 
