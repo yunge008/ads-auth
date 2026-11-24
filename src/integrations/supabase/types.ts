@@ -3110,6 +3110,11 @@ export type Database = {
       }
     }
     Functions: {
+      ai_reader_refresh_grants: { Args: never; Returns: Json }
+      ai_readonly_query: {
+        Args: { max_rows?: number; q: string }
+        Returns: Json
+      }
       attribution_apply_run: {
         Args: { _month: string; _run_id: string }
         Returns: {
