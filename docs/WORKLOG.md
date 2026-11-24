@@ -299,3 +299,4 @@
 2026-11-23 | claude | [1123.205] 负责人决定不迁移自有 Supabase、继续 Lovable Cloud；PLAN.md 新增「待部署 Edge Function 清单」记录未上线的函数改动，改动优先放前端/服务端路由以省积分。
 2026-11-23 | claude | [1123.206] 新增 tools/check-deploy.sh（无权限探测 Edge Function 是否已部署新版 auth.ts）；实测 39 个函数全部已是新版，口令注入修复已上线；PLAN 待部署清单只留 3 个外部无法探测的改动；ARCHITECTURE 记录 Lovable Cloud 环境信息；CLAUDE.md 加开工核对部署一条（负责人要求）。
 2026-11-24 | claude | [1124.207] GMV Max 账户迁移第 0 步：新增只读 Edge Function gmv-max-campaign-info（列出广告户全部 Product GMV Max 广告组 + 逐个 /campaign/gmv_max/info/ 原始 JSON，可选附 /gmv_max/store/list/），用于核实「AI 素材审核发布 / 新素材优先测试」字段（create 文档无此二项）及导出旧户设置。已核验 create 文档：promotion_days.is_enabled、auto_budget.auto_budget_enabled 默认 false；item_group_ids 单组上限 50；不传 identity_list 时用商品图做素材（现有批量创建未传，待核实影响）。
+2026-11-24 | claude | [1124.208] PLAN 记录 GMV Max 账户迁移任务与负责人决定（商品>50 的组不新建、手动处理）；纯文档。

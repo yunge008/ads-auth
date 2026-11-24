@@ -29,6 +29,9 @@
 
 ## 任务板
 
+| GMV Max 账户迁移（旧户广告组批量复制到新户） | 🔶 进行中 claude 2026-11-24 | supabase/functions/gmv-max-campaign-info/index.ts（已完成）、supabase/functions/gmv-max-adgroup-batch-create/index.ts、src/routes/gmv-max-create.tsx（待做） | 第 0 步只读函数已推 main，**等部署后跑 info**核实「AI 素材审核发布 / 新素材优先测试」字段（create 文档无这两项）。负责人决定：①名称最后一段数字 = ROI（与 info 的 roas_bid 交叉核对）②**商品 >50 的组不新建，标出来手动处理**③全部在 main 改。待做：批量创建带 identity_list；不传 promotion_days / auto_budget（文档：传了 promotion_days 对象会自动置 is_enabled=true，默认即关）；切独占授权会暂停旧户全部 GMV Max 组，须负责人确认后执行。为省 Lovable 积分，等 info 结果后一次性改完再部署。 |
+
+
 | 任务 | 状态 | 认领 | 涉及文件 | 备注 |
 | --- | --- | --- | --- | --- |
 | TikTok Shop 多应用（商家自用应用：MX-AR / MX-NE / MX-SJ / JP 各一个 app）+ token 自动刷新 | ✅ 代码完成 1123.197（不设默认应用，原应用改名 sea）（**待人工：跑 migration `20261123120000_tts_multi_app.sql`；Lovable 重新部署 tts-p0-probe / tts-export / tts-listing / sea-inventory / outreach-precheck / outreach-touch；设置页填 4 个应用凭据后授权实测**） | claude 2026-11-23 | supabase/migrations/20261123120000_tts_multi_app.sql、supabase/functions/_shared/tts.ts、supabase/functions/tts-p0-probe/index.ts、src/routes/api/public/hooks/tts-token-cron.ts、src/routes/oauth.tts.callback*.tsx、src/lib/ttsApi.ts、src/components/settings/TtsShopsPanel.tsx | app_secret 存表 `tts_apps`（负责人 2026-11-23 选 A）；原应用 = code `sea`，不设默认、不读 secrets，sea 也须在设置页填凭据并把 Partner Center 重定向链接改为 /oauth/tts/callback/sea |
