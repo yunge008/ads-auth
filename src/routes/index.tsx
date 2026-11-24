@@ -401,10 +401,11 @@ function AuthorizePage() {
     [],
   );
 
-  // 分页：每页行数 = 表格区高度 / 行高。素材列表卡片高度固定为一屏，
-  // 页面滚到底时整个卡片（工具栏 + 表格 + 翻页）正好在一屏内，不出现表格内滚动。
+  // 分页：固定每页 20 行；表格区高度 = 表头 + 20 × 实测行高，正好放下 20 行，
+  // 不出现表格内纵向滚动，最后一页不足 20 行时高度不变、翻页条不跳动。
+  const pageSize = 20;
   const tableBoxRef = React.useRef<HTMLDivElement>(null);
-  const [pageSize, setPageSize] = React.useState(15);
+  const [tableMinH, setTableMinH] = React.useState<number | undefined>(undefined);
   const [page, setPage] = React.useState(1);
   const pageCount = Math.max(1, Math.ceil(visibleMaterials.length / pageSize));
   // 只在筛选变化或条数变化时回第 1 页；授权过程中状态刷新不跳页
@@ -414,17 +415,11 @@ function AuthorizePage() {
   React.useLayoutEffect(() => {
     const el = tableBoxRef.current;
     if (!el) return;
-    const calc = () => {
-      const head = el.querySelector("thead")?.getBoundingClientRect().height ?? 40;
-      const firstRow = hasRows ? el.querySelector("tbody tr") : null;
-      const row = firstRow?.getBoundingClientRect().height || MATERIAL_ROW_PX;
-      const n = Math.max(5, Math.floor((el.clientHeight - head - 2) / row));
-      setPageSize((p) => (p === n ? p : n));
-    };
-    calc();
-    const ro = new ResizeObserver(calc);
-    ro.observe(el);
-    return () => ro.disconnect();
+    const head = el.querySelector("thead")?.getBoundingClientRect().height ?? 40;
+    const firstRow = hasRows ? el.querySelector("tbody tr") : null;
+    const row = firstRow?.getBoundingClientRect().height || MATERIAL_ROW_PX;
+    const h = Math.ceil(head + row * pageSize + 2);
+    setTableMinH((p) => (p === h ? p : h));
   }, [hasRows]);
   const pagedMaterials = React.useMemo(
     () => visibleMaterials.slice((page - 1) * pageSize, page * pageSize),
@@ -1100,7 +1095,7 @@ function AuthorizePage() {
       </div>
 
 
-      <Card className="flex flex-col h-[calc(100dvh-3rem)] min-h-[520px]" aria-label="素材列表">
+      <Card aria-label="素材列表">
         <CardHeader className="space-y-2 pb-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <CardTitle className="text-base flex items-baseline gap-2">
@@ -1157,47 +1152,55 @@ function AuthorizePage() {
                 清空筛选
               </Button>
             )}
+            {authStats && (
+              // 整块靠右，块内左对齐且宽度固定；数字按总数位数预留宽度，计数变化不左右跳动
+              <div
+                role="status"
+                aria-live="polite"
+                className="ml-auto flex w-[36rem] max-w-full flex-wrap items-center justify-start gap-x-3 gap-y-1.5 text-xs"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="w-[4em] font-medium">{authorizing ? "授权中" : "授权完毕"}</span>
+                  <div
+                    className="h-1.5 w-32 rounded-full bg-muted overflow-hidden"
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={authStats.total}
+                    aria-valuenow={authStats.done}
+                    aria-label="授权进度"
+                  >
+                    <div
+                      className="h-full bg-primary transition-[width]"
+                      style={{ width: `${authStats.total ? (authStats.done / authStats.total) * 100 : 0}%` }}
+                    />
+                  </div>
+                  <span
+                    className="tabular-nums text-muted-foreground"
+                    style={{ minWidth: `${String(authStats.total).length * 2 + 1}ch` }}
+                  >
+                    {authStats.done}/{authStats.total}
+                  </span>
+                </div>
+                {authStats.parts.map(([st, n]) => (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => setFStatus([st])}
+                    aria-label={`只看${st}（${n} 条）`}
+                    className="inline-flex items-center gap-1 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <StatusBadge status={st} />
+                    <span className="tabular-nums" style={{ minWidth: `${String(authStats.total).length}ch` }}>{n}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
-          {authStats && (
-            <div role="status" aria-live="polite" className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
-              <div className="flex items-center gap-2">
-                <span className="font-medium">{authorizing ? "授权中" : "授权完毕"}</span>
-                <div
-                  className="h-1.5 w-32 rounded-full bg-muted overflow-hidden"
-                  role="progressbar"
-                  aria-valuemin={0}
-                  aria-valuemax={authStats.total}
-                  aria-valuenow={authStats.done}
-                  aria-label="授权进度"
-                >
-                  <div
-                    className="h-full bg-primary transition-[width]"
-                    style={{ width: `${authStats.total ? (authStats.done / authStats.total) * 100 : 0}%` }}
-                  />
-                </div>
-                <span className="tabular-nums text-muted-foreground">
-                  {authStats.done}/{authStats.total}
-                </span>
-              </div>
-              {authStats.parts.map(([st, n]) => (
-                <button
-                  key={st}
-                  type="button"
-                  onClick={() => setFStatus([st])}
-                  aria-label={`只看${st}（${n} 条）`}
-                  className="inline-flex items-center gap-1 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <StatusBadge status={st} />
-                  <span className="tabular-nums">{n}</span>
-                </button>
-              ))}
-            </div>
-          )}
         </CardHeader>
 
-        <CardContent className="flex-1 min-h-0 flex flex-col pb-3">
-          <div ref={tableBoxRef} className="flex-1 min-h-0 border rounded-md overflow-auto">
+        <CardContent className="pb-3">
+          <div ref={tableBoxRef} className="border rounded-md overflow-x-auto" style={{ minHeight: tableMinH }}>
             <Table>
               <TableHeader>
                 <TableRow>
