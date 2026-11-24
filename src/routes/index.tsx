@@ -318,18 +318,25 @@ function AuthorizePage() {
       byStaff.set(m.staff_name, row);
     }
     const countries = Array.from(countrySet).sort();
+    const staffOrder = new Map<string, number>();
+    staff.forEach((st, i) => { if (!staffOrder.has(st.name)) staffOrder.set(st.name, i); });
     for (const f of fetchReport) {
       if (!byStaff.has(f.name)) byStaff.set(f.name, { pendingByCountry: new Map(), warning: 0, total: 0 });
     }
     const issueByStaff = new Map(fetchReport.filter((f) => f.issue).map((f) => [f.name, f.issue as string]));
     const rows = Array.from(byStaff.entries())
       .map(([staff_name, v]) => ({ staff_name, ...v, issue: issueByStaff.get(staff_name) }))
-      .sort((a, b) => a.staff_name.localeCompare(b.staff_name));
+      // 按「设置 → 人员表」行顺序；不在人员表里的名字（「授权记录」归档里的人）排在后面按名称排序
+      .sort((a, b) => {
+        const ia = staffOrder.get(a.staff_name) ?? Infinity;
+        const ib = staffOrder.get(b.staff_name) ?? Infinity;
+        return ia !== ib ? ia - ib : a.staff_name.localeCompare(b.staff_name);
+      });
     const colTotals = countries.map((c) => rows.reduce((s, r) => s + (r.pendingByCountry.get(c) ?? 0), 0));
     const grandTotal = rows.reduce((s, r) => s + r.total, 0);
     const warningTotal = rows.reduce((s, r) => s + r.warning, 0);
     return { statsRows: rows, statsCountries: countries, colTotals, grandTotal, warningTotal };
-  }, [materials, fetchReport]);
+  }, [materials, fetchReport, staff]);
 
 
   // Filter only (NO dynamic re-sort — order is frozen at fetch time)
@@ -454,7 +461,7 @@ function AuthorizePage() {
             : r.resp?.missing_sheets?.includes(sheet)
               ? `飞书无 sheet「${sheet}」`
               : count === 0
-                ? `sheet「${sheet}」无符合条件的行`
+                ? `sheet「${sheet}」0 条：没有「P 列 VID 非空且 Q 列授权码格式合法」的行（如授权码列为空）`
                 : undefined;
           return { name: r.name, sheet, count, issue };
         }),
