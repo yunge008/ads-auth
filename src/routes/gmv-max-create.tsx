@@ -17,7 +17,7 @@ import { toast } from "sonner";
 import { callGmvMaxWrite } from "@/lib/api";
 import { useConnections, useBCAdvertisers } from "@/lib/store";
 import { CopyFromAccount, FailureList } from "@/components/gmv-max/CopyFromAccount";
-import { TargetPicker, useBcOptions } from "@/components/gmv-max/TargetPicker";
+import { TargetPicker, useBcOptions, shortLabel } from "@/components/gmv-max/TargetPicker";
 import { ImportHistory, detailSheet, newBatchId, type DetailRow, type ProductResult } from "@/components/gmv-max/ImportHistory";
 
 export const Route = createFileRoute("/gmv-max-create")({
@@ -469,13 +469,6 @@ function GmvMaxCreatePage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-xl font-semibold tracking-tight">GMV MAX新建</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          真实调用 TikTok 建单接口，会产生真实花费。广告类型/商品类型/出价类型/排期类型/商品视频类型均按固定默认值
-          （商品卡 · 指定商品 · ROAS 最小化出价 · 自动挑选素材）。
-        </p>
-      </div>
 
       {/* 4 个 TAB 全部常驻挂载（forceMount + 隐藏），切换不丢已填内容、上传文件和执行结果 */}
       <Tabs value={tab} onValueChange={setTab}>
@@ -544,7 +537,9 @@ function GmvMaxCreatePage() {
             <div className="space-y-1">
               <span className="text-xs text-muted-foreground">广告户</span>
               <Select value={advertiserId} onValueChange={setAdvertiserId}>
-                <SelectTrigger><SelectValue placeholder="选择广告户" /></SelectTrigger>
+                <SelectTrigger aria-label="广告户"><SelectValue placeholder="选择广告户">
+                  {advertiserId ? shortLabel(advOptions.find((a) => a.id === advertiserId)?.name, advertiserId) : undefined}
+                </SelectValue></SelectTrigger>
                 <SelectContent>
                   {advOptions.map((a) => (
                     <SelectItem key={a.id} value={a.id}>
@@ -564,7 +559,9 @@ function GmvMaxCreatePage() {
               <span className="text-xs text-muted-foreground">店铺授权 BC</span>
               {singleBcs.length > 0 ? (
                 <Select value={singleBc} onValueChange={setSingleBc}>
-                  <SelectTrigger aria-label="店铺授权 BC"><SelectValue placeholder="选择 BC" /></SelectTrigger>
+                  <SelectTrigger aria-label="店铺授权 BC"><SelectValue placeholder="选择 BC">
+                    {singleBc ? shortLabel(singleBcs.find((b) => b.bcId === singleBc)?.bcName, singleBc) : undefined}
+                  </SelectValue></SelectTrigger>
                   <SelectContent>
                     {singleBcs.map((b) => <SelectItem key={b.bcId} value={b.bcId}>{b.bcName}（{b.bcId}）{b.matched ? "" : " · 未匹配到该户"}</SelectItem>)}
                   </SelectContent>

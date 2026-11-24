@@ -405,11 +405,28 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
     }
     XLSX.utils.book_append_sheet(wb, importWs, "导入");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), "复制");
-    const done = rows.filter((r) => r.status === "ok" || r.status === "partial" || r.status === "error");
-    if (done.length) {
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["campaign_id", "info_json"], ...rawDump.map((d) => {
+      const x = d as { campaign_id: string };
+      return [x.campaign_id, JSON.stringify(d).slice(0, 32000)];
+    })]), "原始info");
+    XLSX.writeFile(wb, `gmv-max-复制-${srcId}-${Date.now()}.xlsx`);
+  };
+
+  // 复制结果：执行过的组 + 逐商品明细（执行前按钮禁用）
+  const doneRows = rows.filter((r) => r.status === "ok" || r.status === "partial" || r.status === "error");
+  const downloadResult = () => {
+    const done = doneRows;
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+      ["源CampaignID", "名称", "状态", "新CampaignID", "备注"],
+      ...done.map((r) => [r.srcId, r.name, statusLabel[r.status], r.newId ?? "", r.note]),
+    ]), "结果");
+    {
       const detail: DetailRow[] = done.flatMap((r) => {
         const base = {
-          campaign_name: r.name, new_campaign_id: r.newId ?? "", source_campaign_id: r.srcId, advertiser_id: dstId, bc_id: dstBc,
+          campaign_name: r.name, new_campaign_id: r.newId ?? "", source_campaign_id: r.srcId,
+          source_advertiser_id: srcId, source_advertiser_name: advName(srcId), source_bc_id: srcBc, source_bc_name: bcNameOf(srcBc),
+          advertiser_id: dstId, advertiser_name: advName(dstId), bc_id: dstBc, bc_name: dstBcName,
           group_status: statusLabel[r.status], group_note: r.note,
         };
         return r.products?.length
@@ -418,11 +435,7 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
       });
       XLSX.utils.book_append_sheet(wb, detailSheet(detail), "商品明细");
     }
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["campaign_id", "info_json"], ...rawDump.map((d) => {
-      const x = d as { campaign_id: string };
-      return [x.campaign_id, JSON.stringify(d).slice(0, 32000)];
-    })]), "原始info");
-    XLSX.writeFile(wb, `gmv-max-复制-${srcId}-${Date.now()}.xlsx`);
+    XLSX.writeFile(wb, `gmv-max-复制结果-${dstId}-${Date.now()}.xlsx`);
   };
 
 
@@ -448,21 +461,34 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
+        {/* 第一行：源户 / 源 BC → 目标户 / 目标 BC（+ 店铺授权状态） */}
         <div className="flex flex-wrap items-center gap-2">
           <TargetPicker advOptions={advOptions} advertiserId={srcId} onAdvertiserChange={setSrcId}
             bcId={srcBcSel} onBcChange={setSrcBcSel} advLabel="源广告户" disabled={running || !!loading} />
           <span aria-hidden className="text-muted-foreground">→</span>
           <TargetPicker advOptions={advOptions} advertiserId={dstId} onAdvertiserChange={setDstId}
             bcId={dstBc} onBcChange={setDstBc} disabled={running} />
-          {/* 读取按目标 BC 的授权读源组（视频账号与目标户一致），所以放在选完目标户/BC 之后 */}
-          <Button size="sm" variant="outline" onClick={load} disabled={!!loading || running || !srcId || !srcBcSel}>
-            <Copy className="h-4 w-4 mr-1" />{loading || "读取广告组"}
-          </Button>
           {dstId && (
             <span className={`text-xs ${dstHolds ? "text-green-600" : "text-amber-600"}`} aria-live="polite">
               {authBusy ? "授权查询中…" : holder?.err ? `授权：${holder.err}` : dstHolds ? "店铺已授权为新账号" : `店铺授权在：${holder?.name ?? holder?.id ?? "无"}`}
             </span>
           )}
+        </div>
+        {/* 第二行：按操作顺序 */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="outline" onClick={load} disabled={!!loading || running || !srcId || !srcBcSel}>
+            <Copy className="h-4 w-4 mr-1" />{loading || "读取广告组"}
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setIdentTick((t) => t + 1)}
+            disabled={identLoading || !((srcId && srcBc) || (dstId && dstBc))} aria-label="读取来源/目标 BC 的视频账号">
+            <Users className="h-4 w-4 mr-1" />{identLoading ? "读取中…" : "读取视频账号"}
+          </Button>
+          <Button size="sm" variant="outline" onClick={downloadFreeProducts} disabled={prodBusy || !dstId} aria-label="下载目标户未在广告组的商品">
+            <PackageSearch className="h-4 w-4 mr-1" />{prodBusy ? "读取中…" : "未投商品"}
+          </Button>
+          <Button size="sm" variant="outline" onClick={download} disabled={!rows.length} aria-label="下载读取的广告组（含可直接导入的 sheet）">
+            <Download className="h-4 w-4 mr-1" />下载
+          </Button>
           <Button size="sm" onClick={() => run()} disabled={running || !!loading || !selectedCount || !dstId || !dstBc}>
             <Play className="h-4 w-4 mr-1" />{running ? "复制中…" : `复制（${selectedCount}）`}
           </Button>
@@ -471,18 +497,9 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
               <RotateCcw className="h-4 w-4 mr-1" />重试失败（{failedCount}）
             </Button>
           )}
-          {rows.length > 0 && (
-            <Button size="sm" variant="outline" onClick={download}><Download className="h-4 w-4 mr-1" />下载</Button>
-          )}
-          <Button size="sm" variant="outline" onClick={() => setIdentTick((t) => t + 1)}
-            disabled={identLoading || !((srcId && srcBc) || (dstId && dstBc))} aria-label="读取来源/目标 BC 的视频账号">
-            <Users className="h-4 w-4 mr-1" />{identLoading ? "读取中…" : "读取视频账号"}
+          <Button size="sm" variant="outline" onClick={downloadResult} disabled={running || !doneRows.length} aria-label="下载复制结果">
+            <Download className="h-4 w-4 mr-1" />下载结果
           </Button>
-          {dstId && (
-            <Button size="sm" variant="outline" onClick={downloadFreeProducts} disabled={prodBusy} aria-label="下载目标户未在广告组的商品">
-              <PackageSearch className="h-4 w-4 mr-1" />{prodBusy ? "读取中…" : "未投商品"}
-            </Button>
-          )}
         </div>
         {rows.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 text-xs">

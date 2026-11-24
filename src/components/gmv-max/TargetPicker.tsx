@@ -4,6 +4,9 @@ import * as React from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useConnections } from "@/lib/store";
 
+/** 已选框里只显示 ID 后 6 位方便对照，下拉列表里显示完整 ID */
+export const shortLabel = (name: string | undefined, id: string) => `${name || id}（…${id.slice(-6)}）`;
+
 export type AdvOption = { id: string; name: string; shopId: string | null; bcId: string | null };
 export type BcOption = { bcId: string; bcName: string; createdAt: string; matched: boolean };
 
@@ -45,15 +48,19 @@ export function TargetPicker({
   return (
     <>
       <Select value={advertiserId} onValueChange={onAdvertiserChange} disabled={disabled}>
-        <SelectTrigger aria-label={advLabel} className="w-72"><SelectValue placeholder={advLabel} /></SelectTrigger>
+        <SelectTrigger aria-label={advLabel} className="w-64">
+          <SelectValue placeholder={advLabel}>{advertiserId ? shortLabel(advOptions.find((a) => a.id === advertiserId)?.name, advertiserId) : undefined}</SelectValue>
+        </SelectTrigger>
         <SelectContent>
           {advOptions.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}（{a.id}）</SelectItem>)}
         </SelectContent>
       </Select>
       {(
         <Select value={bcId} onValueChange={onBcChange} disabled={disabled || !advertiserId || !bcs.length}>
-          <SelectTrigger aria-label="店铺授权 BC" className="w-72">
-            <SelectValue placeholder={!advertiserId ? "先选广告户再选 BC" : bcs.length ? "选择 BC" : "该户无授权 BC"} />
+          <SelectTrigger aria-label="店铺授权 BC" className="w-56">
+            <SelectValue placeholder={!advertiserId ? "先选广告户再选 BC" : bcs.length ? "选择 BC" : "该户无授权 BC"}>
+              {bcId ? shortLabel(bcs.find((b) => b.bcId === bcId)?.bcName, bcId) : undefined}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             {bcs.map((b) => (
