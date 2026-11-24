@@ -4,7 +4,8 @@ import * as React from "react";
 import { HelpCircle } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
-export function HelpTip({ label, children }: { label: string; children: React.ReactNode }) {
+// wide：内容多的说明用两栏（窄屏自动回到一栏），避免弹窗内滚动
+export function HelpTip({ label, wide, children }: { label: string; wide?: boolean; children: React.ReactNode }) {
   const [open, setOpen] = React.useState(false);
   const timer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const show = () => { clearTimeout(timer.current); setOpen(true); };
@@ -18,7 +19,7 @@ export function HelpTip({ label, children }: { label: string; children: React.Re
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" onMouseEnter={show} onMouseLeave={hide}
-        className="w-[460px] max-w-[calc(100vw-2rem)] max-h-[80vh] overflow-auto p-4 space-y-4 text-xs leading-relaxed">
+        className={`${wide ? "w-[820px] sm:columns-2 gap-6" : "w-[460px]"} max-w-[calc(100vw-2rem)] max-h-[85vh] overflow-auto p-4 pb-0 text-xs leading-relaxed`}>
         {children}
       </PopoverContent>
     </Popover>
@@ -27,7 +28,7 @@ export function HelpTip({ label, children }: { label: string; children: React.Re
 
 export function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="space-y-1.5">
+    <section className="mb-4 space-y-1.5 break-inside-avoid">
       <h4 className="text-[13px] font-semibold text-foreground">{title}</h4>
       {children}
     </section>
@@ -83,7 +84,7 @@ const AUTO_RULES = [
 
 export function ExcelHelp() {
   return (
-    <HelpTip label="Excel 批量新建">
+    <HelpTip label="Excel 批量新建" wide>
       <Section title="怎么用">
         <Steps items={[
           { t: "下载模板，填表", d: "一行 = 一个广告组" },
@@ -132,7 +133,7 @@ export function SingleHelp() {
 
 export function CopyHelp() {
   return (
-    <HelpTip label="账户复制">
+    <HelpTip label="账户复制" wide>
       <Section title="怎么用">
         <Steps items={[
           { t: "选源户 → 目标户", d: "各自选店铺授权 BC" },
@@ -142,6 +143,12 @@ export function CopyHelp() {
           { t: "读取视频账号，勾选要带的账号", d: "只能勾目标 BC 有授权的" },
           { t: "复制", d: "失败的点「重试失败」" },
           { t: "下载结果", d: "复制后才能点" },
+        ]} />
+      </Section>
+      <Section title="两个下载的区别">
+        <FieldTable rows={[
+          ["下载", <>读取到的源组；其中「导入」sheet 可直接拿去「Excel 批量新建」上传</>],
+          ["下载结果", "复制后的结果 + 每个商品的明细"],
         ]} />
       </Section>
       <Section title="复制什么">
@@ -161,12 +168,6 @@ export function CopyHelp() {
         ]} />
       </Section>
       <Section title="建组时自动处理"><Bullets items={AUTO_RULES} /></Section>
-      <Section title="两个下载的区别">
-        <FieldTable rows={[
-          ["下载", <>读取到的源组；其中「导入」sheet 可直接拿去「Excel 批量新建」上传</>],
-          ["下载结果", "复制后的结果 + 每个商品的明细"],
-        ]} />
-      </Section>
     </HelpTip>
   );
 }
