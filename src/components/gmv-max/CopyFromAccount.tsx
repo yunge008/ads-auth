@@ -12,7 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { invokeFn, callGmvMaxWrite } from "@/lib/api";
+import { callGmvMaxWrite } from "@/lib/api";
 import { TargetPicker } from "@/components/gmv-max/TargetPicker";
 import { detailSheet, newBatchId, type DetailRow, type ProductResult } from "@/components/gmv-max/ImportHistory";
 
@@ -184,6 +184,7 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
 
   const load = async () => {
     if (!srcId) return toast.error("请选择源广告户");
+    if (!dstBc) return toast.error("先选目标广告户和 BC：按该 BC 的授权读取源组，视频账号才与目标户一致");
     setRows([]);
     setRawDump([]);
     const out: CopyRow[] = [];
@@ -192,7 +193,8 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
     try {
       while (offset != null) {
         setLoading(`读取中… ${out.length}`);
-        const data: InfoResp = await invokeFn<InfoResp>("gmv-max-campaign-info", { advertiser_id: srcId, offset, limit: 30 }, { timeout: 140_000 });
+        // 按导入目标 BC 对应连接的授权读取（不同 BC 读到的视频账号集合不同）
+        const data: InfoResp = await callGmvMaxWrite<InfoResp>({ action: "info", advertiser_id: srcId, bc_id: dstBc, offset, limit: 20 });
         const byId = new Map(data.campaigns.map((c) => [c.campaign_id, c]));
         for (const i of data.infos) {
           dump.push(i);
@@ -353,7 +355,7 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           {advSelect(srcId, setSrcId, "源广告户")}
-          <Button size="sm" variant="outline" onClick={load} disabled={!!loading || running}>
+          <Button size="sm" variant="outline" onClick={load} disabled={!!loading || running || !dstBc}>
             <Copy className="h-4 w-4 mr-1" />{loading || "读取广告组"}
           </Button>
           <span aria-hidden className="text-muted-foreground">→</span>

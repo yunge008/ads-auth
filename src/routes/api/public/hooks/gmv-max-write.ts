@@ -9,7 +9,7 @@
 // 鉴权：x-admin-passcode，需 gmv-max-create 页面权限。
 import { createFileRoute } from "@tanstack/react-router";
 import {
-  adminDb, checkGmvMaxPasscode, createOne, exclusiveAuth, getImportBatch, listImportBatches, listStoreProducts, logImport,
+  adminDb, campaignInfo, checkGmvMaxPasscode, createOne, exclusiveAuth, getImportBatch, listImportBatches, listStoreProducts, logImport,
   spendReport, type CreateRow, type LogMeta,
 } from "@/lib/gmv-max-write.server";
 
@@ -24,6 +24,7 @@ export const Route = createFileRoute("/api/public/hooks/gmv-max-write")({
         if (authErr) return jsonRes({ error: authErr }, 401);
         const body = (await request.json().catch(() => ({}))) as {
           action?: string; row?: CreateRow; advertiser_id?: unknown; days?: unknown; bc_id?: unknown; log?: LogMeta; batch_id?: unknown;
+          offset?: unknown; limit?: unknown;
         };
         try {
           const db = adminDb();
@@ -46,6 +47,9 @@ export const Route = createFileRoute("/api/public/hooks/gmv-max-write")({
               return jsonRes(await exclusiveAuth(db, String(body.advertiser_id ?? "").trim(), false));
             case "auth_grant":
               return jsonRes(await exclusiveAuth(db, String(body.advertiser_id ?? "").trim(), true));
+            case "info": // 只读：广告组列表 + 逐个 info，按 bc_id 对应连接的授权读取
+              return jsonRes(await campaignInfo(db, String(body.advertiser_id ?? "").trim(), String(body.bc_id ?? "").trim() || undefined,
+                Number(body.offset ?? 0) || 0, Number(body.limit ?? 20) || 20));
             case "spend": // 只读：近 N 天 广告组×商品 消耗
               return jsonRes(await spendReport(db, String(body.advertiser_id ?? "").trim(), Number(body.days ?? 3) || 3));
             case "products": // 只读：店铺商品状态（是否可投、是否已在 GMV Max 组）

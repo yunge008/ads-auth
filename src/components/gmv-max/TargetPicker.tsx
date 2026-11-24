@@ -46,18 +46,16 @@ export function TargetPicker({
           {advOptions.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}（{a.id}）</SelectItem>)}
         </SelectContent>
       </Select>
-      {advertiserId && (bcs.length > 1 ? (
-        <Select value={bcId} onValueChange={onBcChange} disabled={disabled}>
-          <SelectTrigger aria-label="店铺授权 BC" className="w-64"><SelectValue placeholder="选择 BC" /></SelectTrigger>
+      {advertiserId && (
+        <Select value={bcId} onValueChange={onBcChange} disabled={disabled || !bcs.length}>
+          <SelectTrigger aria-label="店铺授权 BC" className="w-72">
+            <SelectValue placeholder={bcs.length ? "选择 BC" : "该户无授权 BC"} />
+          </SelectTrigger>
           <SelectContent>
             {bcs.map((b) => <SelectItem key={b.bcId} value={b.bcId}>{b.bcName}（{b.bcId}）</SelectItem>)}
           </SelectContent>
         </Select>
-      ) : (
-        <span className="text-xs text-muted-foreground" aria-label="店铺授权 BC">
-          {bcs[0] ? `${bcs[0].bcName}（${bcs[0].bcId}）` : "无 BC"}
-        </span>
-      ))}
+      )}
     </>
   );
 }

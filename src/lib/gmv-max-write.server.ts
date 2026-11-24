@@ -105,7 +105,9 @@ async function targetIdentities(conns: Conn[], advertiserId: string, storeId: st
   const errors: string[] = [];
   for (const bc of bcIds) {
     try {
-      await withConns(conns, async (token) => {
+      // 每个 BC 优先用它自己授权连接的 token 查（别的连接 token 可能对该 BC 无权限，查回空）
+      const ordered = [...conns.filter((c) => c.bc_id === bc), ...conns.filter((c) => c.bc_id !== bc)];
+      await withConns(ordered, async (token) => {
         const base = { advertiser_id: advertiserId, store_id: storeId, store_authorized_bc_id: bc };
         const add = (d: Record<string, unknown>) => {
           const list = (d.identity_list ?? d.list ?? []) as IdentityInfo[];
@@ -409,6 +411,51 @@ async function createCore(db: SupabaseClient, r: CreateRow, ctx: Ctx): Promise<C
     }
   }
   return { ok: true, campaign_id: campaignId, ...(partial ? { partial: true } : {}), ...(notes.length ? { notes } : {}) };
+}
+
+// 读取源户 Product GMV Max 广告组 + 逐个 info（替代 Edge Function gmv-max-campaign-info，以便按指定 BC 的授权连接读取）。
+// 用户实测：不同 BC 授权读到的视频账号集合不同，用导入目标 BC 的连接读，视频账号才与目标户可用集合一致。
+// Cloudflare Worker 单请求子请求数有限，limit 上限 20。
+export async function campaignInfo(db: SupabaseClient, advertiserId: string, preferBc: string | undefined, offset: number, limit: number) {
+  if (!/^\d+$/.test(advertiserId)) throw new Error("advertiser_id 必填");
+  const { conns } = await loadAdv(db, advertiserId, preferBc);
+  const lim = Math.min(20, Math.max(1, limit || 20));
+  return withConns(conns, async (token) => {
+    const campaigns: { campaign_id: string; campaign_name: string; operation_status: string }[] = [];
+    const seen = new Set<string>();
+    for (let page = 1; page <= 50; page++) {
+      const data = await tt(token, "/gmv_max/campaign/get/", {
+        method: "GET",
+        params: {
+          advertiser_id: advertiserId, page: String(page), page_size: "100",
+          filtering: JSON.stringify({ gmv_max_promotion_types: ["PRODUCT_GMV_MAX"] }),
+        },
+      });
+      const list = (data.list ?? []) as Record<string, unknown>[];
+      for (const r of list) {
+        const id = String(r.campaign_id ?? r.id ?? "");
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        campaigns.push({ campaign_id: id, campaign_name: String(r.campaign_name ?? ""), operation_status: String(r.operation_status ?? "") });
+      }
+      const pi = (data.page_info ?? {}) as Record<string, unknown>;
+      const totalPage = Number(pi.total_page ?? 0);
+      if (!list.length || !totalPage || page >= totalPage) break;
+    }
+    const slice = campaigns.slice(offset, offset + lim);
+    const infos: { campaign_id: string; ok: boolean; info?: unknown; error?: string }[] = [];
+    for (const c of slice) {
+      try {
+        infos.push({ campaign_id: c.campaign_id, ok: true, info: await tt(token, "/campaign/gmv_max/info/", {
+          method: "GET", params: { advertiser_id: advertiserId, campaign_id: c.campaign_id },
+        }) });
+      } catch (e) {
+        infos.push({ campaign_id: c.campaign_id, ok: false, error: (e as Error).message });
+      }
+    }
+    const next = offset + slice.length;
+    return { campaigns, infos, next_offset: next < campaigns.length ? next : null };
+  });
 }
 
 // 导入记录：每个商品一行写 gmv_max_import_logs（表由 migration 20261124120000 创建；表不存在时不影响建组）
