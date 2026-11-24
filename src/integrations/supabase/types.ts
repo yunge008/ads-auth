@@ -1597,6 +1597,63 @@ export type Database = {
         }
         Relationships: []
       }
+      gmv_max_import_logs: {
+        Row: {
+          advertiser_id: string
+          batch_id: string
+          bc_id: string
+          campaign_name: string
+          created_at: string
+          group_note: string
+          group_status: string
+          id: number
+          item_group_id: string
+          kind: string
+          new_campaign_id: string | null
+          operator: string
+          reason: string
+          source: string
+          source_campaign_id: string
+          status: string
+        }
+        Insert: {
+          advertiser_id?: string
+          batch_id: string
+          bc_id?: string
+          campaign_name?: string
+          created_at?: string
+          group_note?: string
+          group_status?: string
+          id?: number
+          item_group_id?: string
+          kind?: string
+          new_campaign_id?: string | null
+          operator?: string
+          reason?: string
+          source?: string
+          source_campaign_id?: string
+          status?: string
+        }
+        Update: {
+          advertiser_id?: string
+          batch_id?: string
+          bc_id?: string
+          campaign_name?: string
+          created_at?: string
+          group_note?: string
+          group_status?: string
+          id?: number
+          item_group_id?: string
+          kind?: string
+          new_campaign_id?: string | null
+          operator?: string
+          reason?: string
+          source?: string
+          source_campaign_id?: string
+          status?: string
+        }
+        Relationships: []
+      }
       gmv_max_sync_state: {
         Row: {
           id: string
