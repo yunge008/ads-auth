@@ -24,6 +24,7 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as TtsExportRouteImport } from './routes/tts-export'
 import { Route as OauthTiktokCallbackRouteImport } from './routes/oauth.tiktok.callback'
 import { Route as OauthTtsCallbackRouteImport } from './routes/oauth.tts.callback'
+import { Route as ApiPublicHooksAiDbReadRouteImport } from './routes/api/public/hooks/ai-db-read'
 import { Route as ApiPublicHooksAttributionCronRouteImport } from './routes/api/public/hooks/attribution-cron'
 import { Route as ApiPublicHooksAuthorizeCronRouteImport } from './routes/api/public/hooks/authorize-cron'
 import { Route as ApiPublicHooksBalanceAlertCronRouteImport } from './routes/api/public/hooks/balance-alert-cron'
@@ -111,6 +112,11 @@ const OauthTtsCallbackRoute = OauthTtsCallbackRouteImport.update({
   path: '/oauth/tts/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicHooksAiDbReadRoute = ApiPublicHooksAiDbReadRouteImport.update({
+  id: '/api/public/hooks/ai-db-read',
+  path: '/api/public/hooks/ai-db-read',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicHooksAttributionCronRoute =
   ApiPublicHooksAttributionCronRouteImport.update({
     id: '/api/public/hooks/attribution-cron',
@@ -191,6 +197,7 @@ export interface FileRoutesByFullPath {
   '/tts-export': typeof TtsExportRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
   '/oauth/tts/callback': typeof OauthTtsCallbackRoute
+  '/api/public/hooks/ai-db-read': typeof ApiPublicHooksAiDbReadRoute
   '/api/public/hooks/attribution-cron': typeof ApiPublicHooksAttributionCronRoute
   '/api/public/hooks/authorize-cron': typeof ApiPublicHooksAuthorizeCronRoute
   '/api/public/hooks/balance-alert-cron': typeof ApiPublicHooksBalanceAlertCronRoute
@@ -219,6 +226,7 @@ export interface FileRoutesByTo {
   '/tts-export': typeof TtsExportRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
   '/oauth/tts/callback': typeof OauthTtsCallbackRoute
+  '/api/public/hooks/ai-db-read': typeof ApiPublicHooksAiDbReadRoute
   '/api/public/hooks/attribution-cron': typeof ApiPublicHooksAttributionCronRoute
   '/api/public/hooks/authorize-cron': typeof ApiPublicHooksAuthorizeCronRoute
   '/api/public/hooks/balance-alert-cron': typeof ApiPublicHooksBalanceAlertCronRoute
@@ -248,6 +256,7 @@ export interface FileRoutesById {
   '/tts-export': typeof TtsExportRoute
   '/oauth/tiktok/callback': typeof OauthTiktokCallbackRoute
   '/oauth/tts/callback': typeof OauthTtsCallbackRoute
+  '/api/public/hooks/ai-db-read': typeof ApiPublicHooksAiDbReadRoute
   '/api/public/hooks/attribution-cron': typeof ApiPublicHooksAttributionCronRoute
   '/api/public/hooks/authorize-cron': typeof ApiPublicHooksAuthorizeCronRoute
   '/api/public/hooks/balance-alert-cron': typeof ApiPublicHooksBalanceAlertCronRoute
@@ -278,6 +287,7 @@ export interface FileRouteTypes {
     | '/tts-export'
     | '/oauth/tiktok/callback'
     | '/oauth/tts/callback'
+    | '/api/public/hooks/ai-db-read'
     | '/api/public/hooks/attribution-cron'
     | '/api/public/hooks/authorize-cron'
     | '/api/public/hooks/balance-alert-cron'
@@ -306,6 +316,7 @@ export interface FileRouteTypes {
     | '/tts-export'
     | '/oauth/tiktok/callback'
     | '/oauth/tts/callback'
+    | '/api/public/hooks/ai-db-read'
     | '/api/public/hooks/attribution-cron'
     | '/api/public/hooks/authorize-cron'
     | '/api/public/hooks/balance-alert-cron'
@@ -334,6 +345,7 @@ export interface FileRouteTypes {
     | '/tts-export'
     | '/oauth/tiktok/callback'
     | '/oauth/tts/callback'
+    | '/api/public/hooks/ai-db-read'
     | '/api/public/hooks/attribution-cron'
     | '/api/public/hooks/authorize-cron'
     | '/api/public/hooks/balance-alert-cron'
@@ -363,6 +375,7 @@ export interface RootRouteChildren {
   TtsExportRoute: typeof TtsExportRoute
   OauthTiktokCallbackRoute: typeof OauthTiktokCallbackRoute
   OauthTtsCallbackRoute: typeof OauthTtsCallbackRoute
+  ApiPublicHooksAiDbReadRoute: typeof ApiPublicHooksAiDbReadRoute
   ApiPublicHooksAttributionCronRoute: typeof ApiPublicHooksAttributionCronRoute
   ApiPublicHooksAuthorizeCronRoute: typeof ApiPublicHooksAuthorizeCronRoute
   ApiPublicHooksBalanceAlertCronRoute: typeof ApiPublicHooksBalanceAlertCronRoute
@@ -483,6 +496,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OauthTtsCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/hooks/ai-db-read': {
+      id: '/api/public/hooks/ai-db-read'
+      path: '/api/public/hooks/ai-db-read'
+      fullPath: '/api/public/hooks/ai-db-read'
+      preLoaderRoute: typeof ApiPublicHooksAiDbReadRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/hooks/attribution-cron': {
       id: '/api/public/hooks/attribution-cron'
       path: '/api/public/hooks/attribution-cron'
@@ -579,6 +599,7 @@ const rootRouteChildren: RootRouteChildren = {
   TtsExportRoute: TtsExportRoute,
   OauthTiktokCallbackRoute: OauthTiktokCallbackRoute,
   OauthTtsCallbackRoute: OauthTtsCallbackRoute,
+  ApiPublicHooksAiDbReadRoute: ApiPublicHooksAiDbReadRoute,
   ApiPublicHooksAttributionCronRoute: ApiPublicHooksAttributionCronRoute,
   ApiPublicHooksAuthorizeCronRoute: ApiPublicHooksAuthorizeCronRoute,
   ApiPublicHooksBalanceAlertCronRoute: ApiPublicHooksBalanceAlertCronRoute,

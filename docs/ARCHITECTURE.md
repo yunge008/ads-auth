@@ -205,3 +205,9 @@
 
 ### gmv_max_import_logs（2026-11-24，migration 20261124120000）
 GMV Max 导入记录，逐商品一行：batch_id / kind(excel|single|copy) / source / operator / advertiser_id / bc_id / campaign_name / source_campaign_id / new_campaign_id / group_status / group_note / item_group_id / status(成功|失败|组成功商品未纳入) / reason。RLS 开启无策略，仅服务端路由 service role 读写。
+
+### AI 只读查询通道（2026-11-24，migration 20261124150000_ai_readonly.sql）
+- 服务端路由 `/api/public/hooks/ai-db-read`（POST `{action:"query", sql, max_rows?}` / `{action:"refresh_grants"}`）。**鉴权例外**：不走口令头，校验请求头 `x-ai-db-key` 的 sha256 = `app_accounts` 里 name=「AI只读」、非管理员、启用中账号的 `passcode_hash`；停用/删除该账号即撤销。
+- `ai_readonly_query(q, max_rows)`：SECURITY INVOKER，只收 SELECT/WITH，`set transaction read only` + `set local role ai_reader`，结果 jsonb，最多 2000 行；只有 service_role 有执行权限。函数内设 statement_timeout 对当前语句无效，超时依赖平台默认（负责人确认业务上不限）。
+- 角色 `ai_reader`：按列授 SELECT，列名匹配 token/secret/passcode/password/cookie/credential/api_key/app_key/device_id 的列不授；开 RLS 的表加 `ai_reader_select` 只读策略。新表由 `ai_reader_refresh_grants()`（SECURITY DEFINER，路由 action=refresh_grants）按同一规则补授。
+- 本地 PG16 实测：普通表/视图可读；敏感列、`select *` 含敏感列被拒；CTE 写、注入第二条语句、借 SECURITY DEFINER 函数删数据均被拒；anon 无执行权限。

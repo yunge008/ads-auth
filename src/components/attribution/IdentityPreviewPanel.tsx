@@ -28,16 +28,58 @@ function Stat({ label, value, hint }: { label: string; value: React.ReactNode; h
   );
 }
 
+// 与 DataPrepPanel / UploadStatusMatrix 的站点清单一致
+const IDENTITY_SITES = ["PH", "TH", "VN", "MY", "SG", "PH2", "PHL", "MX-AR", "MX-NE", "MX-SJ", "US", "JP"];
+
+const NUM_KEYS = [
+  "components", "components_multi_name", "components_linked_via_gmv_nickname", "stages",
+  "creators_with_multiple_stages", "identity_conflicts", "unusable_vids",
+] as const;
+
+function mergeResults(parts: IdentityBuildResult[]): IdentityBuildResult {
+  const out: IdentityBuildResult = { diff_by_kind: {}, identity_merge_sample: [], diff_sample: [] };
+  for (const p of parts) {
+    for (const k of NUM_KEYS) out[k] = (out[k] ?? 0) + (p[k] ?? 0);
+    for (const [k, v] of Object.entries(p.diff_by_kind ?? {})) out.diff_by_kind![k] = (out.diff_by_kind![k] ?? 0) + v;
+    out.identity_merge_sample!.push(...(p.identity_merge_sample ?? []));
+    out.diff_sample!.push(...(p.diff_sample ?? []));
+    out.note ??= p.note;
+  }
+  out.identity_merge_sample = out.identity_merge_sample!.slice(0, 100);
+  out.diff_sample = out.diff_sample!.slice(0, 100);
+  return out;
+}
+
 export function IdentityPreviewPanel() {
   const [country, setCountry] = React.useState("");
   const [busy, setBusy] = React.useState<"build" | "report" | null>(null);
   const [res, setRes] = React.useState<IdentityBuildResult | null>(null);
 
+  const [progress, setProgress] = React.useState<string | null>(null);
+
+  // 站点留空 = 全部：逐站点调用再汇总。一次跑全站点会超出 Edge Function 计算资源（HTTP 546 WORKER_RESOURCE_LIMIT）。
   const run = async (action: "build" | "report") => {
     setBusy(action);
     try {
-      const r = await identityBuild(action, { country: country.trim() || undefined });
+      const one = country.trim();
+      let r: IdentityBuildResult;
+      const failed: string[] = [];
+      if (one || action === "report") {
+        r = await identityBuild(action, { country: one || undefined });
+      } else {
+        const parts: IdentityBuildResult[] = [];
+        for (const [i, c] of IDENTITY_SITES.entries()) {
+          setProgress(`${c}（${i + 1}/${IDENTITY_SITES.length}）`);
+          try {
+            parts.push(await identityBuild("build", { country: c }));
+          } catch (e) {
+            failed.push(`${c}：${(e as Error).message}`);
+          }
+        }
+        r = mergeResults(parts);
+      }
       setRes(r);
+      if (failed.length) toast.error(`以下站点失败：\n${failed.join("\n")}`, { duration: 15000 });
       toast.success(
         action === "build"
           ? `身份与区间已重建：${r.components ?? 0} 个达人实体 · ${r.stages ?? 0} 段归属区间（归因数字未改变）`
@@ -50,6 +92,7 @@ export function IdentityPreviewPanel() {
       toast.error(`操作失败：${(e as Error).message}`);
     } finally {
       setBusy(null);
+      setProgress(null);
     }
   };
 
@@ -62,7 +105,7 @@ export function IdentityPreviewPanel() {
         <p className="text-xs text-muted-foreground">
           只生成不使用：重建「同一个真人的多个名字」身份实体与「按发布日期分段的归属区间」，
           用来先看清阶段 3 切引擎的影响面。<b>本面板的任何操作都不会改变现在的归因数字。</b>
-          站点留空 = 全站点；数据量大时建议按站点逐个跑。
+          站点留空 = 全站点（自动逐个站点执行后汇总）。
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -82,6 +125,7 @@ export function IdentityPreviewPanel() {
           <Button size="sm" variant="outline" onClick={() => run("report")} disabled={!!busy}>
             查看差异报告
           </Button>
+          {progress ? <span className="text-xs text-muted-foreground tabular-nums">正在重建 {progress}</span> : null}
         </div>
 
         {res ? (

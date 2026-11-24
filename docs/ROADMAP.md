@@ -7,7 +7,7 @@
 > 标记：✅ 已核验 ｜ ⚠️ 未核验（代码写了但没实测或无权限确认）｜ 🙋 需负责人决策/提供 ｜ 🔧 需负责人手动操作（跑 SQL / 让 Lovable 部署）
 > 优先级：P0 本轮必须做 ｜ P1 本轮争取 ｜ P2 之后
 
-最后更新：2026-11-24（1124.254）
+最后更新：2026-11-24（1124.255）
 
 ---
 
@@ -19,7 +19,7 @@ Lovable 积分已充值 → Edge Function 改动可以部署（B 类：给 Lovab
 |---|---|---|---|
 | G1 | 部署 `attribution-upload`、`attribution-identity-build`、`tts-listing`、`feishu-read` | 🔧 Lovable | ✅ 1124.253 已部署，四个均在线应答 |
 | G2 | 5 个 migration 是否已执行（outreach_core / tts_multi_app / outreach_settings_rls / gmv_max_import_logs / _src_dst） | 🔧 SQL | ✅ 2026-11-24 负责人跑检查 SQL，6 项全部 true，已登记 `docs/MIGRATIONS.md` |
-| G3 | AI 数据库只读通道（只读查询路由 + 专用只读角色 + 专用口令） | 🙋 | 方案已给，待负责人确认后实施 |
+| G3 | AI 数据库只读通道（路由 `/api/public/hooks/ai-db-read` + 角色 `ai_reader` + 账号「AI只读」） | 🔧 SQL + 账号 | 代码已推（1124.255）；待负责人跑 migration `20261124150000_ai_readonly.sql`、建账号、在会话安全表单填口令 |
 
 ---
 
@@ -74,7 +74,8 @@ Lovable 积分已充值 → Edge Function 改动可以部署（B 类：给 Lovab
 
 | 优先 | 待办 | 备注 |
 |---|---|---|
-| P0 | 修复已上线（1124.253）：点一次「重新计算」与「重建身份与区间」核对不再报错 | 🔧 负责人点按钮 |
+| P0 | 「重建身份与区间」全站点一次跑报 546 资源超限 → 1124.255 改为前端逐站点调用后汇总（不改后端）；待负责人再点一次 | 🔧 负责人点按钮 |
+| P0 | 「重新计算」成功但页面没数据：原因未查（⚠️），只读通道开通后由 AI 直接查库定位 | 依赖 G3 |
 | P1 | 阶段 3 ②–⑨ 引擎切换（**会改归因数字**，逐项单独提交、单独验收）：②发样/回收双事件 ④交接并入事件流 ⑤站点权限校验 ⑥Pass 2 改 creator_key ⑦PENDING/EXCLUDED 两桶 ⑧人工判定接入 ⑨pickVidOwner 去重键 | 每项提交前给 before/after 对账 |
 | P1 | 阶段 4：事实层维护页（都不算规则 / 站点权限 / 交接） | 表已建，缺 UI |
 | P2 🙋 | 「建联-自动」sheet 的 GMV 是否计入：A 当作同事「自动」（不改代码）/ B 收尾交给站点 BD | 负责人倾向 A，需在人员表登记「自动」 |
