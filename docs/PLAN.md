@@ -29,7 +29,7 @@
 
 ## 任务板
 
-| GMV Max 账户迁移（旧户广告组批量复制到新户） | 🔶 进行中 claude 2026-11-24 | supabase/functions/gmv-max-campaign-info/index.ts（已完成）、supabase/functions/gmv-max-adgroup-batch-create/index.ts、src/routes/gmv-max-create.tsx（待做） | 第 0 步只读函数已推 main，**等部署后跑 info**核实「AI 素材审核发布 / 新素材优先测试」字段（create 文档无这两项）。负责人决定：①名称最后一段数字 = ROI（与 info 的 roas_bid 交叉核对）②**商品 >50 的组不新建，标出来手动处理**③全部在 main 改。待做：批量创建带 identity_list；不传 promotion_days / auto_budget（文档：传了 promotion_days 对象会自动置 is_enabled=true，默认即关）；切独占授权会暂停旧户全部 GMV Max 组，须负责人确认后执行。为省 Lovable 积分，等 info 结果后一次性改完再部署。 |
+| GMV Max 账户迁移（旧户广告组批量复制到新户） | ✅ 完成 claude 2026-11-24（1124.209，待负责人实测） | supabase/functions/gmv-max-campaign-info/index.ts、supabase/functions/gmv-max-adgroup-batch-create/index.ts、src/components/gmv-max/CopyFromAccount.tsx、src/routes/gmv-max-create.tsx | 「GMV MAX新建」页新增「从账户复制」卡片：选源户→读取全部广告组（info 原始 JSON 可下载）→勾选（默认勾启用中）→选目标户→逐个新建。复制名称/商品/ROI/预算/identity_list/affiliate_posts_enabled；全店商品组、手选视频组、商品>50 组标「手动」不复制（负责人决定）；名称 R 后第 4 个数≠info roas_bid 时备注提示，以 info 为准。不传 promotion_days/auto_budget（默认关；传 promotion_days 对象会自动开启）。AI 素材审核发布 / 新素材优先测试：create 文档无字段，建完需后台手动开。切独占授权（旧户 GMV Max 组全部自动暂停）不在代码里做。实测确认 Lovable 同步 main 后自动部署 Edge Function（新函数 401≠404）。 |
 
 
 | 任务 | 状态 | 认领 | 涉及文件 | 备注 |

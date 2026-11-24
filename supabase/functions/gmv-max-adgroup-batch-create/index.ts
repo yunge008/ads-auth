@@ -13,7 +13,11 @@
 // Body: { rows: [{ advertiser_id, campaign_name, item_group_ids: string[],
 //                   roas_bid: number, budget: number,
 //                   start_time?: "YYYY-MM-DD HH:MM:SS",
-//                   end_time?: "YYYY-MM-DD HH:MM:SS" }] }
+//                   end_time?: "YYYY-MM-DD HH:MM:SS",
+//                   identity_list?: [{identity_id, identity_type, ...}] (<=20, copied from a source campaign),
+//                   affiliate_posts_enabled?: boolean }] }
+// promotion_days / auto_budget are deliberately never sent: both default to off, and per TikTok docs
+// passing a promotion_days object auto-sets is_enabled=true.
 // Returns: { results: [{ row, advertiser_id, campaign_name, ok, campaign_id?, error? }] }
 import { admin, checkAdminPasscode, type ConnRow } from "../_shared/auth.ts";
 import { corsHeaders } from "../_shared/feishu.ts";
@@ -27,7 +31,24 @@ type RowInput = {
   budget?: unknown;
   start_time?: unknown;
   end_time?: unknown;
+  identity_list?: unknown;
+  affiliate_posts_enabled?: unknown;
 };
+
+const IDENTITY_KEYS = ["identity_id", "identity_type", "identity_authorized_bc_id", "identity_authorized_shop_id", "store_id"];
+// Keep only the request fields TikTok accepts (info responses also carry profile_image/user_name).
+function cleanIdentityList(v: unknown): Record<string, string>[] | null {
+  if (!Array.isArray(v)) return null;
+  const out: Record<string, string>[] = [];
+  for (const it of v) {
+    if (!it || typeof it !== "object") continue;
+    const src = it as Record<string, unknown>;
+    const o: Record<string, string> = {};
+    for (const k of IDENTITY_KEYS) if (src[k] != null && src[k] !== "") o[k] = String(src[k]);
+    if (o.identity_id && o.identity_type) out.push(o);
+  }
+  return out;
+}
 
 type Result = {
   row: number;
@@ -92,6 +113,9 @@ Deno.serve(async (req) => {
       if (!advertiserId) { fail("advertiser_id 必填"); continue; }
       if (!campaignName) { fail("campaign_name 必填"); continue; }
       if (!itemGroupIds.length) { fail("商品ID 至少一个"); continue; }
+      if (itemGroupIds.length > 50) { fail(`商品 ${itemGroupIds.length} 个，超过单组上限 50，不新建（请手动处理）`); continue; }
+      const identityList = cleanIdentityList(r.identity_list);
+      if (identityList && identityList.length > 20) { fail("identity_list 超过 20 个"); continue; }
       if (!Number.isFinite(roasBid) || roasBid <= 0) { fail("ROI 必须是大于 0 的数字"); continue; }
       if (!Number.isFinite(budget) || budget <= 0) { fail("预算必须是大于 0 的数字"); continue; }
 
@@ -120,6 +144,8 @@ Deno.serve(async (req) => {
         product_video_specific_type: "AUTO_SELECTION",
       };
       if (endTime) ttBody.schedule_end_time = endTime;
+      if (identityList && identityList.length) ttBody.identity_list = identityList;
+      if (typeof r.affiliate_posts_enabled === "boolean") ttBody.affiliate_posts_enabled = r.affiliate_posts_enabled;
 
       try {
         const data = await createGmvMaxCampaign(conns, ttBody);

@@ -15,6 +15,7 @@ import {
 import { toast } from "sonner";
 import { invokeFn } from "@/lib/api";
 import { useConnections, useBCAdvertisers } from "@/lib/store";
+import { CopyFromAccount } from "@/components/gmv-max/CopyFromAccount";
 
 export const Route = createFileRoute("/gmv-max-create")({
   head: () => ({ meta: [{ title: "GMV MAX新建 - TikTok授权工具" }] }),
@@ -491,6 +492,8 @@ function GmvMaxCreatePage() {
           </Button>
         </CardContent>
       </Card>
+
+      <CopyFromAccount advOptions={advOptions} />
 
       <ResultsTable results={results} />
 
