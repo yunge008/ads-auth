@@ -309,3 +309,4 @@
 2026-11-24 | claude | [1124.215] 实测报错修复：①切户 /gmv_max/exclusive_authorization/create/ 报缺 bc_id（店铺 owner BC）→ 传 bc_id（优先 store/list 里店铺的 BC 字段，否则连接表 bc_id）；②建组报 BC_AUTH_TT 缺 identity_authorized_shop_id（info 不返回）→ 先查目标户 /gmv_max/identity/get/（advertiser_id+store_id，按 page_info 翻页，缓存 10 分钟）补 identity_authorized_shop_id/identity_authorized_bc_id；目标户查不到或 product_gmv_max_available=false 的账号整行报错不建（不擅自去掉，保证与原组一致）。
 2026-11-24 | claude | [1124.216] ①/gmv_max/identity/get/ 实测必填 store_authorized_bc_id → 补上（取目标户连接表 bc_id，与建组同源）；②切户需对方手动同意，页面去掉「切户」按钮与确认框，只保留目标户授权状态显示（auth_grant 路由保留未删）。
 2026-11-24 | claude | [1124.217] 目标户 identity/get 查不到源组 16 个 BC_AUTH_TT 账号（TTS_TT 4 个查到）：identity/get 返回范围随 store_authorized_bc_id 变化，改为用「目标户连接 BC + 源账号 identity_authorized_bc_id」逐个查后合并；报错带上已查 BC。根因未核实（BC 不同 / 跨 BC identity_id 不同），待负责人在 API 测试页跑 gmv-max-identity-get 对比。
+2026-11-24 | claude | [1124.218] 负责人更正：后台视频账号可选 23 个 → 撤销「取前 20」，视频账号与源组完全一致不截断；接口拒收则整行失败。

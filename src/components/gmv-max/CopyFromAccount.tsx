@@ -260,7 +260,7 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
               <TooltipContent className="max-w-sm text-xs leading-relaxed">
                 流程：读取源户 →（下载存档）→ 在 TikTok 后台切户（需对方同意）→ 复制；也可下载后用「Excel 批量新建」上传首个 sheet「导入」。
                 复制名称、商品、ROI（按名称 R 后最后一个数，解析不出用 info）、预算、视频来源账号；新素材优先测试全开；立即开始，不开促销日、不开自动加预算。
-                视频账号按源组 info 原顺序取前 20（原组上限 20）。商品超过 50 被拒时先建 50 个再自动补全；补全失败标「已建·需处理」并列出缺的商品。
+                视频账号与源组完全一致（不截断）。商品超过 50 被拒时先建 50 个再自动补全；补全失败标「已建·需处理」并列出缺的商品。
                 全店商品组、手选视频组标「手动」不复制。所有未成功的组在上方红框列出。
                 AI 素材（审核后发布）接口无此字段，建完需后台手动开。
               </TooltipContent>

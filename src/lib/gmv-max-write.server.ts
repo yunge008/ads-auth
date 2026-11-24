@@ -172,12 +172,9 @@ export async function createOne(db: SupabaseClient, r: CreateRow): Promise<Creat
     product_video_specific_type: "AUTO_SELECTION",
   };
   if (endTime) body.schedule_end_time = endTime;
-  // 原组在后台最多选 20 个视频账号；info 偶尔多返回几个（实测 PH 户 20 个组返回 23 个，多的 3 个固定排在末尾），
-  // 负责人确认原组 ≤20 → 按 info 原顺序取前 20，多出的不建、在备注列出。
-  const identityAll = cleanIdentityList(r.identity_list);
-  const identityList = identityAll.slice(0, 20);
+  // 视频账号与源组完全一致（后台可选 23 个，负责人确认），不截断；接口若拒收超量则整行失败，不擅自去掉。
+  const identityList = cleanIdentityList(r.identity_list);
   if (identityList.length) body.identity_list = identityList;
-  const droppedIdentities = identityAll.slice(20).map((x) => x.identity_id);
   // 用目标户 identity/get 补 identity_authorized_shop_id / identity_authorized_bc_id；目标户查不到的账号直接报错，不擅自去掉
   if (identityList.length) {
     let avail: Map<string, IdentityInfo>;
@@ -213,9 +210,7 @@ export async function createOne(db: SupabaseClient, r: CreateRow): Promise<Creat
 
   // 先按源组原样建；商品 >50 被拒时降到 50 个建组，再用 update 补全到与源组一致。
   const fullIds = ids;
-  const notes: string[] = droppedIdentities.length
-    ? [`源组 info 返回 ${identityAll.length} 个视频账号，按原顺序取前 20，未带：${droppedIdentities.join(",")}`]
-    : [];
+  const notes: string[] = [];
   let lastErr = "";
   let campaignId: string | undefined;
   let trimmedIds = false;
