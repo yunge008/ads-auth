@@ -884,6 +884,20 @@ async function syncOrders(shop: Shop, started: number) {
     const wm = st.watermark ? Date.parse(st.watermark) / 1000 - ORDER_OVERLAP_S : syncFromSec(shop);
     cur = { ge: Math.floor(wm), lt: Math.floor(Date.now() / 1000) - 60, page_token: "", done: 0 };
   }
+  // 仓库 ID → 名称（订单原文只有 warehouse_id；汇总计算的履约率/头程/海外仓件数要用名称）。每轮刷新一次，存 tts_sync_state kind=warehouses
+  {
+    const wh = await warehouseNames(shop, errors);
+    if (wh.size) {
+      const { error } = await admin().from("tts_sync_state").upsert({
+        shop_id: shop.shop_id, kind: "warehouses", cursor: Object.fromEntries(wh), last_run_at: new Date().toISOString(), last_ok_at: new Date().toISOString(),
+      }, { onConflict: "shop_id,kind" });
+      if (error) errors.push(`仓库名写入失败：${error.message}`);
+    }
+    if (errors.length) {
+      await saveState(shop.shop_id, "orders", st, { last_error: errors.join("；").slice(0, 2000) });
+      return { part: "orders", finished: false, done: cur.done, window: [iso(cur.ge), iso(cur.lt)], errors, new_unknown: [] as string[] };
+    }
+  }
   let finished = false;
   do {
     const r = await ttsCall<{ orders?: Order[]; next_page_token?: string }>({

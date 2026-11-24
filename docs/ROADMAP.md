@@ -7,7 +7,7 @@
 > 标记：✅ 已核验 ｜ ⚠️ 未核验（代码写了但没实测或无权限确认）｜ 🙋 需负责人决策/提供 ｜ 🔧 需负责人手动操作（跑 SQL / 让 Lovable 部署）
 > 优先级：P0 本轮必须做 ｜ P1 本轮争取 ｜ P2 之后
 
-最后更新：2026-11-25（1125.267）
+最后更新：2026-11-25（1125.268）
 
 ---
 
@@ -21,7 +21,7 @@ Lovable 积分已充值 → Edge Function 改动可以部署（B 类：给 Lovab
 | G2 | 5 个 migration 是否已执行（outreach_core / tts_multi_app / outreach_settings_rls / gmv_max_import_logs / _src_dst） | 🔧 SQL | ✅ 2026-11-24 负责人跑检查 SQL，6 项全部 true，已登记 `docs/MIGRATIONS.md` |
 | G3 | AI 数据库只读通道 v2（`rpc/ai_db_query`，口令头 + ai_reader + 只读事务） | — | ✅ 已执行并实测可用；单条查询上限 3 秒（anon 平台默认，函数内无法放宽）。Lovable 扫描报「ai_db_query 拼 SQL」Critical 属设计如此，已建议忽略 |
 | G4 | 定时任务密钥 `gmv_max_cron_secret` 明文写在历史 migration `20260605144834`（Lovable Critical） | 🔧 SQL | ✅ 2026-11-24 已轮换（64 位随机）；读取方均运行时取 vault，无需部署。✅ 当晚 23:00 飞书同步、23:30 归因快照（6/7/8 月）均正常；次日 19:00 自动授权待核对（已设提醒）。历史 migration 不改，扫描可能仍报，可标已处理 |
-| G6 | 财务/订单每日入库 | 🔧 Lovable + SQL | ✅ 已发布，首轮 2026-11-25 02:17 起回填（TH 订单先跑）。⚠️ **上轮遗漏：订单原文带买家个人信息入库**（邮箱、user_id、收件人姓名/电话/详细地址）→ 1125.267 入库前剔除，待 Lovable 重新部署 tts-export + SQL 清理已入库行 |
+| G6 | 财务/订单每日入库 | 🔧 Lovable + SQL | ✅ 已发布，首轮 2026-11-25 02:17 起回填（TH 订单先跑）。⚠️ **上轮遗漏：订单原文带买家个人信息入库**（邮箱、user_id、收件人姓名/电话/详细地址）→ 1125.267 入库前剔除；1125.268 补存仓库 ID→名称（汇总算履约率/头程要用）。待 Lovable 重新部署 tts-export（main 最新）+ SQL 清理已入库行 |
 | G5 | 导出防公式注入：素材成效已修（Lovable 1124.257）；「TikTok授权结果」CSV 与其他 Excel 导出待 Lovable 修/检查 | Lovable 免费修 | 进行中 |
 
 ---
