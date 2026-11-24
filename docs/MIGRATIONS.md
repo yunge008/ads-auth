@@ -36,3 +36,6 @@ git show <提交号>:supabase/migrations/<文件名>
 | ≤2026-11-24 | `20261123130000_outreach_settings_rls.sql` | `538dbce` | `outreach_settings` 开 RLS。同上确认 |
 | ≤2026-11-24 | `20261124120000_gmv_max_import_logs.sql` | `b82e5cf` | GMV Max 导入记录表 `gmv_max_import_logs`。同上确认 |
 | ≤2026-11-24 | `20261124130000_gmv_max_import_logs_src_dst.sql` | `aedd688` | 导入记录加来源/去向户名与 BC 6 列。同上确认 |
+| 2026-11-24 | `20261124150000_ai_readonly.sql` | `059b319` | AI 只读通道 v1：角色 ai_reader、按列授权、RLS 只读策略（834 列 / 61 策略 / 屏蔽 10 列） |
+| 2026-11-24 | `20261124160000_ai_readonly_direct.sql` | `e8dc6ac` | AI 只读通道 v2：ai_key_ok / ai_db_query / ai_db_refresh_grants，删 ai_readonly_query |
+| 2026-11-25 | `20261125120000_tts_daily_sync.sql` | `48d14c3` | 订单/财务每日入库 4 表 + tts_shops.daily_sync（PH/TH）+ pg_cron tts-daily-sync；授权后 867 列 |
