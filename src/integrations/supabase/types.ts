@@ -1600,8 +1600,10 @@ export type Database = {
       gmv_max_import_logs: {
         Row: {
           advertiser_id: string
+          advertiser_name: string
           batch_id: string
           bc_id: string
+          bc_name: string
           campaign_name: string
           created_at: string
           group_note: string
@@ -1613,13 +1615,19 @@ export type Database = {
           operator: string
           reason: string
           source: string
+          source_advertiser_id: string
+          source_advertiser_name: string
+          source_bc_id: string
+          source_bc_name: string
           source_campaign_id: string
           status: string
         }
         Insert: {
           advertiser_id?: string
+          advertiser_name?: string
           batch_id: string
           bc_id?: string
+          bc_name?: string
           campaign_name?: string
           created_at?: string
           group_note?: string
@@ -1631,13 +1639,19 @@ export type Database = {
           operator?: string
           reason?: string
           source?: string
+          source_advertiser_id?: string
+          source_advertiser_name?: string
+          source_bc_id?: string
+          source_bc_name?: string
           source_campaign_id?: string
           status?: string
         }
         Update: {
           advertiser_id?: string
+          advertiser_name?: string
           batch_id?: string
           bc_id?: string
+          bc_name?: string
           campaign_name?: string
           created_at?: string
           group_note?: string
@@ -1649,6 +1663,10 @@ export type Database = {
           operator?: string
           reason?: string
           source?: string
+          source_advertiser_id?: string
+          source_advertiser_name?: string
+          source_bc_id?: string
+          source_bc_name?: string
           source_campaign_id?: string
           status?: string
         }
