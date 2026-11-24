@@ -352,12 +352,26 @@ function AuthorizePage() {
     }
     setLoadingMode(includeDone ? "all" : "pending");
     try {
-      const data = await invokeFn<{ materials: Material[]; missing_sheets?: string[] }>("feishu-read", {
+      const payload = {
         // 用后端算好的 resolved_sheet_name：人员表 sheet名 留空的人靠模板生成，
         // 前端自己再算一遍迟早和后端不一致，不一致就是读错表且不报错。
         staff: activeStaff.map((s) => ({ name: s.name, sheet_name: s.resolved_sheet_name || s.sheet_name })),
         include_done: includeDone,
-      });
+      };
+      // 飞书大表冷加载时会返回「data not ready, retry later」等瞬时错误：整次重试，间隔 3/6/12s。
+      // 后端 _shared/feishu.ts 已有分块级重试，但需重新部署才生效；这里兜底，不依赖部署。
+      const TRANSIENT_RE = /not ready|retry later|too many|frequen|timeout|busy/i;
+      let data: { materials: Material[]; missing_sheets?: string[] } | undefined;
+      for (let attempt = 1; ; attempt++) {
+        try {
+          data = await invokeFn<{ materials: Material[]; missing_sheets?: string[] }>("feishu-read", payload);
+          break;
+        } catch (e) {
+          if (attempt >= 4 || !TRANSIENT_RE.test((e as Error).message)) throw e;
+          toast.info(`飞书数据未就绪，${3 * 2 ** (attempt - 1)} 秒后第 ${attempt} 次重试…`);
+          await new Promise((r) => setTimeout(r, 3000 * 2 ** (attempt - 1)));
+        }
+      }
       const list = (data?.materials ?? []).map((m) => ({
         ...m,
         advertiser_name: m.advertiser_id
