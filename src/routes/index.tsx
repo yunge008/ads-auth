@@ -226,6 +226,15 @@ function AuthorizeLogPanel({ refreshKey }: { refreshKey: number }) {
   );
 }
 
+/** 毫秒 → m:ss 或 h:mm:ss */
+function fmtDuration(ms: number): string {
+  const t = Math.round(ms / 1000);
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const sec = String(t % 60).padStart(2, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+}
+
 /** 统计表人员行的异常说明：悬停 / 键盘聚焦 / 点按都能打开。 */
 function IssueTip({ text }: { text: string }) {
   const [open, setOpen] = React.useState(false);
@@ -277,6 +286,10 @@ function AuthorizePage() {
   // 本次执行授权覆盖的素材 id 集合；执行完毕后不清空，保留到下一次点「执行授权」再覆盖，
   // 这样状态条能一直显示上一次的结果。
   const [authTargetIds, setAuthTargetIds] = React.useState<Set<string> | null>(null);
+  // 本次执行授权的起止时间，用于进度里的「已用 / 剩余约」；授权中每秒刷新一次
+  const [authStartAt, setAuthStartAt] = React.useState<number | null>(null);
+  const [authEndAt, setAuthEndAt] = React.useState<number | null>(null);
+  const [nowTick, setNowTick] = React.useState(() => Date.now());
   // 「待授权账户」面板开关：与素材列表筛选是 AND 关系，默认每次拉取素材后全部开启
   const [enabledAdvertiserIds, setEnabledAdvertiserIds] = React.useState<Set<string>>(new Set());
   // 本次拉取每个请求人员的结果：0 条 / sheet 未找到 / 失败的人也要在统计表里出现，不能静默消失
@@ -590,6 +603,9 @@ function AuthorizePage() {
     }
     const targetIds = new Set(targets.map((t) => t.id));
     setAuthTargetIds(targetIds);
+    setAuthStartAt(Date.now());
+    setAuthEndAt(null);
+    setNowTick(Date.now());
     setAuthorizing(true);
 
     // 每个素材最新的处理结果，独立于 materials 状态记录一份，用于判断本轮结束后
@@ -658,6 +674,7 @@ function AuthorizePage() {
       await runBatch(retryTargets);
     }
 
+    setAuthEndAt(Date.now());
     setAuthorizing(false);
     toast.success(
       `已处理 ${targets.length} 条` +
@@ -666,6 +683,12 @@ function AuthorizePage() {
   };
 
   // 本次执行授权的进度：进度条 + 各结果状态计数（已授权 → 各类失败 → 授权中，0 的不显示）。
+  React.useEffect(() => {
+    if (!authorizing) return;
+    const t = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, [authorizing]);
+
   const authStats = React.useMemo(() => {
     if (!authTargetIds) return null;
     const counts: Partial<Record<MaterialStatus, number>> = {};
@@ -675,12 +698,19 @@ function AuthorizePage() {
     }
     const pending = counts["授权中"] ?? 0;
     const order: MaterialStatus[] = ["已授权", ...OTHER_RESULT_STATUSES, "授权中"];
+    const total = authTargetIds.size;
+    const done = total - pending;
+    // 已用 = 结束时间（或当前）- 开始时间；剩余约 = 已用 / 已完成 × 未完成（按平均速度线性估算，未完成任何一条时不估）
+    const elapsedMs = authStartAt ? Math.max(0, (authEndAt ?? nowTick) - authStartAt) : 0;
+    const etaMs = authorizing && done > 0 && pending > 0 ? (elapsedMs / done) * pending : null;
     return {
-      total: authTargetIds.size,
-      done: authTargetIds.size - pending,
+      total,
+      done,
+      elapsedMs,
+      etaMs,
       parts: order.filter((s) => (counts[s] ?? 0) > 0).map((s) => [s, counts[s] as number] as const),
     };
-  }, [authTargetIds, materials]);
+  }, [authTargetIds, materials, authStartAt, authEndAt, nowTick, authorizing]);
 
   const handleWriteback = async () => {
     const targets = materials.filter((m) => WRITEBACK_STATUSES.includes(m.status));
@@ -1157,7 +1187,7 @@ function AuthorizePage() {
               <div
                 role="status"
                 aria-live="polite"
-                className="ml-auto flex w-[36rem] max-w-full flex-wrap items-center justify-start gap-x-3 gap-y-1.5 text-xs"
+                className="ml-auto flex w-[48rem] max-w-full flex-wrap items-center justify-start gap-x-3 gap-y-1.5 text-xs"
               >
                 <div className="flex items-center gap-2">
                   <span className="w-[4em] font-medium">{authorizing ? "授权中" : "授权完毕"}</span>
@@ -1180,6 +1210,14 @@ function AuthorizePage() {
                   >
                     {authStats.done}/{authStats.total}
                   </span>
+                  <span className="tabular-nums text-muted-foreground whitespace-nowrap" aria-label="已用时间">
+                    已用 <span className="inline-block min-w-[5ch]">{fmtDuration(authStats.elapsedMs)}</span>
+                  </span>
+                  {authorizing && (
+                    <span className="tabular-nums text-muted-foreground whitespace-nowrap" aria-label="预估剩余时间">
+                      剩余约 <span className="inline-block min-w-[5ch]">{authStats.etaMs == null ? "--:--" : fmtDuration(authStats.etaMs)}</span>
+                    </span>
+                  )}
                 </div>
                 {authStats.parts.map(([st, n]) => (
                   <button
