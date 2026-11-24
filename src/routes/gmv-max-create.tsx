@@ -29,6 +29,7 @@ type ResultRow = {
   ok: boolean;
   campaign_id?: string;
   error?: string;
+  notes?: string[];
 };
 type BatchRow = {
   advertiser_id: string;
@@ -38,6 +39,8 @@ type BatchRow = {
   budget: number;
   start_time?: string;
   end_time?: string;
+  identity_list?: unknown[];
+  accelerate_testing_for_new_videos?: "ON" | "OFF";
 };
 type BatchRowStatus = "invalid" | "pending" | "running" | "ok" | "error";
 type BatchRowState = BatchRow & {
@@ -172,7 +175,7 @@ function BatchPreviewTable({
               <TableCell className="text-xs font-mono">
                 {r.status === "invalid" ? (
                   <span className="text-amber-600 font-sans">{r.issues.join("；")}</span>
-                ) : r.status === "ok" ? r.campaignId : r.status === "error" ? (
+                ) : r.status === "ok" ? [r.campaignId, r.error].filter(Boolean).join(" · ") : r.status === "error" ? (
                   <span className="text-destructive font-sans">{r.error}</span>
                 ) : ""}
               </TableCell>
@@ -310,18 +313,35 @@ function GmvMaxCreatePage() {
         const budget = Number(get("预算", "budget"));
         const startTimeVal = excelTimeToTikTok(get("开始时间", "start_time"));
         const endTimeVal = excelTimeToTikTok(get("结束时间", "end_time"));
+        // 可选列：视频账号JSON（identity_list 原样 JSON）/ 新素材优先测试（ON/OFF）
+        const identityText = String(get("视频账号JSON", "identity_list") ?? "").trim();
+        let identity_list: unknown[] | undefined;
+        let identityBad = false;
+        if (identityText) {
+          try {
+            const v = JSON.parse(identityText);
+            if (Array.isArray(v)) identity_list = v; else identityBad = true;
+          } catch { identityBad = true; }
+        }
+        const accelRaw = String(get("新素材优先测试", "accelerate_testing_for_new_videos") ?? "").trim().toUpperCase();
+        const accelerate_testing_for_new_videos = accelRaw === "ON" || accelRaw === "OFF" ? accelRaw : undefined;
         const rowNo = idx + 2; // header is row 1
         if (!advertiser_id && !campaign_name && !item_group_ids.length) return; // skip fully blank row
         const issues: string[] = [];
         if (!advertiser_id) issues.push("广告户ID 为空");
         if (!campaign_name) issues.push("广告组名称为空");
         if (!item_group_ids.length) issues.push("商品ID 为空");
+        if (item_group_ids.length > 50) issues.push(`商品 ${item_group_ids.length} 个，超过上限 50`);
+        if (identityBad) issues.push("视频账号JSON 格式错误");
+        if (accelRaw && !accelerate_testing_for_new_videos) issues.push("新素材优先测试只能填 ON/OFF");
         if (!Number.isFinite(roas_bid) || roas_bid <= 0) issues.push("ROI 必须是大于 0 的数字");
         if (!Number.isFinite(budget) || budget <= 0) issues.push("预算必须是大于 0 的数字");
         rows.push({
           advertiser_id, campaign_name, item_group_ids, roas_bid, budget,
           start_time: startTimeVal,
           end_time: endTimeVal,
+          ...(identity_list ? { identity_list } : {}),
+          ...(accelerate_testing_for_new_videos ? { accelerate_testing_for_new_videos } : {}),
           rowNo,
           issues,
           status: issues.length ? "invalid" : "pending",
@@ -345,15 +365,17 @@ function GmvMaxCreatePage() {
         if (batchRows[i].status === "invalid") continue;
         setBatchRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, status: "running" } : r)));
         try {
-          const { advertiser_id, campaign_name, item_group_ids, roas_bid, budget, start_time, end_time } = batchRows[i];
-          const res = await runBatch([{ advertiser_id, campaign_name, item_group_ids, roas_bid, budget, start_time, end_time }]);
+          const { advertiser_id, campaign_name, item_group_ids, roas_bid, budget, start_time, end_time,
+            identity_list, accelerate_testing_for_new_videos } = batchRows[i];
+          const res = await runBatch([{ advertiser_id, campaign_name, item_group_ids, roas_bid, budget, start_time, end_time,
+            identity_list, accelerate_testing_for_new_videos }]);
           const r0 = res[0];
           if (r0?.ok) ok++;
           setBatchRows((prev) => prev.map((r, idx) => (idx === i ? {
             ...r,
             status: r0?.ok ? "ok" : "error",
             campaignId: r0?.ok ? r0.campaign_id : undefined,
-            error: r0?.ok ? undefined : (r0?.error ?? "未知错误"),
+            error: r0?.ok ? (r0.notes?.join("；") || undefined) : (r0?.error ?? "未知错误"),
           } : r)));
         } catch (e) {
           setBatchRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, status: "error", error: (e as Error).message } : r)));
@@ -374,7 +396,7 @@ function GmvMaxCreatePage() {
       ...batchRows.map((r) => [
         r.rowNo, r.advertiser_id, r.campaign_name, r.item_group_ids.join(","), r.roas_bid, r.budget,
         r.start_time ?? "", r.end_time ?? "", batchStatusLabel(r.status),
-        r.status === "ok" ? (r.campaignId ?? "") : r.status === "invalid" ? r.issues.join("；") : (r.error ?? ""),
+        r.status === "ok" ? [r.campaignId ?? "", r.error ?? ""].filter(Boolean).join(" · ") : r.status === "invalid" ? r.issues.join("；") : (r.error ?? ""),
       ]),
     ];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -455,6 +477,7 @@ function GmvMaxCreatePage() {
         <CardContent className="space-y-3">
           <p className="text-xs text-muted-foreground">
             列：广告户ID / 广告组名称 / 商品ID（多个用逗号或换行分隔）/ ROI / 预算 / 开始时间（可空）/ 结束时间（可空）。设置逻辑同「单个新建」。
+            可选列：视频账号JSON / 新素材优先测试（ON/OFF）。
             模板 A:C 列固定为文本格式，F:G 列固定为日期时间格式。
           </p>
           <div className="flex flex-wrap items-center gap-2">

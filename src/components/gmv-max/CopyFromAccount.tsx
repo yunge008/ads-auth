@@ -4,7 +4,11 @@
 // 不复制、标「手动」：全店商品组、手选视频组、商品 >50 的组。
 import * as React from "react";
 import * as XLSX from "xlsx";
-import { Copy, Download, Play, HelpCircle } from "lucide-react";
+import { Copy, Download, Play, HelpCircle, ArrowRightLeft } from "lucide-react";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,6 +38,7 @@ type CopyRow = {
   affiliatePostsEnabled?: boolean;
   accelTesting?: string;
   nameRoi: number | null;
+  infoRoi: number;
   selected: boolean;
   status: Status;
   note: string;
@@ -49,10 +54,12 @@ function pickCampaign(info: Record<string, unknown> | undefined): Record<string,
   }
   return info;
 }
-// 名称形如 807-R3.4-5.5-7.5-5.0，R 后第 4 个数 = ROI
+// 名称 R 后连续数字串的最后一个 = ROI：807-R3.4-5.5-7.5-5.0 → 5.0；观察六11.19-R5.0 → 5.0
 function roiFromName(name: string): number | null {
-  const m = name.match(/R(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)/);
-  return m ? Number(m[4]) : null;
+  const m = name.match(/R(\d+(?:\.\d+)?(?:-\d+(?:\.\d+)?)*)/);
+  if (!m) return null;
+  const v = Number(m[1].split("-").pop());
+  return v > 0 ? v : null;
 }
 
 function toRow(c: { campaign_id: string; campaign_name: string; operation_status: string }, raw: Record<string, unknown> | undefined, err?: string): CopyRow {
@@ -65,11 +72,11 @@ function toRow(c: { campaign_id: string; campaign_name: string; operation_status
     srcStatus: c.operation_status,
     itemGroupIds: ids,
     roasBid: Number(info.roas_bid),
+    infoRoi: Number(info.roas_bid),
     budget: Number(info.budget),
     identityList: Array.isArray(info.identity_list) ? (info.identity_list as unknown[]) : [],
     affiliatePostsEnabled: typeof info.affiliate_posts_enabled === "boolean" ? info.affiliate_posts_enabled : undefined,
-    accelTesting: info.accelerate_testing_for_new_videos === "ON" || info.accelerate_testing_for_new_videos === "OFF"
-      ? String(info.accelerate_testing_for_new_videos) : undefined,
+    accelTesting: "ON", // 负责人决定：新素材优先测试全开
     nameRoi: roiFromName(name),
     selected: false,
     status: "pending",
@@ -81,9 +88,13 @@ function toRow(c: { campaign_id: string; campaign_name: string; operation_status
   if (info.product_video_specific_type === "CUSTOM_SELECTION") return manual("手选视频组");
   if (!ids.length) return manual("无商品");
   if (ids.length > 50) return manual(`商品 ${ids.length} 个 >50`);
+  // 负责人决定：ROI 以名称为准，名称里解析不出才用 info
+  if (row.nameRoi != null) {
+    if (Math.abs(row.nameRoi - row.infoRoi) > 1e-6) row.note = `ROI 按名称 ${row.nameRoi}（info ${row.infoRoi}）`;
+    row.roasBid = row.nameRoi;
+  }
   if (!(row.roasBid > 0) || !(row.budget > 0)) return manual("ROI/预算缺失");
   row.selected = c.operation_status === "ENABLE";
-  if (row.nameRoi != null && Math.abs(row.nameRoi - row.roasBid) > 1e-6) row.note = `名称ROI ${row.nameRoi}≠${row.roasBid}`;
   return row;
 }
 
@@ -96,6 +107,39 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
   const [loading, setLoading] = React.useState("");
   const [running, setRunning] = React.useState(false);
   const [rawDump, setRawDump] = React.useState<unknown[]>([]);
+  const [holder, setHolder] = React.useState<{ id: string | null; name: string | null; err?: string } | null>(null);
+  const [authBusy, setAuthBusy] = React.useState(false);
+  const [confirmOpen, setConfirmOpen] = React.useState(false);
+
+  type AuthCheck = { holder_advertiser_id: string | null; holder_advertiser_name: string | null; store_found: boolean };
+  const checkAuth = React.useCallback(async (adv: string) => {
+    if (!adv) return setHolder(null);
+    setAuthBusy(true);
+    try {
+      const d = await invokeFn<AuthCheck>("gmv-max-exclusive-auth", { advertiser_id: adv, action: "check" });
+      setHolder({ id: d.holder_advertiser_id, name: d.holder_advertiser_name, err: d.store_found ? undefined : "店铺未在列表中" });
+    } catch (e) {
+      setHolder({ id: null, name: null, err: (e as Error).message });
+    } finally {
+      setAuthBusy(false);
+    }
+  }, []);
+  React.useEffect(() => { void checkAuth(dstId); }, [dstId, checkAuth]);
+
+  const grantAuth = async () => {
+    setConfirmOpen(false);
+    setAuthBusy(true);
+    try {
+      await invokeFn("gmv-max-exclusive-auth", { advertiser_id: dstId, action: "grant" });
+      toast.success("已切换独占授权");
+    } catch (e) {
+      toast.error(`切户失败：${(e as Error).message}`);
+    } finally {
+      setAuthBusy(false);
+      void checkAuth(dstId);
+    }
+  };
+  const dstHolds = !!dstId && holder?.id === dstId;
 
   const load = async () => {
     if (!srcId) return toast.error("请选择源广告户");
@@ -173,12 +217,24 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
   };
 
   const download = () => {
+    const importAoa = [
+      ["广告户ID", "广告组名称", "商品ID", "ROI", "预算", "开始时间", "结束时间", "视频账号JSON", "新素材优先测试", "源CampaignID"],
+      ...rows.filter((r) => r.selected && r.status === "pending").map((r) => [
+        dstId, r.name, r.itemGroupIds.join(","), r.roasBid, r.budget, "", "", JSON.stringify(r.identityList), r.accelTesting ?? "", r.srcId,
+      ]),
+    ];
     const aoa = [
       ["源CampaignID", "名称", "源状态", "商品数", "商品ID", "ROI", "预算", "identity数", "新素材测试", "状态", "新CampaignID", "备注"],
       ...rows.map((r) => [r.srcId, r.name, r.srcStatus, r.itemGroupIds.length, r.itemGroupIds.join(","), r.roasBid, r.budget,
         r.identityList.length, r.accelTesting ?? "", statusLabel[r.status], r.newId ?? "", r.note]),
     ];
     const wb = XLSX.utils.book_new();
+    const importWs = XLSX.utils.aoa_to_sheet(importAoa);
+    for (let r = 1; r < importAoa.length; r++) for (const c of [0, 2, 9]) {
+      const cell = importWs[XLSX.utils.encode_cell({ r, c })];
+      if (cell) { cell.t = "s"; cell.z = "@"; }
+    }
+    XLSX.utils.book_append_sheet(wb, importWs, "导入");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), "复制");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["campaign_id", "info_json"], ...rawDump.map((d) => {
       const x = d as { campaign_id: string };
@@ -207,10 +263,11 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
                 <button type="button" aria-label="说明" className="text-muted-foreground"><HelpCircle className="h-4 w-4" /></button>
               </TooltipTrigger>
               <TooltipContent className="max-w-sm text-xs leading-relaxed">
-                复制名称、商品、ROI、预算、视频来源账号、新素材优先测试；立即开始，不开促销日、不开自动加预算。
+                流程：读取源户 →（下载存档）→ 切户 → 复制；也可下载后用「Excel 批量新建」上传首个 sheet「导入」。
+                复制名称、商品、ROI（按名称 R 后最后一个数，解析不出用 info）、预算、视频来源账号；新素材优先测试全开；立即开始，不开促销日、不开自动加预算。
                 视频账号超过 20 个时先按原样建，被拒再保留前 20 个（店铺官方号优先），备注列出被去掉的账号。
                 全店商品组、手选视频组、商品超过 50 个的组标「手动」不复制。
-                目标户须已拿到该店铺 GMV Max 独占授权，且商品未被启用中的广告组占用，否则单行失败。
+                切户后原持有户在该店铺的 GMV Max 广告组全部自动暂停。
                 AI 素材（审核后发布）接口无此字段，建完需后台手动开。
               </TooltipContent>
             </Tooltip>
@@ -225,6 +282,16 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
           </Button>
           <span aria-hidden className="text-muted-foreground">→</span>
           {advSelect(dstId, setDstId, "目标广告户")}
+          {dstId && (
+            <span className={`text-xs ${dstHolds ? "text-green-600" : "text-amber-600"}`} aria-live="polite">
+              {authBusy ? "授权查询中…" : holder?.err ? `授权：${holder.err}` : dstHolds ? "已独占授权" : `授权在：${holder?.name ?? holder?.id ?? "无"}`}
+            </span>
+          )}
+          {dstId && !dstHolds && !authBusy && (
+            <Button size="sm" variant="destructive" onClick={() => setConfirmOpen(true)} disabled={running || !!loading}>
+              <ArrowRightLeft className="h-4 w-4 mr-1" />切户
+            </Button>
+          )}
           <Button size="sm" onClick={run} disabled={running || !!loading || !selectedCount || !dstId}>
             <Play className="h-4 w-4 mr-1" />{running ? "复制中…" : `复制（${selectedCount}）`}
           </Button>
@@ -274,6 +341,21 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
           </div>
         )}
       </CardContent>
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>把店铺 GMV Max 独占授权切到 {dstId}？</AlertDialogTitle>
+            <AlertDialogDescription>
+              当前持有方 {holder?.name ?? holder?.id ?? "未知"} 在该店铺的所有 GMV Max 广告组会被 TikTok 自动暂停。
+              {rows.length ? "" : " 还没读取源户广告组，切户后旧户可能读不到。"}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={grantAuth}>确认切户</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }

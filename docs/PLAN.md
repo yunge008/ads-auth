@@ -21,7 +21,6 @@
 | --- | --- | --- |
 | attribution-upload | 快照重算心跳（1123.203） | 外部无法探测；下次大月份重算超 10 分钟不再误报失败即确认 |
 | attribution-identity-build | 身份合并让出签名、区间不再出 0 长度（1123.203） | 外部无法探测；下次「重建身份与区间」不报错即确认 |
-| gmv-max-campaign-info | 新增只读函数：导出 GMV Max 广告组 info 原始 JSON（1124.207，账户迁移第 0 步） | API 测试页 `gmv-max-campaign-info {"advertiser_id":"..."}` 不报 404 即确认 |
 | tts-listing | 图片白名单补火山引擎 TOS（1123.202） | 外部无法探测；下次 API 上架传 TOS 图不报「域名不在允许列表」即确认 |
 
 2026-11-23 核验：`tools/check-deploy.sh` 显示 39 个函数全部已是新版 `_shared/auth.ts`（口令注入修复已上线）。
