@@ -1,6 +1,6 @@
-import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
+import { Link, useRouter, useRouterState, useNavigate } from "@tanstack/react-router";
 import { ChevronRight, LogOut, User } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Component, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { APP_VERSION } from "@/lib/version";
 import { setPasscode } from "@/lib/api";
@@ -11,6 +11,7 @@ import { toast } from "sonner";
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { location } = useRouterState();
   const navigate = useNavigate();
+  const router = useRouter();
   const account = useCurrentAccount();
 
   const visibleTabs = useMemo(
@@ -45,6 +46,57 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       navigate({ to: target });
     }
   }, [account, location.pathname, visibleTabs, navigate]);
+
+  // ── 页面保活：访问过的 tab 页隐藏保留、不卸载，切回来不重新请求、已填内容不丢 ──
+  const currentTab = tabByPath(location.pathname);
+  const keepKey =
+    account && currentTab && location.pathname === currentTab.to && hasTab(account, currentTab.key)
+      ? currentTab.key
+      : null;
+  const [visited, setVisited] = useState<string[]>([]);
+  const shown = keepKey && !visited.includes(keepKey) ? [...visited, keepKey] : visited;
+  useEffect(() => {
+    if (keepKey) setVisited((v) => (v.includes(keepKey) ? v : [...v, keepKey]));
+  }, [keepKey]);
+
+  // 每个页面各自记住滚动位置（共用 main 滚动容器）
+  const mainRef = useRef<HTMLElement>(null);
+  const scrollPos = useRef(new Map<string, number>());
+  const prevKey = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const el = mainRef.current;
+    if (!el) return;
+    if (prevKey.current) scrollPos.current.set(prevKey.current, el.scrollTop);
+    el.scrollTop = (keepKey && scrollPos.current.get(keepKey)) || 0;
+    prevKey.current = keepKey;
+  }, [keepKey]);
+
+  // 登录后空闲时预加载全部可见页面代码，首次点击不再等下载
+  useEffect(() => {
+    if (!account) return;
+    let cancelled = false;
+    const idle = () =>
+      new Promise<void>((r) =>
+        "requestIdleCallback" in window
+          ? (window as Window & { requestIdleCallback: (cb: () => void) => void }).requestIdleCallback(() => r())
+          : setTimeout(r, 50),
+      );
+    const timer = setTimeout(async () => {
+      for (const t of visibleTabs) {
+        if (cancelled) return;
+        await idle();
+        try {
+          await router.preloadRoute({ to: t.to } as Parameters<typeof router.preloadRoute>[0]);
+        } catch {
+          /* 预加载失败不影响正常导航 */
+        }
+      }
+    }, 1000);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [account, visibleTabs, router]);
 
   return (
     <div className="flex h-screen bg-muted/30">
@@ -124,7 +176,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
-        <main className="flex-1 p-6 overflow-auto">{children}</main>
+        <main ref={mainRef} className="flex-1 p-6 overflow-auto">
+          {!keepKey && children}
+          {shown.map((k) => {
+            const tab = TABS.find((t) => t.key === k);
+            const route = tab ? (router.routesByPath as unknown as Record<string, { options: { component?: ComponentType } }>)[tab.to] : undefined;
+            const Page = route?.options.component;
+            if (!Page) return null;
+            return (
+              <div key={k} hidden={k !== keepKey}>
+                <PageErrorBoundary>
+                  <Suspense fallback={<div className="text-sm text-muted-foreground">加载中…</div>}>
+                    <Page />
+                  </Suspense>
+                </PageErrorBoundary>
+              </div>
+            );
+          })}
+        </main>
       </div>
     </div>
   );
@@ -164,4 +233,22 @@ function NavItem({ tab, active, nested }: { tab: TabDef; active: boolean; nested
       {text}
     </Link>
   );
+}
+
+class PageErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div role="alert" className="space-y-2 text-sm">
+        <p className="text-destructive">页面出错：{this.state.error.message}</p>
+        <button type="button" className="underline" onClick={() => this.setState({ error: null })}>
+          重试
+        </button>
+      </div>
+    );
+  }
 }

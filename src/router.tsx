@@ -9,6 +9,8 @@ export const getRouter = () => {
     routeTree,
     context: { queryClient },
     scrollRestoration: true,
+    // 鼠标悬停/聚焦导航链接即预加载该页代码
+    defaultPreload: "intent",
     defaultPreloadStaleTime: 0,
   });
 
