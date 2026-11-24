@@ -22,6 +22,11 @@
 2. **口径清单 + 对账**：把 finance-order 全部取数/计算规则列成清单；API 数据按清单算出 PH、TH 三个月的结果，与手工表结果逐列对比。
    - 已知差异点：接口结算交易是订单维度，不带 SKU ID / 数量。拟沿用 finance-order 现有 PHL 规则「按订单号展开订单表 SKU 行，金额只挂第一条」——**须在对账中验证成本件数一致**，不一致再改为逐单拉 SKU 级明细。
    - 接口导出缺「订单创建时间」列：结算交易原文里取 `order_create_time`（已单独入库）。
+   - 对账原始表（Google Drive「5. 跨境数据共享」，2026-11-25 清点）：
+     | 店铺 | 订单 | 财务 |
+     |---|---|---|
+     | PH | `PH 订单 260801-261104.xlsx`（1Ac7xNgmwWQMW3FJ0pRIuPVcL2TCVK-EA） | `PH 财务 260801-260930.xlsx`（1iYE7atF9XLFusoI-e_MSBL7EYWHk2zHL）、`PH 财务 261001-261118.xlsx`（1YckG9aMDEp9WK6_eY4-9xIyzO9vpay2r） |
+     | TH | `TH 订单 260101-261104.xlsx`（1HWbVTOry1NVXz-GMSXUYu9E2tzg_4cNv） | `TH 财务 260801-260930.xlsx`（1z_w5GdkBMuGmUCdNzHtknvpcyLG3aat0）、`TH 财务 261001-261118.xlsx`（负责人本地有，云盘同步中，未查到 ID） |
 3. **ads-auth 汇总页**：全站点汇总（截止日期）+ 汇总数据回写（按月汇总在上、日期行近→远），可写飞书。
 4. **逐店接入**：每接一个店先跑该店三个月对账。
 
