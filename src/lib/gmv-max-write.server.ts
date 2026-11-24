@@ -392,14 +392,59 @@ async function createCore(db: SupabaseClient, r: CreateRow, ctx: Ctx): Promise<C
       } else break;
     }
   }
-  if (!campaignId) return { ok: false, error: notes.length ? `${lastErr}｜${notes.join("；")}` : lastErr };
-
   // 补全：update 参数（advertiser_id / campaign_id + 要改的字段）按 create 惯例推断，未见文档。
-  let partial = notes.some((n) => n.includes("需后台手动开") || n.includes("去掉不可投商品"));
   const update = async (patch: Record<string, unknown>) =>
     withConns(conns, (token) => tt(token, "/campaign/gmv_max/update/", {
       method: "POST", body: { advertiser_id: advertiserId, campaign_id: campaignId, ...patch },
     }));
+  const UNAVAILABLE = /unavailable/i;
+  const rejectReason = (msg: string) => `不可用（TikTok 拒绝：${msg.replace(/^.*?: /, "")}）`;
+
+  // TikTok 报 product is unavailable 且无法预检时：让 TikTok 自己逐个判。
+  // ① 逐个商品单独试建（失败不会建出任何组）直到一个成功作为种子；② 其余分批 update 追加，某批失败就二分，定位到单个被拒商品。
+  let isolated = false;
+  if (!campaignId && UNAVAILABLE.test(lastErr) && !allProducts && fullIds.length > 1) {
+    isolated = true;
+    trimmedIds = false;
+    let seedIdx = -1;
+    for (let k = 0; k < fullIds.length && k < 40; k++) {
+      try {
+        const data = await withConns(conns, (token) => tt(token, "/campaign/gmv_max/create/", {
+          method: "POST", body: { ...body, item_group_ids: [fullIds[k]], request_id: genRequestId() },
+        }));
+        campaignId = data.campaign_id ? String(data.campaign_id) : undefined;
+        if (campaignId) { seedIdx = k; break; }
+      } catch (e) {
+        const m = (e as Error).message;
+        if (!UNAVAILABLE.test(m)) { lastErr = m; break; } // 非商品原因（如 identity/预算）→ 不再逐个试
+        ctx.excluded.set(fullIds[k], rejectReason(m));
+      }
+    }
+    if (campaignId) {
+      let current = [fullIds[seedIdx]];
+      const tryAdd = async (list: string[]): Promise<void> => {
+        if (!list.length) return;
+        try {
+          await update({ item_group_ids: [...current, ...list] });
+          current = [...current, ...list];
+        } catch (e) {
+          const m = (e as Error).message;
+          if (list.length === 1) { ctx.excluded.set(list[0], UNAVAILABLE.test(m) ? rejectReason(m) : `补全失败：${m}`); return; }
+          const mid = Math.ceil(list.length / 2);
+          await tryAdd(list.slice(0, mid));
+          await tryAdd(list.slice(mid));
+        }
+      };
+      const rest = fullIds.slice(seedIdx + 1);
+      for (let k = 0; k < rest.length; k += 25) await tryAdd(rest.slice(k, k + 25));
+      const rejected = fullIds.filter((id) => ctx.excluded.has(id));
+      notes.push(`TikTok 报商品不可用，逐个定位：纳入 ${current.length}/${fullIds.length}${rejected.length ? `，被拒 ${rejected.length} 个：${rejected.join(",")}` : ""}`);
+    }
+  }
+  if (!campaignId) return { ok: false, error: notes.length ? `${lastErr}｜${notes.join("；")}` : lastErr };
+
+  let partial = notes.some((n) => n.includes("需后台手动开") || n.includes("去掉不可投商品")) ||
+    (isolated && fullIds.some((id) => ctx.excluded.has(id)));
   if (trimmedIds) {
     try {
       await update({ item_group_ids: fullIds });
