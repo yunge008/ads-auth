@@ -4,7 +4,7 @@
 // 不复制、标「手动」：手选视频组。全店商品组以 商品ID=ALL 复制。商品 >50 / 视频账号 >20 由服务端先降级建组再 update 补全。
 import * as React from "react";
 import * as XLSX from "xlsx";
-import { Copy, Download, Play, HelpCircle, PackageSearch, RotateCcw } from "lucide-react";
+import { Copy, Download, Play, HelpCircle, PackageSearch, RotateCcw, Users } from "lucide-react";
 import { MultiSelect } from "@/components/MultiSelect";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -153,7 +153,8 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
   const [identNames, setIdentNames] = React.useState<Record<string, string>>({});
   const [identChecked, setIdentChecked] = React.useState<Set<string>>(new Set());
   const [identLoading, setIdentLoading] = React.useState(false);
-  // 来源 BC = 源组 info 里最常见的 store_authorized_bc_id
+  const [identTypes, setIdentTypes] = React.useState<Record<string, string>>({});
+  const [identTick, setIdentTick] = React.useState(0); // 「读取视频账号」按钮触发
   // 来源 BC = 源户 BC 下拉所选（读取源组、查来源 BC 视频账号都用它）
   const srcBc = srcBcSel;
   const identItems: IdentityRow[] = React.useMemo(() => {
@@ -169,14 +170,22 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
         m.set(id, it);
       }
     }
+    // 两边 BC 查到的账号也列出（没读组时只看授权对照，组数 0）
+    for (const id of [...(srcIdents ?? []), ...(dstIdents ?? [])]) {
+      if (m.has(id)) continue;
+      m.set(id, { identity_id: id, identity_type: identTypes[id] ?? "", name: identNames[id] ?? "", groups: 0,
+        inSrc: srcIdents ? srcIdents.has(id) : null, inDst: dstIdents ? dstIdents.has(id) : null });
+    }
     return Array.from(m.values()).sort((a, b) => Number(b.inDst !== false) - Number(a.inDst !== false) || b.groups - a.groups);
-  }, [rows, srcIdents, dstIdents, identNames]);
+  }, [rows, srcIdents, dstIdents, identNames, identTypes]);
   React.useEffect(() => {
-    if (!rows.length || !srcId || !dstId || !dstBc) return;
+    // 自动：读完组且两边户+BC 都选了；手动：点「读取视频账号」（identTick 变化），哪边选了查哪边
+    if (!identTick && (!rows.length || !srcId || !dstId || !dstBc)) return;
+    if (!(srcId && srcBc) && !(dstId && dstBc)) return;
     let stop = false;
     setIdentLoading(true);
-    type Resp = { identities: { identity_id: string; name: string; product_gmv_max_available: boolean }[]; names?: Record<string, string> };
-    const q = (adv: string, bc: string) => bc
+    type Resp = { identities: { identity_id: string; identity_type: string; name: string; product_gmv_max_available: boolean }[]; names?: Record<string, string> };
+    const q = (adv: string, bc: string) => adv && bc
       ? callGmvMaxWrite<Resp>({ action: "identities", advertiser_id: adv, bc_id: bc }).catch(() => null)
       : Promise.resolve(null);
     Promise.all([q(srcId, srcBc), q(dstId, dstBc)]).then(([s1, d1]) => {
@@ -185,15 +194,19 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
       Object.assign(names, s1?.names ?? {}, d1?.names ?? {});
       for (const x of [...(s1?.identities ?? []), ...(d1?.identities ?? [])]) if (x.name) names[x.identity_id] = x.name;
       setIdentNames(names);
+      const types: Record<string, string> = {};
+      for (const x of [...(s1?.identities ?? []), ...(d1?.identities ?? [])]) types[x.identity_id] = x.identity_type;
+      setIdentTypes(types);
       setSrcIdents(s1 ? new Set(s1.identities.map((x) => x.identity_id)) : null);
       const dst = d1 ? new Set(d1.identities.filter((x) => x.product_gmv_max_available).map((x) => x.identity_id)) : null;
       setDstIdents(dst);
       // 默认勾选：目标 BC 有授权的（查询失败时全部勾上，交给建组时校验）
       const all = rows.flatMap((r) => (r.identityList as Record<string, unknown>[]).map((x) => String(x.identity_id ?? "")));
       setIdentChecked(new Set(all.filter((id) => !dst || dst.has(id))));
+      if (!s1 && !d1) toast.error("读取视频账号失败");
     }).finally(() => { if (!stop) setIdentLoading(false); });
     return () => { stop = true; };
-  }, [rows.length, srcId, dstId, dstBc, srcBc]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [rows.length, srcId, dstId, dstBc, srcBc, identTick]); // eslint-disable-line react-hooks/exhaustive-deps
   const identsFor = (r: CopyRow) => (r.identityList as Record<string, unknown>[]).filter((x) => identChecked.has(String(x.identity_id ?? "")));
 
   // 目标户店铺里「可投且不在任何启用中 GMV Max 组」的商品
@@ -461,6 +474,10 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
           {rows.length > 0 && (
             <Button size="sm" variant="outline" onClick={download}><Download className="h-4 w-4 mr-1" />下载</Button>
           )}
+          <Button size="sm" variant="outline" onClick={() => setIdentTick((t) => t + 1)}
+            disabled={identLoading || !((srcId && srcBc) || (dstId && dstBc))} aria-label="读取来源/目标 BC 的视频账号">
+            <Users className="h-4 w-4 mr-1" />{identLoading ? "读取中…" : "读取视频账号"}
+          </Button>
           {dstId && (
             <Button size="sm" variant="outline" onClick={downloadFreeProducts} disabled={prodBusy} aria-label="下载目标户未在广告组的商品">
               <PackageSearch className="h-4 w-4 mr-1" />{prodBusy ? "读取中…" : "未投商品"}

@@ -18,6 +18,8 @@ export function IdentityPanel({ items, checked, onToggle, srcLabel, dstLabel, lo
   srcLabel: string; dstLabel: string; loading: boolean;
 }) {
   const [open, setOpen] = React.useState(false);
+  const hasGroups = items.some((i) => i.groups > 0);
+  React.useEffect(() => { if (items.length && !hasGroups) setOpen(true); }, [items.length, hasGroups]); // 只看授权对照时直接展开
   if (!items.length) return null;
   const usable = items.filter((i) => i.inDst !== false).length;
   const picked = items.filter((i) => checked.has(i.identity_id)).length;
