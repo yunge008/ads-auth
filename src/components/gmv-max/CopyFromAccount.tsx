@@ -446,7 +446,7 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
           </Button>
           {dstId && (
             <span className={`text-xs ${dstHolds ? "text-green-600" : "text-amber-600"}`} aria-live="polite">
-              {authBusy ? "授权查询中…" : holder?.err ? `授权：${holder.err}` : dstHolds ? "已独占授权" : `授权在：${holder?.name ?? holder?.id ?? "无"}`}
+              {authBusy ? "授权查询中…" : holder?.err ? `授权：${holder.err}` : dstHolds ? "店铺已授权为新账号" : `店铺授权在：${holder?.name ?? holder?.id ?? "无"}`}
             </span>
           )}
           <Button size="sm" onClick={() => run()} disabled={running || !!loading || !selectedCount || !dstId || !dstBc}>

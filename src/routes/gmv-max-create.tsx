@@ -614,7 +614,7 @@ function GmvMaxCreatePage() {
         <CopyFromAccount advOptions={advOptions} onDone={() => setLogRefresh((k) => k + 1)} />
         </TabsContent>
         <TabsContent value="log" className="mt-3 space-y-4 data-[state=inactive]:hidden" forceMount>
-        <ImportHistory refreshKey={logRefresh} />
+        <ImportHistory refreshKey={logRefresh} advNames={Object.fromEntries(advOptions.map((a) => [a.id, a.name]))} />
         </TabsContent>
       </Tabs>
 

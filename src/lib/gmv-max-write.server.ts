@@ -618,6 +618,34 @@ export async function logImport(db: SupabaseClient, meta: LogMeta, row: CreateRo
   return error ? error.message : null;
 }
 
+// 记录显示时补名：历史记录没存户名/BC 名 → 从 advertiser_countries.advertiser_name、tiktok_connections.bc_name 现查；
+// 旧复制记录的 source 形如「源户 <id>」→ 解析出来源户 ID。来源 BC 旧记录未存，无法补。
+type NameRec = Record<string, unknown>;
+async function nameMaps(db: SupabaseClient) {
+  const [{ data: advs }, { data: conns }] = await Promise.all([
+    db.from("advertiser_countries").select("advertiser_id, advertiser_name"),
+    db.from("tiktok_connections").select("bc_id, bc_name"),
+  ]);
+  const adv = new Map<string, string>();
+  for (const a of (advs ?? []) as { advertiser_id: string; advertiser_name: string | null }[]) if (a.advertiser_name) adv.set(String(a.advertiser_id), a.advertiser_name);
+  const bc = new Map<string, string>();
+  for (const c of (conns ?? []) as { bc_id: string | null; bc_name: string | null }[]) if (c.bc_id && c.bc_name) bc.set(String(c.bc_id), c.bc_name);
+  return { adv, bc };
+}
+function fillNames<T extends NameRec>(r: T, m: { adv: Map<string, string>; bc: Map<string, string> }): T {
+  const o = { ...r } as NameRec;
+  const str = (k: string) => String(o[k] ?? "");
+  if (!str("source_advertiser_id") && o.kind === "copy") {
+    const mt = str("source").match(/(\d{10,})/);
+    if (mt) o.source_advertiser_id = mt[1];
+  }
+  if (!str("advertiser_name")) o.advertiser_name = m.adv.get(str("advertiser_id")) ?? "";
+  if (!str("bc_name")) o.bc_name = m.bc.get(str("bc_id")) ?? "";
+  if (!str("source_advertiser_name")) o.source_advertiser_name = m.adv.get(str("source_advertiser_id")) ?? "";
+  if (!str("source_bc_name")) o.source_bc_name = m.bc.get(str("source_bc_id")) ?? "";
+  return o as T;
+}
+
 export async function listImportBatches(db: SupabaseClient, days = 30) {
   const since = new Date(Date.now() - days * 86400_000).toISOString();
   const out = new Map<string, { batch_id: string; kind: string; source: string; operator: string; advertiser_id: string;
@@ -646,7 +674,8 @@ export async function listImportBatches(db: SupabaseClient, days = 30) {
     }
     if ((data ?? []).length < 1000) break;
   }
-  return Array.from(out.values()).map((b) => ({ ...b, groups: b.groups.size, counts: b.counts as Record<string, number> }))
+  const names = await nameMaps(db);
+  return Array.from(out.values()).map((b) => fillNames({ ...b, groups: b.groups.size, counts: b.counts as Record<string, number> }, names))
     .sort((a, b) => b.last_at.localeCompare(a.last_at));
 }
 
@@ -659,7 +688,8 @@ export async function getImportBatch(db: SupabaseClient, batchId: string) {
     rows.push(...((data ?? []) as unknown as Record<string, unknown>[]));
     if ((data ?? []).length < 1000) break;
   }
-  return rows;
+  const names = await nameMaps(db);
+  return rows.map((r) => fillNames(r, names));
 }
 
 export async function exclusiveAuth(db: SupabaseClient, advertiserId: string, grant: boolean) {

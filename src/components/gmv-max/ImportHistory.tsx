@@ -53,12 +53,13 @@ function AdvBc({ name, id, bcName, bcId }: { name?: string; id?: string; bcName?
   return (
     <div className="leading-tight">
       <div>{name || "—"} <span className="font-mono text-muted-foreground">{id}</span></div>
-      {(bcName || bcId) && <div className="text-muted-foreground">BC {bcName} <span className="font-mono">{bcId}</span></div>}
+      <div className="text-muted-foreground">BC {bcName || (bcId ? "" : "—")} <span className="font-mono">{bcId}</span></div>
     </div>
   );
 }
 
-export function ImportHistory({ refreshKey }: { refreshKey: number }) {
+// advNames：页面已有的广告户名（库里 advertiser_name 为空时兜底）
+export function ImportHistory({ refreshKey, advNames = {} }: { refreshKey: number; advNames?: Record<string, string> }) {
   const [batches, setBatches] = React.useState<Batch[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState("");
@@ -125,11 +126,11 @@ export function ImportHistory({ refreshKey }: { refreshKey: number }) {
                     <TableCell className="text-xs">{KIND_LABEL[b.kind] ?? b.kind}</TableCell>
                     <TableCell className="text-xs">
                       {b.source_advertiser_id
-                        ? <AdvBc name={b.source_advertiser_name} id={b.source_advertiser_id} bcName={b.source_bc_name} bcId={b.source_bc_id} />
+                        ? <AdvBc name={b.source_advertiser_name || advNames[b.source_advertiser_id ?? ""]} id={b.source_advertiser_id} bcName={b.source_bc_name} bcId={b.source_bc_id} />
                         : <span className="block max-w-48 truncate" title={b.source}>{b.source}</span>}
                     </TableCell>
                     <TableCell className="text-xs">
-                      <AdvBc name={b.advertiser_name} id={b.advertiser_id} bcName={b.bc_name} bcId={b.bc_id} />
+                      <AdvBc name={b.advertiser_name || advNames[b.advertiser_id]} id={b.advertiser_id} bcName={b.bc_name} bcId={b.bc_id} />
                     </TableCell>
                     <TableCell className="text-right text-xs">{b.groups}</TableCell>
                     <TableCell className="text-right text-xs text-emerald-600">{b.counts["成功"] ?? 0}</TableCell>
