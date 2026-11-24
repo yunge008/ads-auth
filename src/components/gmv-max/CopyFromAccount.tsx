@@ -4,17 +4,17 @@
 // 不复制、标「手动」：手选视频组。全店商品组以 商品ID=ALL 复制。商品 >50 / 视频账号 >20 由服务端先降级建组再 update 补全。
 import * as React from "react";
 import * as XLSX from "xlsx";
-import { Copy, Download, Play, HelpCircle, RotateCcw, Users } from "lucide-react";
+import { Copy, Download, Play, RotateCcw, Users } from "lucide-react";
 import { MultiSelect } from "@/components/MultiSelect";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { callGmvMaxWrite } from "@/lib/api";
 import { TargetPicker, useBcOptions } from "@/components/gmv-max/TargetPicker";
 import { IdentityPanel, type IdentityRow } from "@/components/gmv-max/IdentityPanel";
+import { CopyHelp } from "@/components/gmv-max/HelpTip";
 import { useConnections } from "@/lib/store";
 import { detailSheet, newBatchId, type DetailRow, type ProductResult } from "@/components/gmv-max/ImportHistory";
 
@@ -423,20 +423,7 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
       <CardHeader>
         <CardTitle className="text-base flex items-center gap-2">
           从账户复制
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button type="button" aria-label="说明" className="text-muted-foreground"><HelpCircle className="h-4 w-4" /></button>
-              </TooltipTrigger>
-              <TooltipContent className="max-w-sm text-xs leading-relaxed">
-                流程：读取源户 →（下载存档）→ 在 TikTok 后台切户（需对方同意）→ 复制；也可下载后用「Excel 批量新建」上传首个 sheet「导入」。
-                复制名称、商品、ROI（按名称 R 后最后一个数，解析不出用 info）、预算、视频来源账号；新素材优先测试全开；立即开始，不开促销日、不开自动加预算。
-                视频账号与源组完全一致（不截断）。商品超过 50 被拒时先建 50 个再自动补全；补全失败标「已建·需处理」并列出缺的商品。
-                全店商品组转为指定商品（近 30 天有数据的商品，去掉其他组已有的），因为一个商品只能在一个启用组；手选视频组标「手动」不复制。所有未成功的组在上方红框列出。
-                AI 素材（审核后发布）接口无此字段，建完需后台手动开。
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <CopyHelp />
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">

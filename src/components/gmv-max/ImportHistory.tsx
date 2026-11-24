@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { callGmvMaxWrite } from "@/lib/api";
+import { LogHelp } from "@/components/gmv-max/HelpTip";
 
 export type ProductResult = { item_group_id: string; status: string; reason: string };
 export type DetailRow = {
@@ -92,7 +93,7 @@ export function ImportHistory({ refreshKey, advNames = {} }: { refreshKey: numbe
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between space-y-0">
-        <CardTitle className="text-base">导入记录</CardTitle>
+        <CardTitle className="text-base flex items-center gap-2">导入记录<LogHelp /></CardTitle>
         <Button size="sm" variant="outline" onClick={load} disabled={loading} aria-label="刷新导入记录">
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </Button>
