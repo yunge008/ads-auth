@@ -7,7 +7,7 @@
 > 标记：✅ 已核验 ｜ ⚠️ 未核验（代码写了但没实测或无权限确认）｜ 🙋 需负责人决策/提供 ｜ 🔧 需负责人手动操作（跑 SQL / 让 Lovable 部署）
 > 优先级：P0 本轮必须做 ｜ P1 本轮争取 ｜ P2 之后
 
-最后更新：2026-11-24（1124.259）
+最后更新：2026-11-25（1125.260）
 
 ---
 
@@ -20,7 +20,7 @@ Lovable 积分已充值 → Edge Function 改动可以部署（B 类：给 Lovab
 | G1 | 部署 `attribution-upload`、`attribution-identity-build`、`tts-listing`、`feishu-read` | 🔧 Lovable | ✅ 1124.253 已部署，四个均在线应答 |
 | G2 | 5 个 migration 是否已执行（outreach_core / tts_multi_app / outreach_settings_rls / gmv_max_import_logs / _src_dst） | 🔧 SQL | ✅ 2026-11-24 负责人跑检查 SQL，6 项全部 true，已登记 `docs/MIGRATIONS.md` |
 | G3 | AI 数据库只读通道 v2（`rpc/ai_db_query`，口令头 + ai_reader + 只读事务） | — | ✅ 已执行并实测可用；单条查询上限 3 秒（anon 平台默认，函数内无法放宽）。Lovable 扫描报「ai_db_query 拼 SQL」Critical 属设计如此，已建议忽略 |
-| G4 | 定时任务密钥 `gmv_max_cron_secret` 明文写在历史 migration `20260605144834`（Lovable Critical） | 🔧 SQL | ✅ 2026-11-24 已轮换（64 位随机）；读取方均运行时取 vault，无需部署。待核对当晚 23:00/23:30 与次日 19:00 定时任务正常（已设提醒）。历史 migration 不改，扫描可能仍报，可标已处理 |
+| G4 | 定时任务密钥 `gmv_max_cron_secret` 明文写在历史 migration `20260605144834`（Lovable Critical） | 🔧 SQL | ✅ 2026-11-24 已轮换（64 位随机）；读取方均运行时取 vault，无需部署。✅ 当晚 23:00 飞书同步、23:30 归因快照（6/7/8 月）均正常；次日 19:00 自动授权待核对（已设提醒）。历史 migration 不改，扫描可能仍报，可标已处理 |
 | G5 | 导出防公式注入：素材成效已修（Lovable 1124.257）；「TikTok授权结果」CSV 与其他 Excel 导出待 Lovable 修/检查 | Lovable 免费修 | 进行中 |
 
 ---
@@ -78,7 +78,6 @@ Lovable 积分已充值 → Edge Function 改动可以部署（B 类：给 Lovab
 |---|---|---|
 | P0 | 「重建身份与区间」全站点一次跑报 546 资源超限 → 1124.255 改为前端逐站点调用后汇总（不改后端）；待负责人再点一次 | 🔧 负责人点按钮 |
 | P0 🔧 | 「重新计算」没数据 = **2026-09、2026-10 广告表未上传**（ad_uploads 最晚到 2026-08，最后上传 9-17）；计算本身正常。需负责人上传 9、10 月广告表 | 已核验 |
-| P2 | 6 月每晚快照总被标「后台重算进程已中断（超过 10 分钟没有进展）」但结果已 READY 且数字稳定：心跳判定偏紧导致误报 | 待查 |
 | P2 | 站点为空（country=''）的登记行：逐站点重建身份时不覆盖，数量未统计（查询超 3 秒） | 待查 |
 | P1 | 阶段 3 ②–⑨ 引擎切换（**会改归因数字**，逐项单独提交、单独验收）：②发样/回收双事件 ④交接并入事件流 ⑤站点权限校验 ⑥Pass 2 改 creator_key ⑦PENDING/EXCLUDED 两桶 ⑧人工判定接入 ⑨pickVidOwner 去重键 | 每项提交前给 before/after 对账 |
 | P1 | 阶段 4：事实层维护页（都不算规则 / 站点权限 / 交接） | 表已建，缺 UI |
