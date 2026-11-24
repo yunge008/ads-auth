@@ -789,7 +789,11 @@ function AuthorizePage() {
     const csv =
       "\uFEFF" +
       [headers, ...rows]
-        .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
+        .map((r) => r.map((c) => {
+          let v = String(c ?? "");
+          if (/^[=+\-@\t\r]/.test(v) && !/^[+-]?\d+(\.\d+)?$/.test(v)) v = "'" + v;
+          return `"${v.replace(/"/g, '""')}"`;
+        }).join(","))
         .join("\n");
     const ts = new Date()
       .toISOString()
