@@ -1,4 +1,4 @@
-// TikTok「creative data for product campaigns」导出表解析（中英文表头，26 列）。
+// TikTok「creative data for product campaigns」导出表解析（中英文表头，26 列；另兼容 2026-09 起的中文新版表头 28 列）。
 // 文件名约定「站点 MAX yyyymm.xlsx」→ 解析出站点（国家）+ 月份。
 import * as XLSX from "xlsx";
 
@@ -92,6 +92,12 @@ const HEADER_MAP: Record<string, keyof ParsedRow> = {
   "商品广告曝光数": "impressions",
   "商品广告点击数": "clicks",
   "货币": "currency",
+  // 中文新版导出（2026-09 起出现，如「MX-NE MAX 202609 V2.xlsx」）：同一字段换了列名。
+  // 已用库里 2026-08 旧格式数据核对：作品 ID = 视频 ID、SPU ID = 商品 ID 取值一致。
+  "作品id": "vid",
+  "推广系列id": "campaign_id",
+  "spuid": "product_id",
+  "创意素材": "video_title",
   // 英文
   "campaignname": "campaign_name",
   "campaignid": "campaign_id",
