@@ -216,7 +216,11 @@ function MaterialPerformancePage() {
         r.country, r.advertiser_name || r.advertiser_id, r.staff_name, r.source_type, r.vid, r.item_group_id, r.registered_sku, r.merchant_sku,
         r.cost, r.gross_revenue, r.orders, r.product_impressions, r.product_clicks,
         r.roi ?? "", r.ctr ?? "", r.cvr ?? "", r.cpm ?? "", r.cpa ?? "",
-      ].map((x) => `"${String(x ?? "").replace(/"/g, '""')}"`).join(",")))
+      ].map((x) => {
+        let v = String(x ?? "");
+        if (/^[=+\-@\t\r]/.test(v) && !/^[+-]?\d+(\.\d+)?$/.test(v)) v = "'" + v;
+        return `"${v.replace(/"/g, '""')}"`;
+      }).join(",")))
       .join("\n");
 
     const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
