@@ -4,7 +4,7 @@
 // 不复制、标「手动」：手选视频组。全店商品组以 商品ID=ALL 复制。商品 >50 / 视频账号 >20 由服务端先降级建组再 update 补全。
 import * as React from "react";
 import * as XLSX from "xlsx";
-import { Copy, Download, Play, HelpCircle, PackageSearch, RotateCcw, Users } from "lucide-react";
+import { Copy, Download, Play, HelpCircle, RotateCcw, Users } from "lucide-react";
 import { MultiSelect } from "@/components/MultiSelect";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -139,7 +139,6 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
   const [dstBc, setDstBc] = React.useState("");
   const [filters, setFilters] = React.useState<string[]>([]);
   const [showAll, setShowAll] = React.useState(false);
-  const [prodBusy, setProdBusy] = React.useState(false);
   const changeFilters = (f: string[]) => { setFilters(f); setRows((p) => applyFilter(p, f)); };
 
   // ---- 视频账号：来源 BC / 目标 BC 授权对照，只能勾目标 BC 有的 ----
@@ -210,26 +209,6 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
   const identsFor = (r: CopyRow) => (r.identityList as Record<string, unknown>[]).filter((x) => identChecked.has(String(x.identity_id ?? "")));
 
   // 目标户店铺里「可投且不在任何启用中 GMV Max 组」的商品
-  const downloadFreeProducts = async () => {
-    if (!dstId) return toast.error("请先选目标广告户");
-    setProdBusy(true);
-    try {
-      const d = await callGmvMaxWrite<{ store_id: string; products: { item_group_id: string; title?: string; status?: string; gmv_max_ads_status?: string }[] }>(
-        { action: "products", advertiser_id: dstId, bc_id: dstBc });
-      const free = d.products.filter((p) => p.status === "AVAILABLE" && p.gmv_max_ads_status !== "OCCUPIED");
-      const aoa = [["商品ID", "商品名称", "状态", "GMV Max 占用"],
-        ...d.products.map((p) => [p.item_group_id, p.title ?? "", p.status ?? "", p.gmv_max_ads_status ?? ""])];
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["商品ID", "商品名称"], ...free.map((p) => [p.item_group_id, p.title ?? ""])]), "未在广告组");
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), "全部商品");
-      XLSX.writeFile(wb, `店铺商品-${d.store_id}-${Date.now()}.xlsx`);
-      toast.success(`共 ${d.products.length} 个商品，未在广告组 ${free.length} 个`);
-    } catch (e) {
-      toast.error(`读取商品失败：${(e as Error).message}`);
-    } finally {
-      setProdBusy(false);
-    }
-  };
   const [loading, setLoading] = React.useState("");
   const [running, setRunning] = React.useState(false);
   const [rawDump, setRawDump] = React.useState<unknown[]>([]);
@@ -482,9 +461,6 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
           <Button size="sm" variant="outline" onClick={() => setIdentTick((t) => t + 1)}
             disabled={identLoading || !((srcId && srcBc) || (dstId && dstBc))} aria-label="读取来源/目标 BC 的视频账号">
             <Users className="h-4 w-4 mr-1" />{identLoading ? "读取中…" : "读取视频账号"}
-          </Button>
-          <Button size="sm" variant="outline" onClick={downloadFreeProducts} disabled={prodBusy || !dstId} aria-label="下载目标户未在广告组的商品">
-            <PackageSearch className="h-4 w-4 mr-1" />{prodBusy ? "读取中…" : "未投商品"}
           </Button>
           <Button size="sm" variant="outline" onClick={download} disabled={!rows.length} aria-label="下载读取的广告组（含可直接导入的 sheet）">
             <Download className="h-4 w-4 mr-1" />下载
