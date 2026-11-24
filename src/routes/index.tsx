@@ -345,9 +345,12 @@ function AuthorizePage() {
 
   const handleFetch = async (includeDone = false) => {
     // 执行授权只读 BD 角色的建联表；剪辑角色的素材不需要授权码授权，不参与拉取。
-    const activeStaff = staff.filter((s) => s.active && (s.role ?? "BD") === "BD");
+    // 「获取所有素材」读人员表内全部 BD（含未启用）；「获取未授权素材」只读启用中的 BD。
+    const activeStaff = staff.filter(
+      (s) => (includeDone || s.active) && (s.role ?? "BD") === "BD",
+    );
     if (activeStaff.length === 0) {
-      toast.error("请先在「设置」中配置启用的 BD 人员");
+      toast.error(includeDone ? "请先在「设置」中配置 BD 人员" : "请先在「设置」中配置启用的 BD 人员");
       return;
     }
     setLoadingMode(includeDone ? "all" : "pending");
@@ -673,8 +676,8 @@ function AuthorizePage() {
                   <div>
                     <div className="font-medium mb-1">两种拉取模式</div>
                     <ul className="list-disc pl-5 text-muted-foreground space-y-1">
-                      <li><b>获取未授权素材</b>：须同时满足 V 列（code 授权日期/投放日期）为空、P 列 VID 非空、Q 列授权码格式合法；C 列国家须符合格式，N 列视频登记日期可为空，填写时须为可识别日期。适用于每日授权。</li>
-                      <li><b>获取所有素材</b>：建联表中 P 列 VID 非空且 Q 列授权码格式合法的行（不看 V 列，国家/日期无效不剔除，国家未匹配广告户时标为「无授权账号」），并合并「授权记录」M:S 列的原始 code 归档（第 3 行起），按 VID+授权码去重。适用于批量授权新账户。</li>
+                      <li><b>获取未授权素材</b>：仅启用中的 BD；须同时满足 V 列（code 授权日期/投放日期）为空、P 列 VID 非空、Q 列授权码格式合法；C 列国家须符合格式，N 列视频登记日期可为空，填写时须为可识别日期。适用于每日授权。</li>
+                      <li><b>获取所有素材</b>：人员表内全部 BD（含未启用）的建联表中 P 列 VID 非空且 Q 列授权码格式合法的行（不看 V 列，国家/日期无效不剔除，国家未匹配广告户时标为「无授权账号」），并合并「授权记录」M:S 列的原始 code 归档（第 3 行起），按 VID+授权码去重。适用于批量授权新账户。</li>
                       <li><b>注意</b>：只有授权码、P 列 VID 为空的行，两种模式都不会返回；仅 V 列为空不足以纳入。</li>
                     </ul>
                   </div>
