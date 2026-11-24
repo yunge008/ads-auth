@@ -428,7 +428,18 @@ async function createCore(db: SupabaseClient, r: CreateRow, ctx: Ctx): Promise<C
           await update({ item_group_ids: [...current, ...list] });
           current = [...current, ...list];
         } catch (e) {
-          const m = (e as Error).message;
+          let m = (e as Error).message;
+          // 实测 PH 大组4：刚改过的组紧接着再 update 也会报 unavailable（被拒商品成片连续、间隔性成功）→ 等 4 秒原样重试一次再判
+          if (UNAVAILABLE.test(m)) {
+            await sleep(4000);
+            try {
+              await update({ item_group_ids: [...current, ...list] });
+              current = [...current, ...list];
+              return;
+            } catch (e2) {
+              m = (e2 as Error).message;
+            }
+          }
           if (list.length === 1) { ctx.excluded.set(list[0], UNAVAILABLE.test(m) ? rejectReason(m) : `补全失败：${m}`); return; }
           const mid = Math.ceil(list.length / 2);
           await tryAdd(list.slice(0, mid));

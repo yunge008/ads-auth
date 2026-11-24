@@ -50,10 +50,10 @@ export function TargetPicker({
           {advOptions.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}（{a.id}）</SelectItem>)}
         </SelectContent>
       </Select>
-      {advertiserId && (
-        <Select value={bcId} onValueChange={onBcChange} disabled={disabled || !bcs.length}>
+      {(
+        <Select value={bcId} onValueChange={onBcChange} disabled={disabled || !advertiserId || !bcs.length}>
           <SelectTrigger aria-label="店铺授权 BC" className="w-72">
-            <SelectValue placeholder={bcs.length ? "选择 BC" : "该户无授权 BC"} />
+            <SelectValue placeholder={!advertiserId ? "先选广告户再选 BC" : bcs.length ? "选择 BC" : "该户无授权 BC"} />
           </SelectTrigger>
           <SelectContent>
             {bcs.map((b) => (

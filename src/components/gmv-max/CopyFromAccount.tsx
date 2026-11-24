@@ -355,12 +355,13 @@ export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           {advSelect(srcId, setSrcId, "源广告户")}
-          <Button size="sm" variant="outline" onClick={load} disabled={!!loading || running || !dstBc}>
-            <Copy className="h-4 w-4 mr-1" />{loading || "读取广告组"}
-          </Button>
           <span aria-hidden className="text-muted-foreground">→</span>
           <TargetPicker advOptions={advOptions} advertiserId={dstId} onAdvertiserChange={setDstId}
             bcId={dstBc} onBcChange={setDstBc} disabled={running} />
+          {/* 读取按目标 BC 的授权读源组（视频账号与目标户一致），所以放在选完目标户/BC 之后 */}
+          <Button size="sm" variant="outline" onClick={load} disabled={!!loading || running || !srcId || !dstBc}>
+            <Copy className="h-4 w-4 mr-1" />{loading || "读取广告组"}
+          </Button>
           {dstId && (
             <span className={`text-xs ${dstHolds ? "text-green-600" : "text-amber-600"}`} aria-live="polite">
               {authBusy ? "授权查询中…" : holder?.err ? `授权：${holder.err}` : dstHolds ? "已独占授权" : `授权在：${holder?.name ?? holder?.id ?? "无"}`}
