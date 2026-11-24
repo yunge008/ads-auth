@@ -56,9 +56,9 @@ function pickCampaign(info: Record<string, unknown> | undefined): Record<string,
 }
 // 名称 R 后连续数字串的最后一个 = ROI：807-R3.4-5.5-7.5-5.0 → 5.0；观察六11.19-R5.0 → 5.0
 function roiFromName(name: string): number | null {
-  const m = name.match(/R(\d+(?:\.\d+)?(?:-\d+(?:\.\d+)?)*)/);
+  const m = name.match(/R(\d+(?:\.\d+)?(?:-+\d+(?:\.\d+)?)*)/); // 容忍 "4.4--5.7" 双横线
   if (!m) return null;
-  const v = Number(m[1].split("-").pop());
+  const v = Number(m[1].split(/-+/).pop());
   return v > 0 ? v : null;
 }
 
