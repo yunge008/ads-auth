@@ -98,9 +98,10 @@ Deno.serve(async (req) => {
       if (ok === true) cronAuthed = true;
     }
     if (!cronAuthed) await checkAdminPasscode(req, "home");
-    const { staff, include_done } = (await req.json()) as {
+    const { staff, include_done, skip_archive } = (await req.json()) as {
       staff: StaffIn[];
       include_done?: boolean;
+      skip_archive?: boolean; // 前端按人拆请求时，只有第一个请求读「授权记录」归档
     };
     if (!staff?.length) throw new Error("staff 不能为空");
 
@@ -200,7 +201,7 @@ Deno.serve(async (req) => {
 
     // Batch mode: merge legacy code archive from 「授权记录」!M3:S (frozen table).
     // These rows have no writeback target — feishu-writeback skips V/W for them.
-    if (include_done) {
+    if (include_done && !skip_archive) {
       const logSid = sheetByName.get(LOG_SHEET_TITLE);
       if (logSid) {
         const rows = await readRange(token, spreadsheetToken, `${logSid}!M3:S`);

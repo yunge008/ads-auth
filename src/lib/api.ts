@@ -45,14 +45,21 @@ export async function invokeFn<T = unknown>(
     let msg = error.message;
     let status: number | undefined;
     let payload: Record<string, unknown> | undefined;
-    if (err.context && typeof err.context.json === "function") {
+    if (err.context && typeof err.context.text === "function") {
+      status = err.context.status;
       try {
-        const j = await err.context.json();
-        if (j?.error) msg = j.error;
-        status = err.context.status;
-        payload = j;
+        const text = await err.context.text();
+        try {
+          const j = JSON.parse(text);
+          payload = j;
+          if (j?.error) msg = typeof j.error === "string" ? j.error : JSON.stringify(j.error);
+          // 平台层错误（超时 / WORKER_LIMIT / BOOT_ERROR）没有 error 字段，带上状态码和 code/message 便于定位
+          else msg = `HTTP ${status} ${[j?.code, j?.message ?? j?.msg].filter(Boolean).join(" ") || text.slice(0, 200)}`;
+        } catch {
+          msg = `HTTP ${status} ${text.slice(0, 200) || error.message}`;
+        }
       } catch {
-        /* ignore */
+        msg = `HTTP ${status} ${error.message}`;
       }
     }
     if (status === 401) {

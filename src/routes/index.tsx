@@ -355,25 +355,67 @@ function AuthorizePage() {
     }
     setLoadingMode(includeDone ? "all" : "pending");
     try {
-      const payload = {
-        // 用后端算好的 resolved_sheet_name：人员表 sheet名 留空的人靠模板生成，
-        // 前端自己再算一遍迟早和后端不一致，不一致就是读错表且不报错。
-        staff: activeStaff.map((s) => ({ name: s.name, sheet_name: s.resolved_sheet_name || s.sheet_name })),
-        include_done: includeDone,
-      };
-      // 飞书大表冷加载时会返回「data not ready, retry later」等瞬时错误：整次重试，间隔 3/6/12s。
-      // 后端 _shared/feishu.ts 已有分块级重试，但需重新部署才生效；这里兜底，不依赖部署。
+      // 按人拆成多次请求（并发 3）：一次请求串行读全部大表会超过 Edge Function 150s 墙钟上限，
+      // 平台直接返回 non-2xx。「授权记录」归档只由第一个请求读取（skip_archive），
+      // 跨请求的 VID+授权码 去重在前端做，口径与原单次请求一致：建联表行优先，归档行去重。
+      // 飞书大表冷加载时会返回「data not ready, retry later」等瞬时错误：单人重试，间隔 3/6/12s。
       const TRANSIENT_RE = /not ready|retry later|too many|frequen|timeout|busy/i;
-      let data: { materials: Material[]; missing_sheets?: string[] } | undefined;
-      for (let attempt = 1; ; attempt++) {
-        try {
-          data = await invokeFn<{ materials: Material[]; missing_sheets?: string[] }>("feishu-read", payload);
-          break;
-        } catch (e) {
-          if (attempt >= 4 || !TRANSIENT_RE.test((e as Error).message)) throw e;
-          toast.info(`飞书数据未就绪，${3 * 2 ** (attempt - 1)} 秒后第 ${attempt} 次重试…`);
-          await new Promise((r) => setTimeout(r, 3000 * 2 ** (attempt - 1)));
+      type ReadResp = { materials: Material[]; missing_sheets?: string[] };
+      const readOne = async (s: (typeof activeStaff)[number], withArchive: boolean): Promise<ReadResp> => {
+        const payload = {
+          // 用后端算好的 resolved_sheet_name：人员表 sheet名 留空的人靠模板生成，
+          // 前端自己再算一遍迟早和后端不一致，不一致就是读错表且不报错。
+          staff: [{ name: s.name, sheet_name: s.resolved_sheet_name || s.sheet_name }],
+          include_done: includeDone,
+          skip_archive: !withArchive,
+        };
+        for (let attempt = 1; ; attempt++) {
+          try {
+            return await invokeFn<ReadResp>("feishu-read", payload);
+          } catch (e) {
+            if (attempt >= 4 || !TRANSIENT_RE.test((e as Error).message)) throw e;
+            toast.info(`${s.name}：飞书数据未就绪，${3 * 2 ** (attempt - 1)} 秒后第 ${attempt} 次重试…`);
+            await new Promise((r) => setTimeout(r, 3000 * 2 ** (attempt - 1)));
+          }
         }
+      };
+      const results: Array<{ name: string; resp?: ReadResp; err?: string }> = activeStaff.map((s) => ({ name: s.name }));
+      let next = 0;
+      await Promise.all(
+        Array.from({ length: Math.min(3, activeStaff.length) }, async () => {
+          while (next < activeStaff.length) {
+            const idx = next++;
+            try {
+              results[idx].resp = await readOne(activeStaff[idx], includeDone && idx === 0);
+            } catch (e) {
+              results[idx].err = (e as Error).message;
+            }
+          }
+        }),
+      );
+      const failed = results.filter((r) => r.err);
+      if (failed.length === results.length) throw new Error(failed.map((r) => `${r.name}：${r.err}`).join("；"));
+      const ARCHIVE = "授权记录";
+      const staffRows: Material[] = [];
+      const archiveRows: Material[] = [];
+      const missing = new Set<string>();
+      results.forEach((r, idx) => {
+        for (const m of r.resp?.materials ?? []) {
+          if (m.sheet_name === ARCHIVE) {
+            // 未部署 skip_archive 的旧后端每次都会带归档，只取第一个请求的
+            if (idx === 0) archiveRows.push(m);
+          } else staffRows.push(m);
+        }
+        for (const ms of r.resp?.missing_sheets ?? []) if (ms !== ARCHIVE || idx === 0) missing.add(ms);
+      });
+      const staffKeys = new Set(staffRows.map((m) => `${m.vid}__${m.auth_code}`));
+      const data: ReadResp = {
+        materials: [...staffRows, ...archiveRows.filter((m) => !staffKeys.has(`${m.vid}__${m.auth_code}`))],
+        missing_sheets: [...missing],
+      };
+      if (failed.length) {
+        const archiveLost = includeDone && results[0].err ? "（含「授权记录」归档）" : "";
+        toast.error(`${failed.length} 人拉取失败${archiveLost}，数据不完整：${failed.map((r) => `${r.name}：${r.err}`).join("；")}`, { duration: 20000 });
       }
       const list = (data?.materials ?? []).map((m) => ({
         ...m,
