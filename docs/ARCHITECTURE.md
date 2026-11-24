@@ -206,8 +206,10 @@
 ### gmv_max_import_logs（2026-11-24，migration 20261124120000）
 GMV Max 导入记录，逐商品一行：batch_id / kind(excel|single|copy) / source / operator / advertiser_id / bc_id / campaign_name / source_campaign_id / new_campaign_id / group_status / group_note / item_group_id / status(成功|失败|组成功商品未纳入) / reason。RLS 开启无策略，仅服务端路由 service role 读写。
 
-### AI 只读查询通道（2026-11-24，migration 20261124150000_ai_readonly.sql）
-- 服务端路由 `/api/public/hooks/ai-db-read`（POST `{action:"query", sql, max_rows?}` / `{action:"refresh_grants"}`）。**鉴权例外**：不走口令头，校验请求头 `x-ai-db-key` 的 sha256 = `app_accounts` 里 name=「AI只读」、非管理员、启用中账号的 `passcode_hash`；停用/删除该账号即撤销。
-- `ai_readonly_query(q, max_rows)`：SECURITY INVOKER，只收 SELECT/WITH，`set transaction read only` + `set local role ai_reader`，结果 jsonb，最多 2000 行；只有 service_role 有执行权限。函数内设 statement_timeout 对当前语句无效，超时依赖平台默认（负责人确认业务上不限）。
-- 角色 `ai_reader`：按列授 SELECT，列名匹配 token/secret/passcode/password/cookie/credential/api_key/app_key/device_id 的列不授；开 RLS 的表加 `ai_reader_select` 只读策略。新表由 `ai_reader_refresh_grants()`（SECURITY DEFINER，路由 action=refresh_grants）按同一规则补授。
-- 本地 PG16 实测：普通表/视图可读；敏感列、`select *` 含敏感列被拒；CTE 写、注入第二条语句、借 SECURITY DEFINER 函数删数据均被拒；anon 无执行权限。
+### AI 只读查询通道（2026-11-24，migration 20261124150000 + 20261124160000）
+- 调用：`POST {SUPABASE_URL}/rest/v1/rpc/ai_db_query`，body `{q, max_rows?}`，`apikey` = 公开 publishable key，请求头 `x-ai-db-key` = 「AI只读」账号口令（Claude 云环境代理注入）。直接查当前数据库，不依赖网站发布。新表补授：`rpc/ai_db_refresh_grants`。
+- 鉴权：`ai_key_ok()`（SECURITY DEFINER）读 PostgREST 的 `request.headers`，sha256 = `app_accounts` 中 name=「AI只读」、非管理员、启用中账号的 `passcode_hash`；停用/删除该账号即撤销。**这是 AGENTS.md「经 verifyPasscode 鉴权」的例外**（不经 Edge Function）。
+- 执行身份：`ai_db_query` 由角色 `ai_reader` 拥有（SECURITY DEFINER），anon 不是 ai_reader 成员；`set transaction read only`，结果 jsonb 最多 2000 行，不限时（负责人确认）。
+- `ai_reader`：按列授 SELECT，列名匹配 token/secret/passcode/password/cookie/credential/api_key/app_key/device_id 的不授；开 RLS 的表加 `ai_reader_select` 只读策略（首次执行：834 列授权、61 条策略、10 列屏蔽）。
+- 本地 PG16 实测：正确口令可读；错/空口令、敏感列、关闭只读、借 SECURITY DEFINER 函数删数据、CTE 写均被拒；anon 直接读表与调 ai_key_ok 被拒。
+- 第一版「网站服务端路由 /api/public/hooks/ai-db-read」已删除（需发布才生效，不符合「核验后台最新版本」）。

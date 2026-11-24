@@ -7,19 +7,19 @@
 > 标记：✅ 已核验 ｜ ⚠️ 未核验（代码写了但没实测或无权限确认）｜ 🙋 需负责人决策/提供 ｜ 🔧 需负责人手动操作（跑 SQL / 让 Lovable 部署）
 > 优先级：P0 本轮必须做 ｜ P1 本轮争取 ｜ P2 之后
 
-最后更新：2026-11-24（1124.255）
+最后更新：2026-11-24（1124.256）
 
 ---
 
 ## 0. 全局：先处理的人工事项
 
-Lovable 积分已充值 → Edge Function 改动可以部署（B 类：给 Lovable 指令）。部署后跑 `bash tools/check-deploy.sh` 核对（目前只能探测 `_shared/auth.ts` 版本，其余靠实测）。
+Lovable 积分已充值 → Edge Function 改动可以部署（B 类：给 Lovable 指令）。**核验口径**：前端/服务端路由以 Lovable 后台最新版本（同步 main 即生效）为准，正式域名需负责人点发布，不作为核验依据。部署后跑 `bash tools/check-deploy.sh` 核对（目前只能探测 `_shared/auth.ts` 版本，其余靠实测）。
 
 | # | 事项 | 类型 | 状态 |
 |---|---|---|---|
 | G1 | 部署 `attribution-upload`、`attribution-identity-build`、`tts-listing`、`feishu-read` | 🔧 Lovable | ✅ 1124.253 已部署，四个均在线应答 |
 | G2 | 5 个 migration 是否已执行（outreach_core / tts_multi_app / outreach_settings_rls / gmv_max_import_logs / _src_dst） | 🔧 SQL | ✅ 2026-11-24 负责人跑检查 SQL，6 项全部 true，已登记 `docs/MIGRATIONS.md` |
-| G3 | AI 数据库只读通道（路由 `/api/public/hooks/ai-db-read` + 角色 `ai_reader` + 账号「AI只读」） | 🔧 SQL + 账号 | 代码已推（1124.255）；待负责人跑 migration `20261124150000_ai_readonly.sql`、建账号、在会话安全表单填口令 |
+| G3 | AI 数据库只读通道 v2：数据库函数 `ai_db_query`（PostgREST 直连 + 口令头），不依赖网站发布 | 🔧 SQL | v1 已执行（834 列授权 / 10 列屏蔽）；待执行 `20261124160000_ai_readonly_direct.sql` |
 
 ---
 
