@@ -233,7 +233,7 @@ function GmvMaxCreatePage() {
   const [singleBc, setSingleBc] = React.useState("");
   const singleBcs = useBcOptions(advertiserId);
   React.useEffect(() => {
-    if (!singleBcs.some((b) => b.bcId === singleBc)) setSingleBc(singleBcs[0]?.bcId ?? "");
+    if (!singleBcs.some((b) => b.bcId === singleBc)) setSingleBc(singleBcs.find((b) => b.matched)?.bcId ?? "");
   }, [singleBcs, singleBc]);
   const [campaignName, setCampaignName] = React.useState("");
   const [itemGroupIdsText, setItemGroupIdsText] = React.useState("");
@@ -555,11 +555,11 @@ function GmvMaxCreatePage() {
             </div>
             <div className="space-y-1">
               <span className="text-xs text-muted-foreground">店铺授权 BC</span>
-              {singleBcs.length > 1 ? (
+              {singleBcs.length > 0 ? (
                 <Select value={singleBc} onValueChange={setSingleBc}>
                   <SelectTrigger aria-label="店铺授权 BC"><SelectValue placeholder="选择 BC" /></SelectTrigger>
                   <SelectContent>
-                    {singleBcs.map((b) => <SelectItem key={b.bcId} value={b.bcId}>{b.bcName}（{b.bcId}）</SelectItem>)}
+                    {singleBcs.map((b) => <SelectItem key={b.bcId} value={b.bcId}>{b.bcName}（{b.bcId}）{b.matched ? "" : " · 未匹配到该户"}</SelectItem>)}
                   </SelectContent>
                 </Select>
               ) : (

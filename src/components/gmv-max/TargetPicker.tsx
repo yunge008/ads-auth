@@ -5,18 +5,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useConnections } from "@/lib/store";
 
 export type AdvOption = { id: string; name: string; shopId: string | null; bcId: string | null };
-export type BcOption = { bcId: string; bcName: string; createdAt: string };
+export type BcOption = { bcId: string; bcName: string; createdAt: string; matched: boolean };
 
 export function useBcOptions(advertiserId: string): BcOption[] {
   const { connections } = useConnections();
   return React.useMemo(() => {
+    // 全部授权连接的 BC 都列出：包含该户的（matched）在前、按授权时间新→旧；其余在后，供手动选
     const byBc = new Map<string, BcOption>();
     for (const c of connections) {
-      if (!c.bc_id || !c.advertiser_ids.includes(advertiserId)) continue;
+      if (!c.bc_id) continue;
+      const matched = (c.advertiser_ids ?? []).map(String).includes(String(advertiserId));
       const prev = byBc.get(c.bc_id);
-      if (!prev || c.created_at > prev.createdAt) byBc.set(c.bc_id, { bcId: c.bc_id, bcName: c.bc_name ?? c.label ?? c.bc_id, createdAt: c.created_at });
+      const next = { bcId: c.bc_id, bcName: c.bc_name ?? c.label ?? c.bc_id, createdAt: c.created_at, matched: matched || !!prev?.matched };
+      if (!prev || matched || c.created_at > prev.createdAt) byBc.set(c.bc_id, next);
     }
-    return Array.from(byBc.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return Array.from(byBc.values()).sort((a, b) =>
+      Number(b.matched) - Number(a.matched) || b.createdAt.localeCompare(a.createdAt));
   }, [connections, advertiserId]);
 }
 
@@ -35,7 +39,7 @@ export function TargetPicker({
   // 换户或 BC 列表变化时，默认选授权时间最新的 BC
   React.useEffect(() => {
     if (!advertiserId) { if (bcId) onBcChange(""); return; }
-    if (!bcs.some((b) => b.bcId === bcId)) onBcChange(bcs[0]?.bcId ?? "");
+    if (!bcs.some((b) => b.bcId === bcId)) onBcChange(bcs.find((b) => b.matched)?.bcId ?? "");
   }, [advertiserId, bcs, bcId, onBcChange]);
 
   return (
@@ -52,7 +56,11 @@ export function TargetPicker({
             <SelectValue placeholder={bcs.length ? "选择 BC" : "该户无授权 BC"} />
           </SelectTrigger>
           <SelectContent>
-            {bcs.map((b) => <SelectItem key={b.bcId} value={b.bcId}>{b.bcName}（{b.bcId}）</SelectItem>)}
+            {bcs.map((b) => (
+              <SelectItem key={b.bcId} value={b.bcId}>
+                {b.bcName}（{b.bcId}）{b.matched ? "" : " · 未匹配到该户"}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       )}
