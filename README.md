@@ -29,16 +29,33 @@
 
 ---
 
-## 页面功能
+## 待办总览
 
-| 路由 | 功能 |
+按功能线整理的现状 / 待办 / 注意事项：**[docs/ROADMAP.md](docs/ROADMAP.md)**（负责人看这一份即可；任务认领在 `docs/PLAN.md`，完工日志在 `docs/WORKLOG.md`）。
+
+| 功能线 | 一句话现状 |
 |---|---|
-| `/` | **执行授权**：拉飞书素材 → 匹配广告户 → 批量授权 → 回写飞书 |
-| `/material-performance` | **素材成效**：GMV Max VID 级数据查询与分析 |
-| `/feishu-data` | **数据查阅**：GMV Max 日报，默认展示昨日数据 |
-| `/settings` | **系统设置**：账号管理 / 人员表 / TikTok 连接 / 数据同步 |
-| `/api-test` | API 接口调试 |
-| `/oauth/tiktok/callback` | TikTok OAuth 回调处理 |
+| 素材授权 | 手动 + 每日 08:00 自动授权在用 |
+| GMV Max 取数 | ⚠️ 每日同步 2026-10-12 起暂停，待定取数方案 |
+| GMV Max 建组 / 迁移 | 批量 / 单条 / 账户复制在用，走免费服务端路由 |
+| GMV 归因 | 每晚快照在用；V3 引擎切换阶段 3 ②–⑨ 待做 |
+| 达人建联 | P0 实测通过，仅「申样审核建议」上线；定向计划 / 批样 / 插件 / 多账户待开发 |
+| 店铺运营 | 数据导出、SEA 库存、上架工具链部分上线 |
+
+---
+
+## 页面（左侧导航分组）
+
+| 分组 | 页面 | 路由 |
+|---|---|---|
+| 素材授权 | 执行授权 / 发样及素材统计 / 素材成效 | `/` `/connection-stats` `/material-performance` |
+| GMV Max | 新建广告组 / 数据查阅 | `/gmv-max-create` `/feishu-data` |
+| GMV 归因 | 归因结果 / 归因管理 | `/gmv-attribution` `/gmv-attribution-admin` |
+| 达人建联 | 达人建联 | `/outreach` |
+| 店铺 | 数据导出 / SEA 库存 | `/tts-export` `/sea-inventory` |
+| 置底 | 设置 / API 测试 | `/settings` `/api-test` |
+
+分组在 `src/lib/tabs.ts` 的 `group` 字段配置；权限仍按单个页面 key 分配。
 
 ---
 

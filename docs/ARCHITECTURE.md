@@ -8,7 +8,7 @@
 - **前端**：TanStack Start（React 19，文件路由）+ shadcn/ui + Tailwind 4 + TanStack Query，由 Lovable 托管部署，运行时为 bun/vite
 - **后端**：Supabase Edge Functions（Deno），约 20 个函数
 - **数据库**：Supabase Postgres，migrations 在 `supabase/migrations/`
-- **鉴权**：自定义口令体系（非 Supabase Auth）——前端 localStorage 存口令，请求带 `x-admin-passcode`/`x-admin-name` 头，Edge Function 用 `_shared/auth.ts` 校验 `app_accounts` 表（sha256），env `ADMIN_PASSCODE` 为 root 兜底；按 tab 分配权限（`src/lib/tabs.ts` 为 tab 注册中心）
+- **鉴权**：自定义口令体系（非 Supabase Auth）——前端 localStorage 存口令，请求带 `x-admin-passcode`/`x-admin-name` 头，Edge Function 用 `_shared/auth.ts` 校验 `app_accounts` 表（sha256），env `ADMIN_PASSCODE` 为 root 兜底；按 tab 分配权限（`src/lib/tabs.ts` 为 tab 注册中心；`group` 字段决定左侧导航分组，`NAV_GROUPS` 定义分组，`buildNav` 生成侧栏，只有一个可见页的组直接显示该页；权限仍按单个 tab key）
 
 ## 页面（src/routes/）
 

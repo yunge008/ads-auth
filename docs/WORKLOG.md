@@ -344,3 +344,4 @@
 2026-11-24 | claude | [1124.248] GMV MAX新建说明弹窗：Excel 批量新建 / 账户复制 改两栏（820px，窄屏自动一栏），1400×860 视口下无需滚动。
 2026-11-24 | claude | [1124.249] 素材列表授权进度加「已用」与「剩余约」：已用=当前/结束时间-开始时间（每秒刷新）；剩余约=已用/已完成×未完成，按平均速度线性估算，尚无完成时显示 --:--，授权结束后只留已用。进度块宽度 36rem→48rem，时间数字预留宽度防抖动。
 2026-11-24 | claude | [1124.250] GMV MAX新建·单条新建：商品ID 输入框 2 行 → 最小 45% 视口高（rows 12，可拖拽调高）。
+2026-11-24 | claude | [1124.251] ①新增 docs/ROADMAP.md：按 8 条功能线（素材授权 / GMV Max 取数 / 建组迁移 / 归因 / 达人建联 / 店铺运营 / 余额预警 / 平台UI）记录现状、待办、注意与需负责人决策项；README 加待办总览与页面分组表；CLAUDE.md 引用 ROADMAP 使每次会话自动加载。②左侧导航分组折叠：素材授权 / GMV Max / GMV 归因 / 店铺 四组（达人建联单独一项，设置与 API 测试置底），当前页所在组强制展开，展开状态存 localStorage；tab key 与权限不变，组内显示短名（navLabel）；去掉侧栏副标题，用户名与退出合为一行。③PLAN 待部署清单补 feishu-read（上轮遗漏）。tsc 0 错误；Playwright 截图核对展开/折叠/刷新保留。 | docs/ROADMAP.md、README.md、CLAUDE.md、src/lib/tabs.ts、src/components/AppShell.tsx、src/lib/version.ts、docs/{PLAN,ARCHITECTURE,WORKLOG}.md |

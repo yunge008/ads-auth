@@ -3,6 +3,7 @@
 本项目协作规则、架构、任务板统一维护在：
 
 - @AGENTS.md — 协同开发规则（必读）
+- @docs/ROADMAP.md — 按功能线的待办总览（负责人看这份；每次完工同步更新对应功能线）
 - docs/ARCHITECTURE.md — 架构说明
 - docs/PLAN.md — 计划与任务认领
 - docs/WORKLOG.md — 完工日志（只追加）

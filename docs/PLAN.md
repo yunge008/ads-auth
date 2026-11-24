@@ -23,6 +23,7 @@
 | attribution-upload | 快照重算心跳（1123.203） | 外部无法探测；下次大月份重算超 10 分钟不再误报失败即确认 |
 | attribution-identity-build | 身份合并让出签名、区间不再出 0 长度（1123.203） | 外部无法探测；下次「重建身份与区间」不报错即确认 |
 | tts-listing | 图片白名单补火山引擎 TOS（1123.202） | 外部无法探测；下次 API 上架传 TOS 图不报「域名不在允许列表」即确认 |
+| feishu-read（及其他读飞书的函数，共用 `_shared/feishu.ts`） | 飞书瞬时错误退避重试（1124.227）、`skip_archive`（1124.231）；前端已兜底，非阻塞。**上轮遗漏，1124.251 补记** | 外部无法探测；「获取所有素材」不再出现前端重试提示即确认 |
 
 2026-11-23 核验：`tools/check-deploy.sh` 显示 39 个函数全部已是新版 `_shared/auth.ts`（口令注入修复已上线）。
 ~~同时说明 Lovable 在同步 main 后会自动重新部署 Edge Function~~ **2026-11-24 证伪**：新函数 gmv-max-exclusive-auth 推 main 后仍 404，Edge Function 只在 Lovable 手动部署（耗积分）时更新；前端与服务端路由随 main 同步免费上线。
