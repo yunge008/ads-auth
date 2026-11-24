@@ -48,7 +48,7 @@ export function TargetPicker({
   return (
     <>
       <Select value={advertiserId} onValueChange={onAdvertiserChange} disabled={disabled}>
-        <SelectTrigger aria-label={advLabel} className="w-64">
+        <SelectTrigger aria-label={advLabel} className="w-auto max-w-full gap-2 whitespace-nowrap [&>span]:line-clamp-none">
           <SelectValue placeholder={advLabel}>{advertiserId ? shortLabel(advOptions.find((a) => a.id === advertiserId)?.name, advertiserId) : undefined}</SelectValue>
         </SelectTrigger>
         <SelectContent>
@@ -57,7 +57,7 @@ export function TargetPicker({
       </Select>
       {(
         <Select value={bcId} onValueChange={onBcChange} disabled={disabled || !advertiserId || !bcs.length}>
-          <SelectTrigger aria-label="店铺授权 BC" className="w-56">
+          <SelectTrigger aria-label="店铺授权 BC" className="w-auto max-w-full gap-2 whitespace-nowrap [&>span]:line-clamp-none">
             <SelectValue placeholder={!advertiserId ? "先选广告户再选 BC" : bcs.length ? "选择 BC" : "该户无授权 BC"}>
               {bcId ? shortLabel(bcs.find((b) => b.bcId === bcId)?.bcName, bcId) : undefined}
             </SelectValue>
