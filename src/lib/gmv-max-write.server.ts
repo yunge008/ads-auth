@@ -88,32 +88,37 @@ function cleanIdentityList(v: unknown): Record<string, string>[] {
 // 而 /campaign/gmv_max/info/ 不返回它，只能从这里补。按 advertiser 缓存 10 分钟（批量逐行调用时省请求）。
 type IdentityInfo = Record<string, unknown>;
 const identityCache = new Map<string, { at: number; byId: Map<string, IdentityInfo> }>();
-async function targetIdentities(conns: Conn[], advertiserId: string, storeId: string, bcId: string) {
-  const key = `${advertiserId}:${storeId}`;
+async function targetIdentities(conns: Conn[], advertiserId: string, storeId: string, bcIds: string[]) {
+  const key = `${advertiserId}:${storeId}:${bcIds.join(",")}`;
   const hit = identityCache.get(key);
   if (hit && Date.now() - hit.at < 600_000) return hit.byId;
   const byId = new Map<string, IdentityInfo>();
-  await withConns(conns, async (token) => {
-    // 实测必填：advertiser_id + store_id + store_authorized_bc_id
-    const data = await tt(token, "/gmv_max/identity/get/", {
-      method: "GET",
-      params: { advertiser_id: advertiserId, store_id: storeId, store_authorized_bc_id: bcId },
-    });
-    const add = (d: Record<string, unknown>) => {
-      const list = (d.identity_list ?? d.list ?? []) as IdentityInfo[];
-      for (const it of list) if (it.identity_id != null) byId.set(String(it.identity_id), it);
-    };
-    add(data);
-    // 响应带分页时把后续页拉完（只在 TikTok 自己报告多页时才传 page，避免未知参数）
-    const pi = (data.page_info ?? {}) as Record<string, unknown>;
-    const totalPage = Math.min(20, Number(pi.total_page ?? 1) || 1);
-    for (let page = 2; page <= totalPage; page++) {
-      add(await tt(token, "/gmv_max/identity/get/", {
-        method: "GET",
-        params: { advertiser_id: advertiserId, store_id: storeId, store_authorized_bc_id: bcId, page: String(page), ...(pi.page_size ? { page_size: String(pi.page_size) } : {}) },
-      }));
+  // 实测必填 store_authorized_bc_id，且返回范围随它变化：目标户连接 BC 与源账号所属 BC 可能不同，逐个查后合并
+  const errors: string[] = [];
+  for (const bc of bcIds) {
+    try {
+      await withConns(conns, async (token) => {
+        const base = { advertiser_id: advertiserId, store_id: storeId, store_authorized_bc_id: bc };
+        const add = (d: Record<string, unknown>) => {
+          const list = (d.identity_list ?? d.list ?? []) as IdentityInfo[];
+          for (const it of list) if (it.identity_id != null && !byId.has(String(it.identity_id))) byId.set(String(it.identity_id), it);
+        };
+        const data = await tt(token, "/gmv_max/identity/get/", { method: "GET", params: base });
+        add(data);
+        const pi = (data.page_info ?? {}) as Record<string, unknown>;
+        const totalPage = Math.min(20, Number(pi.total_page ?? 1) || 1);
+        for (let page = 2; page <= totalPage; page++) {
+          add(await tt(token, "/gmv_max/identity/get/", {
+            method: "GET",
+            params: { ...base, page: String(page), ...(pi.page_size ? { page_size: String(pi.page_size) } : {}) },
+          }));
+        }
+      });
+    } catch (e) {
+      errors.push(`BC ${bc}: ${(e as Error).message}`);
     }
-  });
+  }
+  if (!byId.size && errors.length) throw new Error(errors.join("；"));
   identityCache.set(key, { at: Date.now(), byId });
   return byId;
 }
@@ -177,7 +182,8 @@ export async function createOne(db: SupabaseClient, r: CreateRow): Promise<Creat
   if (identityList.length) {
     let avail: Map<string, IdentityInfo>;
     try {
-      avail = await targetIdentities(conns, advertiserId, storeId, bcId);
+      avail = await targetIdentities(conns, advertiserId, storeId,
+        Array.from(new Set([bcId, ...identityList.map((x) => x.identity_authorized_bc_id).filter(Boolean)])));
     } catch (e) {
       return { ok: false, error: `查询目标户视频账号失败：${(e as Error).message}` };
     }
@@ -195,7 +201,7 @@ export async function createOne(db: SupabaseClient, r: CreateRow): Promise<Creat
       return {
         ok: false,
         error: [
-          missing.length ? `目标户查不到这些视频账号：${missing.join(",")}` : "",
+          missing.length ? `目标户查不到这些视频账号：${missing.join(",")}（已查 BC：${Array.from(new Set([bcId, ...identityList.map((x) => x.identity_authorized_bc_id).filter(Boolean)])).join(",")}）` : "",
           unavailable.length ? `目标户这些视频账号不可用于商品 GMV Max：${unavailable.join(",")}` : "",
         ].filter(Boolean).join("；") + "（未建组，避免与原组不一致）",
       };
