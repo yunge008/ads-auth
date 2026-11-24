@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -17,6 +18,7 @@ import { callGmvMaxWrite } from "@/lib/api";
 import { useConnections, useBCAdvertisers } from "@/lib/store";
 import { CopyFromAccount, FailureList } from "@/components/gmv-max/CopyFromAccount";
 import { TargetPicker, useBcOptions } from "@/components/gmv-max/TargetPicker";
+import { ImportHistory, detailSheet, newBatchId, type DetailRow, type ProductResult } from "@/components/gmv-max/ImportHistory";
 
 export const Route = createFileRoute("/gmv-max-create")({
   head: () => ({ meta: [{ title: "GMV MAX新建 - TikTok授权工具" }] }),
@@ -32,6 +34,8 @@ type ResultRow = {
   error?: string;
   notes?: string[];
   partial?: boolean;
+  products?: ProductResult[];
+  log_error?: string;
 };
 type BatchRow = {
   advertiser_id: string;
@@ -44,6 +48,7 @@ type BatchRow = {
   identity_list?: unknown[];
   accelerate_testing_for_new_videos?: "ON" | "OFF";
   store_authorized_bc_id?: string;
+  source_campaign_id?: string;
 };
 type BatchRowStatus = "invalid" | "pending" | "running" | "ok" | "partial" | "error";
 type BatchRowState = BatchRow & {
@@ -51,6 +56,9 @@ type BatchRowState = BatchRow & {
   issues: string[];
   status: BatchRowStatus;
   campaignId?: string;
+  products?: ProductResult[];
+  usedAdv?: string;
+  usedBc?: string;
   error?: string;
 };
 
@@ -81,11 +89,13 @@ function excelTimeToTikTok(v: unknown): string | undefined {
   return `${s.replace("T", " ").slice(0, 16)}:00`;
 }
 
-async function runBatch(rows: BatchRow[]): Promise<ResultRow[]> {
+async function runBatch(rows: BatchRow[], log?: Record<string, unknown>): Promise<ResultRow[]> {
   // 走服务端路由 gmv-max-write（Edge Function 部署要耗 Lovable 积分）；逐行调用
   const out: ResultRow[] = [];
   for (let i = 0; i < rows.length; i++) {
-    const r = await callGmvMaxWrite<Omit<ResultRow, "row" | "advertiser_id" | "campaign_name">>({ action: "create", row: rows[i] });
+    const r = await callGmvMaxWrite<Omit<ResultRow, "row" | "advertiser_id" | "campaign_name">>({
+      action: "create", row: rows[i], ...(log ? { log: { ...log, source_campaign_id: rows[i].source_campaign_id ?? "" } } : {}),
+    });
     out.push({ row: i + 1, advertiser_id: rows[i].advertiser_id, campaign_name: rows[i].campaign_name, ...r });
   }
   return out;
@@ -259,7 +269,8 @@ function GmvMaxCreatePage() {
         end_time: toTikTokTime(endTime),
         ...(singleBc ? { store_authorized_bc_id: singleBc } : {}),
       };
-      const res = await runBatch([row]);
+      const res = await runBatch([row], { batch_id: newBatchId(), source: "单个新建", kind: "single" });
+      setLogRefresh((k) => k + 1);
       setResults(res);
       const ok = res[0]?.ok;
       if (ok) toast.success(`创建成功，Campaign ID: ${res[0].campaign_id}`);
@@ -277,6 +288,8 @@ function GmvMaxCreatePage() {
   const [batchSubmitting, setBatchSubmitting] = React.useState(false);
   // 页面选的目标户 + BC：选了就覆盖 Excel 里的「广告户ID」「店铺授权BC」
   const [batchAdv, setBatchAdv] = React.useState("");
+  const [logRefresh, setLogRefresh] = React.useState(0);
+  const [tab, setTab] = React.useState("excel");
   const [batchBc, setBatchBc] = React.useState("");
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -344,6 +357,7 @@ function GmvMaxCreatePage() {
         const accelRaw = String(get("新素材优先测试", "accelerate_testing_for_new_videos") ?? "").trim().toUpperCase();
         const accelerate_testing_for_new_videos = accelRaw === "ON" || accelRaw === "OFF" ? accelRaw : undefined;
         const store_authorized_bc_id = String(get("店铺授权BC", "store_authorized_bc_id") ?? "").trim() || undefined;
+        const source_campaign_id = String(get("源CampaignID", "源计划ID") ?? "").trim() || undefined;
         const rowNo = idx + 2; // header is row 1
         if (!advertiser_id && !campaign_name && !item_group_ids.length) return; // skip fully blank row
         const issues: string[] = [];
@@ -360,6 +374,7 @@ function GmvMaxCreatePage() {
           ...(identity_list ? { identity_list } : {}),
           ...(accelerate_testing_for_new_videos ? { accelerate_testing_for_new_videos } : {}),
           ...(store_authorized_bc_id ? { store_authorized_bc_id } : {}),
+          ...(source_campaign_id ? { source_campaign_id } : {}),
           rowNo,
           issues,
           status: issues.length ? "invalid" : "pending",
@@ -378,18 +393,20 @@ function GmvMaxCreatePage() {
     if (!batchRows.length || !total) return;
     setBatchSubmitting(true);
     let ok = 0;
+    const log = { batch_id: newBatchId(), source: fileName, kind: "excel" };
+    let logErr = "";
     try {
       for (let i = 0; i < batchRows.length; i++) {
         if (batchRows[i].status === "invalid") continue;
         setBatchRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, status: "running" } : r)));
         try {
           const { advertiser_id, campaign_name, item_group_ids, roas_bid, budget, start_time, end_time,
-            identity_list, accelerate_testing_for_new_videos, store_authorized_bc_id } = batchRows[i];
+            identity_list, accelerate_testing_for_new_videos, store_authorized_bc_id, source_campaign_id } = batchRows[i];
           const adv = batchAdv || advertiser_id;
           if (!adv) throw new Error("未选目标广告户，且该行广告户ID 为空");
+          const usedBc = batchAdv ? batchBc : store_authorized_bc_id;
           const res = await runBatch([{ advertiser_id: adv, campaign_name, item_group_ids, roas_bid, budget, start_time, end_time,
-            identity_list, accelerate_testing_for_new_videos,
-            store_authorized_bc_id: batchAdv ? batchBc : store_authorized_bc_id }]);
+            identity_list, accelerate_testing_for_new_videos, store_authorized_bc_id: usedBc, source_campaign_id }], log);
           const r0 = res[0];
           if (r0?.ok && !r0.partial) ok++;
           setBatchRows((prev) => prev.map((r, idx) => (idx === i ? {
@@ -397,13 +414,17 @@ function GmvMaxCreatePage() {
             status: r0?.ok ? (r0.partial ? "partial" : "ok") : "error",
             campaignId: r0?.ok ? r0.campaign_id : undefined,
             error: r0?.ok ? (r0.notes?.join("；") || undefined) : (r0?.error ?? "未知错误"),
+            products: r0?.products, usedAdv: adv, usedBc,
           } : r)));
+          if (r0?.log_error) logErr = r0.log_error;
         } catch (e) {
           setBatchRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, status: "error", error: (e as Error).message } : r)));
         }
       }
     } finally {
       setBatchSubmitting(false);
+      setLogRefresh((k) => k + 1);
+      if (logErr) toast.error(`导入记录未保存：${logErr}`, { duration: 15000 });
       if (ok === total) toast.success(`批量创建完成：全部成功 ${ok} / ${total}`);
       else toast.error(`批量创建完成：成功 ${ok} / ${total}，其余 ${total - ok} 行见下方「未成功」列表`, { duration: 15000 });
     }
@@ -424,6 +445,18 @@ function GmvMaxCreatePage() {
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "结果");
+    // 商品明细：一行一个商品，可按状态筛
+    const detail: DetailRow[] = batchRows.flatMap((r) => {
+      const base = {
+        campaign_name: r.campaign_name, new_campaign_id: r.campaignId ?? "", source_campaign_id: r.source_campaign_id ?? "",
+        advertiser_id: r.usedAdv ?? r.advertiser_id, bc_id: r.usedBc ?? r.store_authorized_bc_id ?? "",
+        group_status: batchStatusLabel(r.status), group_note: r.status === "invalid" ? r.issues.join("；") : (r.error ?? ""),
+      };
+      if (r.products?.length) return r.products.map((p) => ({ ...base, item_group_id: p.item_group_id, status: p.status, reason: p.reason }));
+      const st = r.status === "ok" ? "成功" : r.status === "pending" || r.status === "running" ? "未执行" : "失败";
+      return r.item_group_ids.map((id) => ({ ...base, item_group_id: id, status: st, reason: st === "失败" ? base.group_note : "" }));
+    });
+    XLSX.utils.book_append_sheet(wb, detailSheet(detail), "商品明细");
     XLSX.writeFile(wb, `gmv-max-新建结果-${Date.now()}.xlsx`);
   };
 
@@ -437,6 +470,66 @@ function GmvMaxCreatePage() {
         </p>
       </div>
 
+      {/* 4 个 TAB 全部常驻挂载（forceMount + 隐藏），切换不丢已填内容、上传文件和执行结果 */}
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList>
+          <TabsTrigger value="excel">Excel 批量新建</TabsTrigger>
+          <TabsTrigger value="single">单条新建</TabsTrigger>
+          <TabsTrigger value="copy">账户复制</TabsTrigger>
+          <TabsTrigger value="log">记录</TabsTrigger>
+        </TabsList>
+        <TabsContent value="excel" className="mt-3 space-y-4 data-[state=inactive]:hidden" forceMount>
+      <Card>
+        <CardHeader><CardTitle className="text-base">Excel 批量新建</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            列：广告户ID / 广告组名称 / 商品ID（多个用逗号或换行分隔）/ ROI / 预算 / 开始时间（可空）/ 结束时间（可空）。设置逻辑同「单个新建」。
+            商品ID 填 ALL = 全店商品组。可选列：视频账号JSON / 新素材优先测试（ON/OFF）/ 店铺授权BC。上方选了目标广告户时，覆盖文件里的广告户ID和店铺授权BC。开始/结束时间按 UTC+0 填（北京时间减 8 小时）。
+            模板 A:C 列固定为文本格式，F:G 列固定为日期时间格式。
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <TargetPicker advOptions={advOptions} advertiserId={batchAdv} onAdvertiserChange={setBatchAdv}
+              bcId={batchBc} onBcChange={setBatchBc} disabled={batchSubmitting} />
+            <Button size="sm" variant="outline" onClick={downloadTemplate}><Download className="h-4 w-4 mr-1" />下载模板</Button>
+            <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={batchSubmitting}>
+              <Upload className="h-4 w-4 mr-1" />上传文件
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              disabled={batchSubmitting}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleFile(f);
+                e.target.value = "";
+              }}
+            />
+            {batchRows.length > 0 && (
+              <Button size="sm" variant="outline" onClick={downloadBatchResults}>
+                <Download className="h-4 w-4 mr-1" />下载结果
+              </Button>
+            )}
+          </div>
+          {fileName && (
+            <p className="text-xs text-muted-foreground">
+              {fileName} · 解析到 {batchRows.length} 行
+              {batchRows.some((r) => r.status === "invalid") ? `，${batchRows.filter((r) => r.status === "invalid").length} 行校验未通过` : ""}
+            </p>
+          )}
+          <FailureList items={batchRows.filter((r) => r.status === "error" || r.status === "partial" || r.status === "invalid").map((r) => ({
+            key: String(r.rowNo), name: `#${r.rowNo} ${r.campaign_name}`, label: batchStatusLabel(r.status),
+            reason: r.status === "invalid" ? r.issues.join("；") : (r.error ?? ""),
+          }))} />
+          <BatchPreviewTable rows={batchRows} statusLabel={batchStatusLabel} />
+          <Button onClick={executeBatch} disabled={!batchRows.length || batchRows.every((r) => r.status === "invalid") || batchSubmitting}>
+            <Play className="h-4 w-4 mr-1" />{batchSubmitting ? "批量创建中…" : `执行创建（${batchRows.filter((r) => r.status !== "invalid").length} 行）`}
+          </Button>
+        </CardContent>
+      </Card>
+        </TabsContent>
+        <TabsContent value="single" className="mt-3 space-y-4 data-[state=inactive]:hidden" forceMount>
       <Card>
         <CardHeader><CardTitle className="text-base">单个新建</CardTitle></CardHeader>
         <CardContent className="space-y-3">
@@ -508,60 +601,15 @@ function GmvMaxCreatePage() {
           </Button>
         </CardContent>
       </Card>
-
-      <Card>
-        <CardHeader><CardTitle className="text-base">Excel 批量新建</CardTitle></CardHeader>
-        <CardContent className="space-y-3">
-          <p className="text-xs text-muted-foreground">
-            列：广告户ID / 广告组名称 / 商品ID（多个用逗号或换行分隔）/ ROI / 预算 / 开始时间（可空）/ 结束时间（可空）。设置逻辑同「单个新建」。
-            商品ID 填 ALL = 全店商品组。可选列：视频账号JSON / 新素材优先测试（ON/OFF）/ 店铺授权BC。上方选了目标广告户时，覆盖文件里的广告户ID和店铺授权BC。开始/结束时间按 UTC+0 填（北京时间减 8 小时）。
-            模板 A:C 列固定为文本格式，F:G 列固定为日期时间格式。
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <TargetPicker advOptions={advOptions} advertiserId={batchAdv} onAdvertiserChange={setBatchAdv}
-              bcId={batchBc} onBcChange={setBatchBc} disabled={batchSubmitting} />
-            <Button size="sm" variant="outline" onClick={downloadTemplate}><Download className="h-4 w-4 mr-1" />下载模板</Button>
-            <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={batchSubmitting}>
-              <Upload className="h-4 w-4 mr-1" />上传文件
-            </Button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".xlsx,.xls"
-              className="hidden"
-              disabled={batchSubmitting}
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) handleFile(f);
-                e.target.value = "";
-              }}
-            />
-            {batchRows.length > 0 && (
-              <Button size="sm" variant="outline" onClick={downloadBatchResults}>
-                <Download className="h-4 w-4 mr-1" />下载结果
-              </Button>
-            )}
-          </div>
-          {fileName && (
-            <p className="text-xs text-muted-foreground">
-              {fileName} · 解析到 {batchRows.length} 行
-              {batchRows.some((r) => r.status === "invalid") ? `，${batchRows.filter((r) => r.status === "invalid").length} 行校验未通过` : ""}
-            </p>
-          )}
-          <FailureList items={batchRows.filter((r) => r.status === "error" || r.status === "partial" || r.status === "invalid").map((r) => ({
-            key: String(r.rowNo), name: `#${r.rowNo} ${r.campaign_name}`, label: batchStatusLabel(r.status),
-            reason: r.status === "invalid" ? r.issues.join("；") : (r.error ?? ""),
-          }))} />
-          <BatchPreviewTable rows={batchRows} statusLabel={batchStatusLabel} />
-          <Button onClick={executeBatch} disabled={!batchRows.length || batchRows.every((r) => r.status === "invalid") || batchSubmitting}>
-            <Play className="h-4 w-4 mr-1" />{batchSubmitting ? "批量创建中…" : `执行创建（${batchRows.filter((r) => r.status !== "invalid").length} 行）`}
-          </Button>
-        </CardContent>
-      </Card>
-
-      <CopyFromAccount advOptions={advOptions} />
-
-      <ResultsTable results={results} />
+        <ResultsTable results={results} />
+        </TabsContent>
+        <TabsContent value="copy" className="mt-3 space-y-4 data-[state=inactive]:hidden" forceMount>
+        <CopyFromAccount advOptions={advOptions} onDone={() => setLogRefresh((k) => k + 1)} />
+        </TabsContent>
+        <TabsContent value="log" className="mt-3 space-y-4 data-[state=inactive]:hidden" forceMount>
+        <ImportHistory refreshKey={logRefresh} />
+        </TabsContent>
+      </Tabs>
 
       <p className="text-xs text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
         <a

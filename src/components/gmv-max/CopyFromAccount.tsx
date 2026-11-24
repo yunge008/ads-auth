@@ -14,6 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { invokeFn, callGmvMaxWrite } from "@/lib/api";
 import { TargetPicker } from "@/components/gmv-max/TargetPicker";
+import { detailSheet, newBatchId, type DetailRow, type ProductResult } from "@/components/gmv-max/ImportHistory";
 
 export type AdvOption = { id: string; name: string; shopId: string | null; bcId: string | null };
 
@@ -22,7 +23,9 @@ type InfoResp = {
   infos: { campaign_id: string; ok: boolean; info?: Record<string, unknown>; error?: string }[];
   next_offset: number | null;
 };
-type ResultRow = { ok: boolean; partial?: boolean; campaign_id?: string; error?: string; notes?: string[] };
+type ResultRow = {
+  ok: boolean; partial?: boolean; campaign_id?: string; error?: string; notes?: string[]; products?: ProductResult[]; log_error?: string;
+};
 
 type Status = "manual" | "pending" | "running" | "ok" | "partial" | "error";
 type CopyRow = {
@@ -43,6 +46,7 @@ type CopyRow = {
   status: Status;
   note: string;
   newId?: string;
+  products?: ProductResult[];
 };
 
 // info 可能是扁平对象，也可能包一层；取含 campaign_name 的那层。
@@ -124,7 +128,7 @@ export function FailureList({ items }: { items: { key: string; name: string; lab
   );
 }
 
-export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
+export function CopyFromAccount({ advOptions, onDone }: { advOptions: AdvOption[]; onDone?: () => void }) {
   const [srcId, setSrcId] = React.useState("");
   const [dstId, setDstId] = React.useState("");
   const [dstBc, setDstBc] = React.useState("");
@@ -237,6 +241,8 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
     if (!selectedCount) return;
     setRunning(true);
     let ok = 0;
+    let logErr = "";
+    const batchId = newBatchId();
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       if (!r.selected || r.status !== "pending") continue;
@@ -255,10 +261,12 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
             ...(r.accelTesting ? { accelerate_testing_for_new_videos: r.accelTesting } : {}),
             store_authorized_bc_id: dstBc,
           },
+          log: { batch_id: batchId, kind: "copy", source: `源户 ${srcId}`, source_campaign_id: r.srcId },
         });
+        if (r0?.log_error) logErr = r0.log_error;
         if (r0?.ok && !r0.partial) ok++;
         setRows((p) => p.map((x, idx) => (idx === i ? {
-          ...x, status: r0?.ok ? (r0.partial ? "partial" : "ok") : "error", newId: r0?.campaign_id,
+          ...x, status: r0?.ok ? (r0.partial ? "partial" : "ok") : "error", newId: r0?.campaign_id, products: r0?.products,
           note: r0?.ok ? [x.note, ...(r0.notes ?? [])].filter(Boolean).join("；") : (r0?.error ?? "未知错误"),
         } : x)));
       } catch (e) {
@@ -266,6 +274,8 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
       }
     }
     setRunning(false);
+    onDone?.();
+    if (logErr) toast.error(`导入记录未保存：${logErr}`, { duration: 15000 });
     if (ok === selectedCount) toast.success(`复制完成：全部成功 ${ok} / ${selectedCount}`);
     else toast.error(`复制完成：成功 ${ok} / ${selectedCount}，其余见「未成功」列表`, { duration: 15000 });
   };
@@ -290,6 +300,19 @@ export function CopyFromAccount({ advOptions }: { advOptions: AdvOption[] }) {
     }
     XLSX.utils.book_append_sheet(wb, importWs, "导入");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), "复制");
+    const done = rows.filter((r) => r.status === "ok" || r.status === "partial" || r.status === "error");
+    if (done.length) {
+      const detail: DetailRow[] = done.flatMap((r) => {
+        const base = {
+          campaign_name: r.name, new_campaign_id: r.newId ?? "", source_campaign_id: r.srcId, advertiser_id: dstId, bc_id: dstBc,
+          group_status: statusLabel[r.status], group_note: r.note,
+        };
+        return r.products?.length
+          ? r.products.map((p) => ({ ...base, item_group_id: p.item_group_id, status: p.status, reason: p.reason }))
+          : r.itemGroupIds.map((id) => ({ ...base, item_group_id: id, status: r.status === "error" ? "失败" : "成功", reason: r.status === "error" ? r.note : "" }));
+      });
+      XLSX.utils.book_append_sheet(wb, detailSheet(detail), "商品明细");
+    }
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["campaign_id", "info_json"], ...rawDump.map((d) => {
       const x = d as { campaign_id: string };
       return [x.campaign_id, JSON.stringify(d).slice(0, 32000)];

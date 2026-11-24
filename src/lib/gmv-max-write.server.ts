@@ -222,7 +222,35 @@ export type CreateRow = {
   store_authorized_bc_id?: unknown;
 };
 // ok=true 且 partial=true：组已建，但没能与源组完全一致（notes 说明差异），需人工处理
-export type CreateResult = { ok: boolean; partial?: boolean; campaign_id?: string; error?: string; notes?: string[] };
+// products：逐个商品的结果（成功 / 失败 / 组成功商品未纳入 + 原因），给结果表「商品明细」与导入记录用
+export type ProductStatus = "成功" | "失败" | "组成功商品未纳入";
+export type ProductResult = { item_group_id: string; status: ProductStatus; reason: string };
+export type CreateResult = {
+  ok: boolean; partial?: boolean; campaign_id?: string; error?: string; notes?: string[]; products?: ProductResult[];
+};
+type Ctx = { excluded: Map<string, string>; occupied: Set<string> };
+
+export async function createOne(db: SupabaseClient, r: CreateRow): Promise<CreateResult> {
+  const ids = (Array.isArray(r.item_group_ids) ? r.item_group_ids : []).map((x) => String(x).trim()).filter(Boolean);
+  const ctx: Ctx = { excluded: new Map(), occupied: new Set() };
+  let res: CreateResult;
+  try {
+    res = await createCore(db, r, ctx);
+  } catch (e) {
+    res = { ok: false, error: (e as Error).message };
+  }
+  const products: ProductResult[] = ids.map((id) => {
+    if (!res.ok) {
+      if (ctx.occupied.has(id)) return { item_group_id: id, status: "失败", reason: "已在其他启用中的 GMV Max 组内" };
+      if (ctx.occupied.size) return { item_group_id: id, status: "失败", reason: "同组其他商品已在其他组内，整组未建" };
+      if (ctx.excluded.has(id)) return { item_group_id: id, status: "失败", reason: ctx.excluded.get(id)! };
+      return { item_group_id: id, status: "失败", reason: res.error ?? "建组失败" };
+    }
+    if (ctx.excluded.has(id)) return { item_group_id: id, status: "组成功商品未纳入", reason: ctx.excluded.get(id)! };
+    return { item_group_id: id, status: "成功", reason: "" };
+  });
+  return { ...res, products };
+}
 
 const pad = (n: number) => String(n).padStart(2, "0");
 function nowPlus5Utc(): string {
@@ -231,7 +259,7 @@ function nowPlus5Utc(): string {
 }
 
 // 单行建组。不传 promotion_days / auto_budget（默认关；传 promotion_days 对象会被自动置 is_enabled=true）。
-export async function createOne(db: SupabaseClient, r: CreateRow): Promise<CreateResult> {
+async function createCore(db: SupabaseClient, r: CreateRow, ctx: Ctx): Promise<CreateResult> {
   const advertiserId = String(r.advertiser_id ?? "").trim();
   const name = String(r.campaign_name ?? "").trim();
   const ids = (Array.isArray(r.item_group_ids) ? r.item_group_ids : []).map((x) => String(x).trim()).filter(Boolean);
@@ -260,6 +288,7 @@ export async function createOne(db: SupabaseClient, r: CreateRow): Promise<Creat
       if (catalog.size) {
         const occupied = ids.filter((id) => catalog.get(id)?.gmv_max_ads_status === "OCCUPIED");
         if (occupied.length) {
+          for (const id of occupied) ctx.occupied.add(id);
           return { ok: false, error: `商品已在启用中的 GMV Max 组里（目标户可能已建过此组）：${occupied.join(",")}` };
         }
         // 查不到 = 不在「可建 GMV Max」商品目录里（通常已下架/删除）；查到但 status≠AVAILABLE = 不可投
@@ -268,6 +297,8 @@ export async function createOne(db: SupabaseClient, r: CreateRow): Promise<Creat
         const unavailable = [...notFound, ...badStatus];
         if (unavailable.length) {
           useIds = ids.filter((id) => !unavailable.includes(id));
+          for (const id of notFound) ctx.excluded.set(id, "不可用：店铺可投商品目录查不到（多为下架/删除）");
+          for (const id of badStatus) ctx.excluded.set(id, `不可用：商品状态 ${catalog.get(id)?.status}`);
           const detail = [
             notFound.length ? `店铺可投目录查不到 ${notFound.length} 个：${notFound.join(",")}` : "",
             badStatus.length ? `状态不可投 ${badStatus.length} 个：${badStatus.map((id) => `${id}(${catalog.get(id)?.status})`).join(",")}` : "",
@@ -374,9 +405,73 @@ export async function createOne(db: SupabaseClient, r: CreateRow): Promise<Creat
     } catch (e) {
       partial = true;
       notes.push(`商品只建了 50/${fullIds.length} 个，补全失败：${(e as Error).message}；未加入的商品：${fullIds.slice(50).join(",")}`);
+      for (const id of fullIds.slice(50)) ctx.excluded.set(id, `补全失败：${(e as Error).message}`);
     }
   }
   return { ok: true, campaign_id: campaignId, ...(partial ? { partial: true } : {}), ...(notes.length ? { notes } : {}) };
+}
+
+// 导入记录：每个商品一行写 gmv_max_import_logs（表由 migration 20261124120000 创建；表不存在时不影响建组）
+export type LogMeta = { batch_id?: unknown; source?: unknown; kind?: unknown; source_campaign_id?: unknown };
+export async function logImport(db: SupabaseClient, meta: LogMeta, row: CreateRow, res: CreateResult, operator: string) {
+  const batchId = String(meta.batch_id ?? "").trim();
+  if (!batchId) return null;
+  const base = {
+    batch_id: batchId,
+    kind: String(meta.kind ?? "excel"),
+    source: String(meta.source ?? ""),
+    operator,
+    advertiser_id: String(row.advertiser_id ?? ""),
+    bc_id: String(row.store_authorized_bc_id ?? ""),
+    campaign_name: String(row.campaign_name ?? ""),
+    source_campaign_id: String(meta.source_campaign_id ?? ""),
+    new_campaign_id: res.campaign_id ?? null,
+    group_status: res.ok ? (res.partial ? "已建·需处理" : "成功") : "失败",
+    group_note: res.ok ? (res.notes ?? []).join("；") : (res.error ?? ""),
+  };
+  const products = res.products?.length ? res.products : [{ item_group_id: "", status: res.ok ? "成功" : "失败", reason: res.error ?? "" }];
+  const { error } = await db.from("gmv_max_import_logs").insert(
+    products.map((p) => ({ ...base, item_group_id: p.item_group_id, status: p.status, reason: p.reason })),
+  );
+  return error ? error.message : null;
+}
+
+export async function listImportBatches(db: SupabaseClient, days = 30) {
+  const since = new Date(Date.now() - days * 86400_000).toISOString();
+  const out = new Map<string, { batch_id: string; kind: string; source: string; operator: string; advertiser_id: string;
+    first_at: string; last_at: string; groups: Set<string>; counts: Record<string, number> }>();
+  for (let from = 0; from < 50000; from += 1000) {
+    const { data, error } = await db.from("gmv_max_import_logs")
+      .select("batch_id, kind, source, operator, advertiser_id, created_at, campaign_name, status")
+      .gte("created_at", since).order("created_at", { ascending: false }).range(from, from + 999);
+    if (error) throw new Error(error.message);
+    type LogRow = { batch_id: string; kind: string; source: string; operator: string; advertiser_id: string;
+      created_at: string; campaign_name: string; status: string };
+    for (const r of (data ?? []) as unknown as LogRow[]) {
+      const b = out.get(r.batch_id) ?? { batch_id: r.batch_id, kind: r.kind, source: r.source, operator: r.operator,
+        advertiser_id: r.advertiser_id, first_at: r.created_at, last_at: r.created_at, groups: new Set<string>(), counts: {} };
+      if (r.created_at < b.first_at) b.first_at = r.created_at;
+      if (r.created_at > b.last_at) b.last_at = r.created_at;
+      b.groups.add(r.campaign_name);
+      b.counts[r.status] = (b.counts[r.status] ?? 0) + 1;
+      out.set(r.batch_id, b);
+    }
+    if ((data ?? []).length < 1000) break;
+  }
+  return Array.from(out.values()).map((b) => ({ ...b, groups: b.groups.size, counts: b.counts as Record<string, number> }))
+    .sort((a, b) => b.last_at.localeCompare(a.last_at));
+}
+
+export async function getImportBatch(db: SupabaseClient, batchId: string) {
+  const rows: Record<string, unknown>[] = [];
+  for (let from = 0; from < 50000; from += 1000) {
+    const { data, error } = await db.from("gmv_max_import_logs").select("*").eq("batch_id", batchId)
+      .order("id", { ascending: true }).range(from, from + 999);
+    if (error) throw new Error(error.message);
+    rows.push(...((data ?? []) as unknown as Record<string, unknown>[]));
+    if ((data ?? []).length < 1000) break;
+  }
+  return rows;
 }
 
 export async function exclusiveAuth(db: SupabaseClient, advertiserId: string, grant: boolean) {

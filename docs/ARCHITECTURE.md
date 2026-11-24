@@ -24,7 +24,7 @@
 | `/settings` | 账号管理、人员表、数据同步（AccountsManager/StaffTable/DataSyncCard） |
 | `/api-test` | API 测试 |
 | `/oauth/tiktok/callback` | TikTok OAuth 回调 |
-| `/api/public/hooks/gmv-max-write` | **服务端路由**：GMV Max 写操作（`create` 单行建组 / `auth_check` / `auth_grant` 店铺独占授权），逻辑在 `src/lib/gmv-max-write.server.ts`，页面「GMV MAX新建」全部建组都走这里（Edge Function 部署耗 Lovable 积分）。鉴权：口令 + gmv-max-create 权限（借 `gmv-max-campaign-info` 校验） |
+| `/api/public/hooks/gmv-max-write` | **服务端路由**：GMV Max 写操作与配套只读查询，逻辑在 `src/lib/gmv-max-write.server.ts`：`create`（单行建组，建前用 `/store/product/get/` 预检商品：不可投去掉、被占用整行失败；商品>50 先建 50 再 update 补全；带 `log` 时逐商品写 `gmv_max_import_logs`）、`auth_check`/`auth_grant`（店铺独占授权）、`spend`（近 N 天 组×商品 消耗）、`products`（店铺商品状态）、`log_batches`/`log_get`（导入记录）。页面「GMV MAX新建」4 个 TAB（Excel 批量新建 / 单条新建 / 账户复制 / 记录）全部走这里（Edge Function 部署耗 Lovable 积分）。鉴权：口令 + gmv-max-create 权限（借 `gmv-max-campaign-info` 校验） |
 | `/api/public/hooks/gmv-max-cron` | **⏸ 2026-10-12 起暂停**（`GMV_MAX_SYNC_PAUSED=true`，数据库容量告警，GMV Max 官方 API 同步未上线）。**服务端路由**：pg_cron 调用入口，循环驱动 gmv-max-sync 续跑（apikey=anon key 鉴权，5 分钟硬预算） |
 | `/api/public/hooks/attribution-cron` | **服务端路由**：每晚北京 23:30 刷新 GMV 归因结果快照（调 `attribution-upload` 的 `refresh`，默认最近 3 个有批次的月份；**cron 带 `skip_if_unchanged`，该月广告表和达人登记都没变化就直接跳过，不重复计算**；apikey 鉴权） |
 | `/api/public/hooks/feishu-sync-cron` | **服务端路由**：每晚北京 23:00 把四个「读飞书 → 写自己库」的基础同步各跑一次（`feishu-read-connection-stats` 发样及素材统计、`attribution-sync-creators` 达人登记、`attribution-feishu` 的 `sync-targets` / `sync-handovers`）。四步串行且互不影响，任一步失败发飞书机器人通知，运行状态写 `gmv_max_sync_state.id='feishu_nightly_sync'`；body 可传 `{only:["creators",...]}` 只跑其中几步（apikey 鉴权，单步 4 分钟超时） |
@@ -201,3 +201,7 @@
 - 改接外部 Supabase：Settings → General → External Supabase；不自动迁移数据，**单向不可回 Cloud**；前端与 `ads-auth.lovable.app` 不变。
 - Edge Function secrets（19 个，名字）：ADMIN_PASSCODE、DINGMIAO_APP_KEY、DINGMIAO_APP_SECRET、DINGMIAO_BASE_URL、ECO_PASSWORD、ECO_USERNAME、FEISHU_APP_ID、FEISHU_APP_SECRET、FEISHU_BOT_WEBHOOK、FEISHU_EDITOR_SPREADSHEET_TOKEN、FEISHU_SKU_SPREADSHEET_TOKEN、FEISHU_SPREADSHEET_TOKEN、LOVABLE_API_KEY（系统托管）、QIANYI_ACCESS_ID、QIANYI_SECRET_KEY、TIKTOK_APP_ID、TIKTOK_APP_SECRET、TIKTOK_BC_ACCESS_TOKEN、TIKTOK_BC_ID。
 - 部署核验脚本：`tools/check-deploy.sh`（无权限探测，不读写数据）。
+
+
+### gmv_max_import_logs（2026-11-24，migration 20261124120000）
+GMV Max 导入记录，逐商品一行：batch_id / kind(excel|single|copy) / source / operator / advertiser_id / bc_id / campaign_name / source_campaign_id / new_campaign_id / group_status / group_note / item_group_id / status(成功|失败|组成功商品未纳入) / reason。RLS 开启无策略，仅服务端路由 service role 读写。
