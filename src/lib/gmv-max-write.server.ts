@@ -84,6 +84,40 @@ function cleanIdentityList(v: unknown): Record<string, string>[] {
   return out;
 }
 
+// 目标户可用的视频账号（/gmv_max/identity/get/）。BC_AUTH_TT 建组必须带 identity_authorized_shop_id，
+// 而 /campaign/gmv_max/info/ 不返回它，只能从这里补。按 advertiser 缓存 10 分钟（批量逐行调用时省请求）。
+type IdentityInfo = Record<string, unknown>;
+const identityCache = new Map<string, { at: number; byId: Map<string, IdentityInfo> }>();
+async function targetIdentities(conns: Conn[], advertiserId: string, storeId: string) {
+  const key = `${advertiserId}:${storeId}`;
+  const hit = identityCache.get(key);
+  if (hit && Date.now() - hit.at < 600_000) return hit.byId;
+  const byId = new Map<string, IdentityInfo>();
+  await withConns(conns, async (token) => {
+    // 只用 gmv-max-identity-get 已验证可用的参数（advertiser_id + store_id）
+    const data = await tt(token, "/gmv_max/identity/get/", {
+      method: "GET",
+      params: { advertiser_id: advertiserId, store_id: storeId },
+    });
+    const add = (d: Record<string, unknown>) => {
+      const list = (d.identity_list ?? d.list ?? []) as IdentityInfo[];
+      for (const it of list) if (it.identity_id != null) byId.set(String(it.identity_id), it);
+    };
+    add(data);
+    // 响应带分页时把后续页拉完（只在 TikTok 自己报告多页时才传 page，避免未知参数）
+    const pi = (data.page_info ?? {}) as Record<string, unknown>;
+    const totalPage = Math.min(20, Number(pi.total_page ?? 1) || 1);
+    for (let page = 2; page <= totalPage; page++) {
+      add(await tt(token, "/gmv_max/identity/get/", {
+        method: "GET",
+        params: { advertiser_id: advertiserId, store_id: storeId, page: String(page), ...(pi.page_size ? { page_size: String(pi.page_size) } : {}) },
+      }));
+    }
+  });
+  identityCache.set(key, { at: Date.now(), byId });
+  return byId;
+}
+
 export type CreateRow = {
   advertiser_id?: unknown; campaign_name?: unknown; item_group_ids?: unknown; roas_bid?: unknown; budget?: unknown;
   start_time?: unknown; end_time?: unknown; identity_list?: unknown; affiliate_posts_enabled?: unknown;
@@ -139,6 +173,34 @@ export async function createOne(db: SupabaseClient, r: CreateRow): Promise<Creat
   const identityList = identityAll.slice(0, 20);
   if (identityList.length) body.identity_list = identityList;
   const droppedIdentities = identityAll.slice(20).map((x) => x.identity_id);
+  // 用目标户 identity/get 补 identity_authorized_shop_id / identity_authorized_bc_id；目标户查不到的账号直接报错，不擅自去掉
+  if (identityList.length) {
+    let avail: Map<string, IdentityInfo>;
+    try {
+      avail = await targetIdentities(conns, advertiserId, storeId);
+    } catch (e) {
+      return { ok: false, error: `查询目标户视频账号失败：${(e as Error).message}` };
+    }
+    const missing: string[] = [];
+    const unavailable: string[] = [];
+    for (const x of identityList) {
+      const t = avail.get(x.identity_id);
+      if (!t) { missing.push(x.identity_id); continue; }
+      if (t.product_gmv_max_available === false) unavailable.push(x.identity_id);
+      for (const k of ["identity_authorized_shop_id", "identity_authorized_bc_id", "store_id"]) {
+        if (t[k] != null && t[k] !== "" && !x[k]) x[k] = String(t[k]);
+      }
+    }
+    if (missing.length || unavailable.length) {
+      return {
+        ok: false,
+        error: [
+          missing.length ? `目标户查不到这些视频账号：${missing.join(",")}` : "",
+          unavailable.length ? `目标户这些视频账号不可用于商品 GMV Max：${unavailable.join(",")}` : "",
+        ].filter(Boolean).join("；") + "（未建组，避免与原组不一致）",
+      };
+    }
+  }
   if (typeof r.affiliate_posts_enabled === "boolean") body.affiliate_posts_enabled = r.affiliate_posts_enabled;
   const accel = r.accelerate_testing_for_new_videos;
   if (accel === "ON" || accel === "OFF") body.accelerate_testing_for_new_videos = accel;
@@ -208,10 +270,15 @@ export async function exclusiveAuth(db: SupabaseClient, advertiserId: string, gr
     if (!grant) return check(token);
     if (!storeId) throw new Error(`广告户 ${advertiserId} 未配置店铺 ID`);
     if (!bcId) throw new Error(`广告户 ${advertiserId} 找不到 BC ID`);
-    // 参数按 create 接口惯例推断（advertiser_id / store_id / store_authorized_bc_id），未见文档
+    // TikTok 报错要求 bc_id = 店铺所属（owner）商务中心。优先取 store/list 里该店铺的 BC 字段，取不到用连接表的 bc_id。
+    const cur = await check(token);
+    const store = ((cur.raw.store_list ?? cur.raw.list ?? []) as Record<string, unknown>[])
+      .find((s) => String(s.store_id ?? "") === storeId) ?? {};
+    const ownerBc = String(store.store_authorized_bc_id ?? store.bc_id ?? store.owner_bc_id
+      ?? (store.store_authorized_bc_info as Record<string, unknown> | undefined)?.bc_id ?? bcId);
     const granted = await tt(token, "/gmv_max/exclusive_authorization/create/", {
       method: "POST",
-      body: { advertiser_id: advertiserId, store_id: storeId, store_authorized_bc_id: bcId },
+      body: { advertiser_id: advertiserId, store_id: storeId, bc_id: ownerBc, store_authorized_bc_id: ownerBc },
     });
     return { granted, after: await check(token).catch((e) => ({ error: (e as Error).message })) };
   });
