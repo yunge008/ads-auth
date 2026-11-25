@@ -2256,6 +2256,228 @@ export type Database = {
         }
         Relationships: []
       }
+      review_daily: {
+        Row: {
+          d: string
+          orders: number | null
+          product_id: string
+          s1: number
+          s2: number
+          s3: number
+          s4: number
+          s5: number
+          shop_key: string
+          source: string
+          updated_at: string
+        }
+        Insert: {
+          d: string
+          orders?: number | null
+          product_id: string
+          s1?: number
+          s2?: number
+          s3?: number
+          s4?: number
+          s5?: number
+          shop_key: string
+          source: string
+          updated_at?: string
+        }
+        Update: {
+          d?: string
+          orders?: number | null
+          product_id?: string
+          s1?: number
+          s2?: number
+          s3?: number
+          s4?: number
+          s5?: number
+          shop_key?: string
+          source?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      review_products: {
+        Row: {
+          alerted_at: string | null
+          below_4: boolean
+          product_id: string
+          seller_sku: string | null
+          shop_key: string
+          updated_at: string
+        }
+        Insert: {
+          alerted_at?: string | null
+          below_4?: boolean
+          product_id: string
+          seller_sku?: string | null
+          shop_key: string
+          updated_at?: string
+        }
+        Update: {
+          alerted_at?: string | null
+          below_4?: boolean
+          product_id?: string
+          seller_sku?: string | null
+          shop_key?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      review_settings: {
+        Row: {
+          id: number
+          min_reviews: number
+          threshold: number
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          id?: number
+          min_reviews?: number
+          threshold?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          id?: number
+          min_reviews?: number
+          threshold?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
+      review_shops: {
+        Row: {
+          api_until: string | null
+          crawl_from: string | null
+          crawl_until: string | null
+          last_error: string | null
+          last_run_at: string | null
+          latest_available_date: string | null
+          shop_key: string
+          state: Json
+        }
+        Insert: {
+          api_until?: string | null
+          crawl_from?: string | null
+          crawl_until?: string | null
+          last_error?: string | null
+          last_run_at?: string | null
+          latest_available_date?: string | null
+          shop_key: string
+          state?: Json
+        }
+        Update: {
+          api_until?: string | null
+          crawl_from?: string | null
+          crawl_until?: string | null
+          last_error?: string | null
+          last_run_at?: string | null
+          latest_available_date?: string | null
+          shop_key?: string
+          state?: Json
+        }
+        Relationships: []
+      }
+      review_texts: {
+        Row: {
+          content: string | null
+          content_zh: string | null
+          img_count: number
+          order_id: string | null
+          product_id: string
+          reply: string | null
+          reply_zh: string | null
+          review_at: string | null
+          review_id: string
+          seller_sku: string | null
+          shop_key: string
+          sku_id: string | null
+          star: number
+          updated_at: string
+        }
+        Insert: {
+          content?: string | null
+          content_zh?: string | null
+          img_count?: number
+          order_id?: string | null
+          product_id: string
+          reply?: string | null
+          reply_zh?: string | null
+          review_at?: string | null
+          review_id: string
+          seller_sku?: string | null
+          shop_key: string
+          sku_id?: string | null
+          star: number
+          updated_at?: string
+        }
+        Update: {
+          content?: string | null
+          content_zh?: string | null
+          img_count?: number
+          order_id?: string | null
+          product_id?: string
+          reply?: string | null
+          reply_zh?: string | null
+          review_at?: string | null
+          review_id?: string
+          seller_sku?: string | null
+          shop_key?: string
+          sku_id?: string | null
+          star?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      review_uploads: {
+        Row: {
+          created_at: string
+          file_name: string
+          id: string
+          products: number
+          range_from: string
+          range_to: string
+          rows_in_range: number
+          rows_text: number
+          rows_total: number
+          shop_key: string
+          status: string
+          uploaded_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          file_name: string
+          id?: string
+          products?: number
+          range_from: string
+          range_to: string
+          rows_in_range?: number
+          rows_text?: number
+          rows_total?: number
+          shop_key: string
+          status?: string
+          uploaded_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          file_name?: string
+          id?: string
+          products?: number
+          range_from?: string
+          range_to?: string
+          rows_in_range?: number
+          rows_text?: number
+          rows_total?: number
+          shop_key?: string
+          status?: string
+          uploaded_by?: string | null
+        }
+        Relationships: []
+      }
       sea_inv_plan_items: {
         Row: {
           advisory: boolean
@@ -3683,6 +3905,32 @@ export type Database = {
           vid: string
         }[]
       }
+      review_alert_scan: { Args: { p_commit?: boolean }; Returns: Json }
+      review_effective: {
+        Args: { p_q: string; p_shops: string[]; p_to: string }
+        Returns: {
+          d: string
+          orders: number
+          product_id: string
+          rated: boolean
+          s1: number
+          s2: number
+          s3: number
+          s4: number
+          s5: number
+          shop_key: string
+        }[]
+      }
+      review_products_fill_sku: { Args: never; Returns: number }
+      review_series: {
+        Args: { p_from: string; p_q?: string; p_shops: string[]; p_to: string }
+        Returns: Json
+      }
+      review_table: {
+        Args: { p_from: string; p_q?: string; p_shops: string[]; p_to: string }
+        Returns: Json
+      }
+      review_texts_upsert: { Args: { p_rows: Json }; Returns: number }
       verify_gmv_cron_key: { Args: { _key: string }; Returns: boolean }
     }
     Enums: {
