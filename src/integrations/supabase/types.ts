@@ -2933,6 +2933,105 @@ export type Database = {
         }
         Relationships: []
       }
+      tts_finance_statements: {
+        Row: {
+          currency: string | null
+          raw: Json
+          shop_id: string
+          statement_id: string
+          statement_time: string | null
+          tx_count: number | null
+          tx_synced_at: string | null
+        }
+        Insert: {
+          currency?: string | null
+          raw: Json
+          shop_id: string
+          statement_id: string
+          statement_time?: string | null
+          tx_count?: number | null
+          tx_synced_at?: string | null
+        }
+        Update: {
+          currency?: string | null
+          raw?: Json
+          shop_id?: string
+          statement_id?: string
+          statement_time?: string | null
+          tx_count?: number | null
+          tx_synced_at?: string | null
+        }
+        Relationships: []
+      }
+      tts_finance_tx: {
+        Row: {
+          order_create_time: string | null
+          order_id: string | null
+          raw: Json
+          shop_id: string
+          statement_id: string
+          statement_time: string | null
+          synced_at: string
+          tx_id: string
+          tx_type: string | null
+        }
+        Insert: {
+          order_create_time?: string | null
+          order_id?: string | null
+          raw: Json
+          shop_id: string
+          statement_id: string
+          statement_time?: string | null
+          synced_at?: string
+          tx_id: string
+          tx_type?: string | null
+        }
+        Update: {
+          order_create_time?: string | null
+          order_id?: string | null
+          raw?: Json
+          shop_id?: string
+          statement_id?: string
+          statement_time?: string | null
+          synced_at?: string
+          tx_id?: string
+          tx_type?: string | null
+        }
+        Relationships: []
+      }
+      tts_orders: {
+        Row: {
+          create_time: string | null
+          order_id: string
+          raw: Json
+          returns: Json | null
+          shop_id: string
+          status: string | null
+          synced_at: string
+          update_time: string | null
+        }
+        Insert: {
+          create_time?: string | null
+          order_id: string
+          raw: Json
+          returns?: Json | null
+          shop_id: string
+          status?: string | null
+          synced_at?: string
+          update_time?: string | null
+        }
+        Update: {
+          create_time?: string | null
+          order_id?: string
+          raw?: Json
+          returns?: Json | null
+          shop_id?: string
+          status?: string | null
+          synced_at?: string
+          update_time?: string | null
+        }
+        Relationships: []
+      }
       tts_shops: {
         Row: {
           access_expires_at: string | null
@@ -2942,6 +3041,7 @@ export type Database = {
           authorizer_open_id: string | null
           contact_info: Json | null
           created_at: string
+          daily_sync: boolean
           id: string
           last_refresh_at: string | null
           last_refresh_error: string | null
@@ -2968,6 +3068,7 @@ export type Database = {
           authorizer_open_id?: string | null
           contact_info?: Json | null
           created_at?: string
+          daily_sync?: boolean
           id?: string
           last_refresh_at?: string | null
           last_refresh_error?: string | null
@@ -2994,6 +3095,7 @@ export type Database = {
           authorizer_open_id?: string | null
           contact_info?: Json | null
           created_at?: string
+          daily_sync?: boolean
           id?: string
           last_refresh_at?: string | null
           last_refresh_error?: string | null
@@ -3021,6 +3123,39 @@ export type Database = {
             referencedColumns: ["code"]
           },
         ]
+      }
+      tts_sync_state: {
+        Row: {
+          cursor: Json | null
+          kind: string
+          last_error: string | null
+          last_ok_at: string | null
+          last_run_at: string | null
+          shop_id: string
+          unknown_fields: Json
+          watermark: string | null
+        }
+        Insert: {
+          cursor?: Json | null
+          kind: string
+          last_error?: string | null
+          last_ok_at?: string | null
+          last_run_at?: string | null
+          shop_id: string
+          unknown_fields?: Json
+          watermark?: string | null
+        }
+        Update: {
+          cursor?: Json | null
+          kind?: string
+          last_error?: string | null
+          last_ok_at?: string | null
+          last_run_at?: string | null
+          shop_id?: string
+          unknown_fields?: Json
+          watermark?: string | null
+        }
+        Relationships: []
       }
     }
     Views: {
