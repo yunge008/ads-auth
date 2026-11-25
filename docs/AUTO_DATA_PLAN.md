@@ -150,4 +150,6 @@
 5. **字段缺失（阻断切换）**：接口实际只返回 `cost / orders / gross_revenue / product_impressions / product_clicks / currency` 6 个金额字段；`tt_account_name`、`shop_content_type`、`tt_account_authorization_type` 已被接口判为无效（旧同步能取到，现在不能），`title` 与发布时间也没有。→ 金额可以用接口；**达人账号名、发布时间、内容类型必须另找来源**，否则「BD-账号」归因路径和站点交接按发布日期切分都没法用接口数据跑。内容类型 1125.289 起按 `item_id=-1`→商品卡、其余→视频推断（VN 6 月 399/399 商品卡键一致；直播形态未见过）。
 6. `/gmv_max/video/get/` 文档（负责人提供截图）：返回 `item_id / text / spu_id_list / identity_info.display_name / video_info`，**没有发布时间字段**（只能 `sort_field=POST_TIME` 排序）；`display_name` 可能能补达人名，范围是否覆盖联盟达人视频未核验 → 探测按钮会取一页原样。
 
+7. 负责人 2026-11-25 提供的外部资料称 TikTok Shop `/analytics/202609/shop_videos/batch_performance`（2026-09 新版）返回 `video.video_post_time`（Unix 秒）与 `video.username`，一次 ≤500 个 VID、日期区间 ≤60 天 —— **未核验**，1125.290 已加入 ⏱ 探测（`video_ids` 按 JSON 数组、逗号分隔两种传法各试一次）。资料首推的「VID 反推」不采用为首选：上文实测 VID 时间戳是创建时间，定时发布会差到次日（SEA 日期一致约 94%、MX-AR 68.5%）；最多作兜底并标来源。第三方 TikAPI（要外部密钥、数据外发）与 Display API（要逐个达人授权）不考虑。
+
 **结论（目前）**：金额（花费/GMV/订单）接口与上传表逐 VID 一致，差异全部可解释；但接口缺达人名、发布时间，**现在还不能替代上传表**。下一步：⏱ 探测 TikTok Shop 视频分析接口与 `/gmv_max/video/get/` 能否按 VID 补齐这两项。

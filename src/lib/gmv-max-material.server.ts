@@ -1088,11 +1088,11 @@ export async function probePostedTime(
     .eq("status", "READY")
     .order("month", { ascending: false })
     .limit(2);
-  const sample: { vid: string; upload_posted_at: string | null }[] = [];
+  const sample: { vid: string; upload_posted_at: string | null; upload_account?: string }[] = [];
   if (ups?.length) {
     const { data: rows } = await db
       .from("ad_upload_agg")
-      .select("vid, posted_at, cost")
+      .select("vid, posted_at, cost, account_name")
       .in(
         "upload_id",
         ups.map((u) => u.id),
@@ -1102,7 +1102,11 @@ export async function probePostedTime(
       .order("cost", { ascending: false })
       .limit(5);
     for (const r of rows ?? [])
-      sample.push({ vid: String(r.vid), upload_posted_at: r.posted_at as string });
+      sample.push({
+        vid: String(r.vid),
+        upload_posted_at: r.posted_at as string,
+        upload_account: String(r.account_name ?? ""),
+      });
   }
   if (country === "VN")
     sample.push({ vid: "7559874631184911623", upload_posted_at: "2025-10-12T13:00:00+00:00" });
@@ -1124,7 +1128,13 @@ export async function probePostedTime(
     return { http: r.status, body: text.slice(0, 6000) };
   };
   const today = new Date().toISOString().slice(0, 10);
-  const yearAgo = new Date(Date.now() - 360 * 86400_000).toISOString().slice(0, 10);
+  // 分析接口日期区间最长 60 天（未核验）：取样本所在月 1 日起 59 天
+  const winStart = ups?.length ? `${ups[0].month}-01` : today;
+  const winEndD = new Date(Date.parse(`${winStart}T00:00:00Z`) + 59 * 86400_000)
+    .toISOString()
+    .slice(0, 10);
+  const yearAgo = winStart;
+  const winEnd = winEndD < today ? winEndD : today;
   const out: Record<string, unknown> = {
     country,
     shop_id: shopId,
@@ -1137,7 +1147,7 @@ export async function probePostedTime(
   for (const s of sample.slice(0, 3).concat(sample.slice(5))) {
     detail[s.vid] = await raw(`/analytics/202509/shop_videos/${s.vid}/performance`, {
       start_date_ge: yearAgo,
-      end_date_lt: today,
+      end_date_lt: winEnd,
       granularity: "ALL",
       currency: "LOCAL",
     });
@@ -1147,14 +1157,31 @@ export async function probePostedTime(
   out.shop_video_list = {
     v202605: await raw("/analytics/202605/shop_videos/performance", {
       start_date_ge: yearAgo,
-      end_date_lt: today,
+      end_date_lt: winEnd,
       page_size: "5",
       currency: "LOCAL",
     }),
     v202409: await raw("/analytics/202409/shop_videos/performance", {
       start_date_ge: yearAgo,
-      end_date_lt: today,
+      end_date_lt: winEnd,
       page_size: "5",
+      currency: "LOCAL",
+    }),
+  };
+  // ④ 批量视频表现（2026-09 新版，资料称含 video.video_post_time / video.username，一次 ≤500 个 VID，未核验）
+  //    video_ids 传法未知：JSON 数组与逗号分隔各试一次
+  const vids = sample.map((x) => x.vid);
+  out.shop_video_batch = {
+    json_array: await raw("/analytics/202609/shop_videos/batch_performance", {
+      video_ids: JSON.stringify(vids),
+      start_date_ge: winStart,
+      end_date_lt: winEnd,
+      currency: "LOCAL",
+    }),
+    comma: await raw("/analytics/202609/shop_videos/batch_performance", {
+      video_ids: vids.join(","),
+      start_date_ge: winStart,
+      end_date_lt: winEnd,
       currency: "LOCAL",
     }),
   };
