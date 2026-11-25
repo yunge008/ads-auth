@@ -131,11 +131,13 @@ export function orderRows(o: Order, shop: Shop, th: boolean, en?: Enrich): Cell[
 
 /** 入库的退货（tts_orders.returns）→ orderRows 需要的 ReturnInfo（金额按分）。
  *  新结构（1125.269 起）：每条带 return_status，逐 SKU 一行；旧结构：{sku_id, qty, refund_total}（已按「未拒绝未取消」过滤）。
- *  countStatus 决定哪些状态的申请计入「Return/Refund」——口径以与后台导出逐单对账结果为准（见 docs/AUTO_DATA_PLAN.md）。 */
+ *  countStatus 决定哪些状态的申请计入「Return/Refund」，默认全部计入（见 docs/AUTO_DATA_PLAN.md 对账记录）。 */
 export type StoredReturn = { sku_id: string; qty?: number; refund_total: number; return_status?: string; return_type?: string; return_id?: string };
 export function returnsInfo(
   list: StoredReturn[] | null | undefined,
-  countStatus: (status: string) => boolean = (st) => !/REJECT|CANCEL/i.test(st),
+  // 口径（2026-11-25 TH 8–9 月 28658 单逐单验证）：只要有退货申请就计入，含买家取消的申请（RETURN_OR_REFUND_REQUEST_CANCEL），
+  // 与后台订单导出「Cancelation/Return Type」一致；旧口径「排除拒绝/取消」少 30 单
+  countStatus: (status: string) => boolean = () => true,
 ): ReturnInfo | undefined {
   if (!list?.length) return undefined;
   const m: ReturnInfo = new Map();
