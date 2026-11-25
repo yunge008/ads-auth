@@ -119,7 +119,7 @@ function ReviewsPage() {
           <TrendView series={series} from={from} to={to} texts={single ? texts : null} stars={stars} onStars={setStars} />
         </TabsContent>
         <TabsContent value="links" className="mt-0">
-          <LinksTable rows={rows} onPick={pickListing} picked={single?.pid ?? null} />
+          <LinksTable rows={rows} onPick={pickListing} picked={single?.pid ?? null} from={from} to={to} />
         </TabsContent>
         <TabsContent value="alerts" className="mt-0">
           <AlertsPanel meta={meta} onSaved={loadMeta} onPick={pickListing} />

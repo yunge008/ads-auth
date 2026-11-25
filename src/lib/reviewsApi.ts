@@ -21,6 +21,7 @@ export type Reconcile = {
   shop_key: string; crawl_until: string | null;
   products: { pid: string; api: Stars; ours: Stars; diff: Stars; api_avg: number | null; our_avg: number | null }[];
 };
+export type SkuTable = { crawl_until: string | null; rows: { sku_id: string; spec: string | null; base: Stars; range: Stars }[] };
 type Filter = { sites: string[]; from: string; to: string; q: string };
 
 const call = <T,>(body: Record<string, unknown>, timeout = 60_000) => invokeFn<T>("reviews", body, { timeout });
@@ -33,6 +34,8 @@ export const reviewsApi = {
   saveSettings: (min_reviews: number, threshold: number) => call<{ ok: true }>({ action: "save_settings", min_reviews, threshold }),
   uploadBegin: (b: Record<string, unknown>) => call<{ upload_id: string }>({ action: "upload_begin", ...b }),
   uploadDaily: (shop_key: string, rows: unknown[]) => call<{ rows: number }>({ action: "upload_daily", shop_key, rows }, 120_000),
+  uploadSku: (shop_key: string, rows: unknown[], specs: unknown[]) => call<{ rows: number }>({ action: "upload_sku", shop_key, rows, specs }, 120_000),
+  skuTable: (site: string, pid: string, from: string, to: string) => call<SkuTable>({ action: "sku_table", site, product_id: pid, from, to }),
   uploadTexts: (shop_key: string, rows: unknown[]) => call<{ rows: number }>({ action: "upload_texts", shop_key, rows }, 120_000),
   uploadEnd: (shop_key: string, upload_id: string) => call<{ crawl_from: string; crawl_until: string }>({ action: "upload_end", shop_key, upload_id }),
   reconcile: (shop_key: string, product_ids: string[]) => call<Reconcile>({ action: "reconcile", shop_key, product_ids }, 150_000),

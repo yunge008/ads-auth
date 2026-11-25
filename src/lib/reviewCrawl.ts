@@ -12,6 +12,7 @@ export type CrawlParsed = {
   file: string; shop_key: string; range_from: string; range_to: string;
   rows_total: number; rows_in_range: number; out_of_range: number; dup: number; bad: number;
   daily: { p: string; d: string; s: Stars }[]; texts: CrawlText[]; products: number;
+  skuDaily: { p: string; k: string; d: string; s: Stars }[]; skuSpecs: { p: string; k: string; spec: string }[];
   zh_col: string | null; reply_zh_col: string | null;
 };
 
@@ -54,6 +55,8 @@ export async function parseCrawlFile(file: File): Promise<CrawlParsed> {
   const at = (r: unknown[], i: number) => (i < 0 ? "" : str(r[i]));
   const seen = new Set<string>();
   const daily = new Map<string, Stars>();
+  const skuDaily = new Map<string, Stars>();
+  const specCount = new Map<string, Map<string, number>>(); // p|sku → 规格写法 → 次数
   const texts: CrawlText[] = [];
   let inRange = 0, out = 0, dup = 0, bad = 0;
   for (const r of rows.slice(1)) {
@@ -70,6 +73,19 @@ export async function parseCrawlFile(file: File): Promise<CrawlParsed> {
     const s = daily.get(k) ?? [0, 0, 0, 0, 0];
     s[star - 1]++;
     daily.set(k, s as Stars);
+    const sku = at(r, C.sku);
+    if (sku) {
+      const kk = `${pid}|${sku}|${d}`;
+      const ss = skuDaily.get(kk) ?? [0, 0, 0, 0, 0];
+      ss[star - 1]++;
+      skuDaily.set(kk, ss as Stars);
+      const spec = at(r, C.skuSpec);
+      if (spec) {
+        const m = specCount.get(`${pid}|${sku}`) ?? new Map<string, number>();
+        m.set(spec, (m.get(spec) ?? 0) + 1);
+        specCount.set(`${pid}|${sku}`, m);
+      }
+    }
     const content = at(r, C.content) || null, reply = at(r, C.reply) || null;
     if (content || reply) {
       texts.push({
@@ -86,5 +102,7 @@ export async function parseCrawlFile(file: File): Promise<CrawlParsed> {
     rows_total: inRange + out + dup + bad, rows_in_range: inRange, out_of_range: out, dup, bad,
     daily: dailyRows, texts, products: new Set(dailyRows.map((x) => x.p)).size,
     zh_col: contentZh?.[0] ?? null, reply_zh_col: replyZh?.[0] ?? null,
+    skuDaily: [...skuDaily.entries()].map(([k, s]) => { const [p, kk, d] = k.split("|"); return { p, k: kk, d, s }; }),
+    skuSpecs: [...specCount.entries()].map(([k, m]) => { const [p, kk] = k.split("|"); return { p, k: kk, spec: [...m.entries()].sort((a, b) => b[1] - a[1])[0][0] }; }),
   };
 }

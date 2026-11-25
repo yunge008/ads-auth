@@ -44,6 +44,10 @@ export function DataPanel({ meta, onChanged }: { meta: Meta | null; onChanged: (
           setBusy(`${p.file}：逐日星级 ${Math.min(i + DAILY_CHUNK, p.daily.length)}/${p.daily.length}`);
           await reviewsApi.uploadDaily(p.shop_key, p.daily.slice(i, i + DAILY_CHUNK));
         }
+        for (let i = 0; i < Math.max(p.skuDaily.length, p.skuSpecs.length); i += DAILY_CHUNK) {
+          setBusy(`${p.file}：SKU 星级 ${Math.min(i + DAILY_CHUNK, p.skuDaily.length)}/${p.skuDaily.length}`);
+          await reviewsApi.uploadSku(p.shop_key, p.skuDaily.slice(i, i + DAILY_CHUNK), p.skuSpecs.slice(i, i + DAILY_CHUNK));
+        }
         for (let i = 0; i < p.texts.length; i += TEXT_CHUNK) {
           setBusy(`${p.file}：评价内容 ${Math.min(i + TEXT_CHUNK, p.texts.length)}/${p.texts.length}`);
           await reviewsApi.uploadTexts(p.shop_key, p.texts.slice(i, i + TEXT_CHUNK));
@@ -70,7 +74,7 @@ export function DataPanel({ meta, onChanged }: { meta: Meta | null; onChanged: (
         <div className="flex flex-wrap items-center gap-2">
           <input ref={fileRef} id="rv-files" type="file" accept=".xlsx,.xls" multiple className="hidden" onChange={(e) => pick(e.target.files)} />
           <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()} disabled={!!busy}><Upload className="h-4 w-4 mr-1" />选择抓取表</Button>
-          <Help label="抓取表格式" text="文件名「站点 YYMMDD-YYMMDD.xlsx」或「站点 ALL YYMMDD-YYMMDD.xlsx」，读 sheet「评论」。全部行按评论时间逐日统计星级，评论时间不在文件名日期段内的行不计。只存有留言或有回复的行（原文、中文译文、回复、订单号等），不存用户名和图片链接。同站点同日期段重复上传会整段替换，不会重复计数。中文译文列：表头含「翻译」或「中文」。" />
+          <Help label="抓取表格式" text="文件名「站点 YYMMDD-YYMMDD.xlsx」或「站点 ALL YYMMDD-YYMMDD.xlsx」，读 sheet「评论」。全部行按评论时间逐日统计星级，评论时间不在文件名日期段内的行不计。只存有留言或有回复的行（原文、中文译文、回复、订单号等），不存用户名和图片链接。同站点同日期段重复上传会整段替换（含 SKU 星级），评价内容按评论 ID 去重，所以新文件可以和旧文件重叠（如从 11-09 开始）。文件名结束日期写到抓取当天的前一天，避免最后一天只抓到半天。中文译文列：表头含「翻译」或「中文」。" />
           {parsed.length > 0 && <Button size="sm" onClick={upload} disabled={!!busy}>入库 {parsed.length} 个文件</Button>}
           {busy && <span className="text-xs text-muted-foreground">{busy}</span>}
         </div>
@@ -151,19 +155,29 @@ export function DataPanel({ meta, onChanged }: { meta: Meta | null; onChanged: (
   );
 }
 
+/** 手动同步：自动连续调用直到该站点今晚的商品全部跑完（每次 ≤ 约 100 秒）；可停止 */
 function SyncButton({ shop, onDone }: { shop: string; onDone: () => void }) {
-  const [busy, setBusy] = React.useState(false);
+  const [busy, setBusy] = React.useState<string | null>(null);
+  const stop = React.useRef(false);
   const run = async () => {
-    setBusy(true);
+    stop.current = false;
+    setBusy("开始…");
+    let calls = 0;
     try {
-      const r = await reviewsApi.step(shop);
-      const x = r.results[0];
-      if (x?.error) toast.error(`${shop}：${x.error}`);
-      else toast.success(x ? `${shop}：${x.idx}/${x.total}，接口调用 ${x.calls} 次${x.done ? "，已完成" : "，再点一次继续"}` : `${shop}：今晚已同步完`);
+      for (let round = 1; round <= 60 && !stop.current; round++) {
+        const r = await reviewsApi.step(shop);
+        const x = r.results[0];
+        if (!x) { toast.success(`${shop}：今晚已同步完`); break; }
+        if (x.error) { toast.error(`${shop}：${x.error}`); break; }
+        calls = x.calls;
+        setBusy(`${x.idx}/${x.total}`);
+        if (x.done) { toast.success(`${shop}：完成 ${x.total} 个商品，接口调用 ${calls} 次`); break; }
+      }
       onDone();
-    } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
+    } catch (e) { toast.error((e as Error).message); } finally { setBusy(null); }
   };
-  return <Button size="sm" variant="ghost" onClick={run} disabled={busy}>{busy ? "同步中…" : "同步"}</Button>;
+  if (busy) return <Button size="sm" variant="ghost" onClick={() => { stop.current = true; }} title="点击停止">{busy} · 停止</Button>;
+  return <Button size="sm" variant="ghost" onClick={run}>同步</Button>;
 }
 
 function ReconcileCard({ sites }: { sites: string[] }) {

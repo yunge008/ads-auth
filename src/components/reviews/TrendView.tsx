@@ -44,8 +44,14 @@ export function TrendView({ series, from, to, texts, onStars, stars }: Props) {
     { label: "差评率", help: "1–2 星条数 / 区间评价数。", v: pct(bad), d: diff(bad, pbad), fmt: (x: number) => `${(x * 100).toFixed(1)}pp`, good: false },
   ];
   const cumVals = calc.rows.map((r) => r.cumAvg).filter((v): v is number => v != null);
-  const lo = cumVals.length ? Math.max(1, Math.floor((Math.min(...cumVals, 4) - 0.05) * 10) / 10) : 1;
-  const hi = cumVals.length ? Math.min(5, Math.ceil((Math.max(...cumVals) + 0.05) * 10) / 10) : 5;
+  // 纵轴贴着数据走，小变化也看得出：上下各留 25% 余量，最少 ±0.005
+  const cMin = cumVals.length ? Math.min(...cumVals) : 4, cMax = cumVals.length ? Math.max(...cumVals) : 5;
+  const pad = Math.max(0.005, (cMax - cMin) * 0.25);
+  const lo = Math.max(1, Math.floor((cMin - pad) * 1000) / 1000);
+  const hi = Math.min(5, Math.ceil((cMax + pad) * 1000) / 1000);
+  const cumDigits = hi - lo < 0.1 ? 3 : 2;
+  // 差评率右轴：默认 3% 封顶，超过时按最大值向上取整
+  const badMax = Math.max(3, Math.ceil(Math.max(0, ...calc.rows.map((r) => (r.bad ?? 0) * 100))));
   const maxN = Math.max(1, ...calc.rows.map((r) => r.n));
   const tick = { fontSize: 11, fill: "var(--muted-foreground)" };
 
@@ -76,11 +82,11 @@ export function TrendView({ series, from, to, texts, onStars, stars }: Props) {
               <CartesianGrid vertical={false} stroke="var(--border)" />
               <XAxis dataKey="d" tick={tick} tickLine={false} axisLine={false} minTickGap={40} />
               {mode === "cum" ? (
-                <YAxis domain={[lo, hi]} tick={tick} tickLine={false} axisLine={false} tickFormatter={(v) => Number(v).toFixed(2)} />
+                <YAxis domain={[lo, hi]} tick={tick} tickLine={false} axisLine={false} tickFormatter={(v) => Number(v).toFixed(cumDigits)} width={52} />
               ) : (
                 <YAxis domain={[1, 5]} ticks={[1, 2, 3, 4, 5]} tick={tick} tickLine={false} axisLine={false} />
               )}
-              <RTooltip formatter={(v: number, _k, p) => (mode === "cum" ? [f2(v), "累计平均分"] : [`${f2(v)} · ${(p.payload as { n: number }).n} 条`, "当日平均分"])} labelClassName="text-xs" contentStyle={{ fontSize: 12 }} />
+              <RTooltip formatter={(v: number, _k, p) => (mode === "cum" ? [Number(v).toFixed(3), "累计平均分"] : [`${f2(v)} · ${(p.payload as { n: number }).n} 条`, "当日平均分"])} labelClassName="text-xs" contentStyle={{ fontSize: 12 }} />
               {mode === "cum" ? (
                 <Line dataKey="cumAvg" stroke="#2563eb" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
               ) : (
@@ -107,11 +113,11 @@ export function TrendView({ series, from, to, texts, onStars, stars }: Props) {
               <CartesianGrid vertical={false} stroke="var(--border)" />
               <XAxis dataKey="d" tick={tick} tickLine={false} axisLine={false} minTickGap={40} />
               <YAxis yAxisId="n" allowDecimals={false} tick={tick} tickLine={false} axisLine={false} />
-              <YAxis yAxisId="r" orientation="right" domain={[0, 100]} tick={tick} tickLine={false} axisLine={false} tickFormatter={(v) => `${v}%`} />
+              <YAxis yAxisId="r" orientation="right" domain={[0, badMax]} allowDataOverflow tick={tick} tickLine={false} axisLine={false} tickFormatter={(v) => `${Number(v).toFixed(badMax < 10 ? 1 : 0)}%`} />
               <RTooltip contentStyle={{ fontSize: 12 }} formatter={(v: number, k: string) => (k === "差评率" ? [`${Number(v).toFixed(1)}%`, k] : [v, k])} />
               <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
               {[5, 4, 3, 2, 1].map((s) => <Bar key={s} yAxisId="n" dataKey={`s${s}`} name={`${s}★`} stackId="a" fill={STAR_COLORS[s - 1]} isAnimationActive={false} />)}
-              <Line yAxisId="r" dataKey="bad" name="差评率" stroke="var(--foreground)" strokeWidth={1.5} dot={{ r: 2 }} connectNulls={false} isAnimationActive={false} />
+              <Line yAxisId="r" dataKey="bad" name="差评率" stroke="#dc2626" strokeWidth={1.5} dot={{ r: 2, fill: "#dc2626" }} connectNulls={false} isAnimationActive={false} />
             </ComposedChart>
           </ResponsiveContainer>
         </div>

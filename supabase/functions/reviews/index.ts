@@ -291,6 +291,8 @@ async function uploadBegin(b: Record<string, unknown>, who: string) {
   // 同站点同日期段的抓取行整体替换（同一批评价重复上传不会重复计数）
   const { error } = await db.from("review_daily").delete().eq("shop_key", key).eq("source", "crawl").gte("d", from).lte("d", to);
   if (error) throw error;
+  const { error: e1 } = await db.from("review_sku_daily").delete().eq("shop_key", key).gte("d", from).lte("d", to);
+  if (e1) throw e1;
   const { data, error: e2 } = await db.from("review_uploads").insert({
     shop_key: key, file_name: String(b.file_name ?? ""), range_from: from, range_to: to,
     rows_total: Number(b.rows_total ?? 0), rows_in_range: Number(b.rows_in_range ?? 0), rows_text: Number(b.rows_text ?? 0),
@@ -298,6 +300,18 @@ async function uploadBegin(b: Record<string, unknown>, who: string) {
   }).select("id").single();
   if (e2) throw e2;
   return { upload_id: data.id };
+}
+/** SKU 维度逐日星级（来自抓取表全部行）+ SKU 规格 */
+async function uploadSku(b: Record<string, unknown>) {
+  const key = String(b.shop_key ?? "").toUpperCase();
+  const rows = (Array.isArray(b.rows) ? b.rows : []) as { p: string; k: string; d: string; s: number[] }[];
+  const specs = (Array.isArray(b.specs) ? b.specs : []) as { p: string; k: string; spec: string }[];
+  if (rows.length > 5000 || specs.length > 5000) bad("每片最多 5000 行");
+  const daily = rows.filter((r) => r.k).map((r) => ({ shop_key: key, product_id: String(r.p), sku_id: String(r.k), d: asDate(r.d, "d"), s1: r.s[0] | 0, s2: r.s[1] | 0, s3: r.s[2] | 0, s4: r.s[3] | 0, s5: r.s[4] | 0 }));
+  if (daily.length) await upsertOrThrow("review_sku_daily", daily, "shop_key,product_id,sku_id,d");
+  const sk = specs.filter((r) => r.k).map((r) => ({ shop_key: key, product_id: String(r.p), sku_id: String(r.k), sku_spec: String(r.spec ?? "").slice(0, 200) || null }));
+  if (sk.length) await upsertOrThrow("review_skus", sk, "shop_key,product_id,sku_id");
+  return { ok: true, rows: daily.length };
 }
 async function uploadDaily(b: Record<string, unknown>) {
   const key = String(b.shop_key ?? "").toUpperCase();
@@ -412,6 +426,12 @@ Deno.serve(async (req) => {
       }
       case "upload_begin": return json(await uploadBegin(b, acc.name));
       case "upload_daily": return json(await uploadDaily(b));
+      case "upload_sku": return json(await uploadSku(b));
+      case "sku_table": {
+        const site = String(b.site ?? ""), pid = String(b.product_id ?? "");
+        if (!site || !pid) bad("site、product_id 必填");
+        return json(await rpc("review_sku_table", { p_shop: site, p_pid: pid, p_from: from(), p_to: to() }));
+      }
       case "upload_texts": return json(await uploadTexts(b));
       case "upload_end": return json(await uploadEnd(b));
     }
