@@ -55,7 +55,14 @@ type AccountRow = {
   error: string | null;
   checked_at: string | null;
   last_alerted_at: string | null;
+  // GMV Max 换户（Edge Function 按站点识别；旧版函数没有这些字段时按普通户处理）
+  site?: string | null;
+  site_role?: "normal" | "current" | "switched_out" | "idle";
+  switch_date?: string | null;
+  switch_day?: number | null;
+  replaced_by?: string | null;
 };
+const isFolded = (a: AccountRow) => a.site_role === "switched_out" || a.site_role === "idle";
 type Settings = {
   threshold_days: number;
   abnormal_ratio: number;
@@ -199,7 +206,19 @@ export function BalanceAlertPanel() {
 
   const X = settings?.threshold_days ?? 3;
   const q = filter.trim().toLowerCase();
-  const rows = [...accounts]
+  const visible = [...accounts].filter(
+    (a) =>
+      !q ||
+      [a.advertiser_id, a.advertiser_name, a.country, ...a.connections].some((v) =>
+        String(v ?? "")
+          .toLowerCase()
+          .includes(q),
+      ),
+  );
+  // 已切出 / 未在跑的户：不显示余额、不参与试算，放进默认折叠的分组
+  const folded = visible.filter(isFolded);
+  const rows = visible
+    .filter((a) => !isFolded(a))
     .filter(
       (a) =>
         !q ||
@@ -232,14 +251,16 @@ export function BalanceAlertPanel() {
   const planActive = T != null || Object.keys(overrides).length > 0;
   const runBalance = () => {
     // 用全量账户（不受搜索过滤影响）做平衡
-    const all = accounts.map((a) => ({
-      id: a.advertiser_id,
-      enabled: a.enabled,
-      balance: a.balance,
-      avg: a.avg_daily_spend,
-      daysLeft: a.days_left,
-      currency: a.currency,
-    }));
+    const all = accounts
+      .filter((a) => !isFolded(a))
+      .map((a) => ({
+        id: a.advertiser_id,
+        enabled: a.enabled,
+        balance: a.balance,
+        avg: a.avg_daily_spend,
+        daysLeft: a.days_left,
+        currency: a.currency,
+      }));
     const allPlan = new Map<string, PlanRow>(
       all.map((p) => {
         const o = overrides[p.id];
@@ -260,7 +281,7 @@ export function BalanceAlertPanel() {
     toast.success(`已按 ${BALANCE_STEP} 的倍数平衡 ${res.size} 户（负数=转出）`);
   };
   const alertCount = accounts.filter(
-    (a) => a.enabled && a.days_left != null && a.days_left < X,
+    (a) => !isFolded(a) && a.enabled && a.days_left != null && a.days_left < X,
   ).length;
 
   return (
@@ -361,7 +382,7 @@ export function BalanceAlertPanel() {
                 )}
               </div>
             </div>
-            <div className="flex gap-2 ml-auto">
+            <div className="flex flex-wrap gap-2 ml-auto">
               <Input
                 placeholder="搜索账户/ID/国家"
                 value={filter}
@@ -463,8 +484,26 @@ export function BalanceAlertPanel() {
                             />
                           </TableCell>
                           <TableCell className="max-w-[260px]">
-                            <div className="font-medium truncate">
-                              {a.advertiser_name ?? a.advertiser_id}
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="font-medium truncate">
+                                {a.advertiser_name ?? a.advertiser_id}
+                              </span>
+                              {a.site_role === "current" && a.switch_day != null && (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Badge
+                                      variant="secondary"
+                                      tabIndex={0}
+                                      className="shrink-0 whitespace-nowrap px-1.5 py-0 text-[11px] font-normal"
+                                    >
+                                      换户第{a.switch_day}天
+                                    </Badge>
+                                  </TooltipTrigger>
+                                  <TooltipContent className="text-xs">
+                                    {a.switch_date} 换户，当天不计日均，从次日整天开始算
+                                  </TooltipContent>
+                                </Tooltip>
+                              )}
                             </div>
                             <div className="text-xs text-muted-foreground">
                               {a.advertiser_id} · {a.connections.join("/")}
@@ -547,6 +586,36 @@ export function BalanceAlertPanel() {
               </TableBody>
             </Table>
           </div>
+          {folded.length > 0 && (
+            <details className="border rounded-md text-sm">
+              <summary className="cursor-pointer select-none px-3 py-2 text-muted-foreground">
+                已切出 / 未在跑（{folded.length}）
+              </summary>
+              <ul className="divide-y">
+                {folded.map((a) => (
+                  <li
+                    key={a.advertiser_id}
+                    className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-1.5"
+                  >
+                    <Switch
+                      checked={a.enabled}
+                      onCheckedChange={(v) => toggle(a.advertiser_id, v)}
+                      aria-label={`预警开关：${a.advertiser_name ?? a.advertiser_id}`}
+                    />
+                    <span className="min-w-0 truncate">{a.advertiser_name ?? a.advertiser_id}</span>
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">
+                      {a.country ?? a.site ?? ""}
+                    </span>
+                    <span className="w-full pl-12 text-xs text-muted-foreground sm:ml-auto sm:w-auto sm:pl-0">
+                      {a.site_role === "switched_out"
+                        ? `${a.switch_date?.slice(5) ?? ""} 换户 → ${a.replaced_by ?? "—"}`
+                        : `同站点 ${a.replaced_by ?? "—"} 在跑`}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
         </CardContent>
       </Card>
     </TooltipProvider>

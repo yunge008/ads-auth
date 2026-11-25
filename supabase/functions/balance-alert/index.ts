@@ -22,6 +22,7 @@ import { ttGet } from "../_shared/tiktok.ts";
 import { fetchReport } from "../_shared/gmv-max-report.ts";
 import { ecoPing } from "../_shared/eco.ts";
 import {
+  classifySwitch,
   computeSpendStats,
   DEFAULT_ABNORMAL_RATIO,
   daysLeft,
@@ -31,7 +32,9 @@ import {
   overallLevel,
   pickAvailableBalance,
   shouldAlert,
+  siteOf,
   spendWindow,
+  switchDayN,
 } from "../_shared/balance-alert.ts";
 
 const TIME_BUDGET_MS = 100_000;
@@ -284,7 +287,8 @@ async function actionList() {
     arr.push(c.label);
     labels.set(String(id), arr);
   }
-  const accounts = allAdvertiserIds(conns).map((id) => {
+  const knownSites: string[] = [...new Set<string>((ctry ?? []).map((c: Record<string, unknown>) => String(c.country ?? "")).filter(Boolean))];
+  const base = allAdvertiserIds(conns).map((id) => {
     const s = (snapMap.get(id) ?? {}) as Record<string, unknown>;
     const c = (ctryMap.get(id) ?? {}) as Record<string, unknown>;
     return {
@@ -306,6 +310,42 @@ async function actionList() {
       checked_at: s.checked_at ?? null,
       last_alerted_at: s.last_alerted_at ?? null,
     };
+  });
+  // GMV Max 换户识别（规则见 _shared/balance-alert.ts classifySwitch）：按站点比较各户窗口内日耗
+  type DailyRow = { date: string; spend: number; valid: boolean; basic: number | null; gmv_max: number | null };
+  const sw = classifySwitch(base.map((a) => ({
+    id: a.advertiser_id,
+    site: siteOf(a.country, a.advertiser_name, knownSites),
+    daily: Array.isArray(a.daily) ? (a.daily as DailyRow[]) : null,
+  })));
+  const nameById = new Map(base.map((a) => [a.advertiser_id, a.advertiser_name ?? a.advertiser_id]));
+  const accounts = base.map((a) => {
+    const info = sw.get(a.advertiser_id)!;
+    const extra = {
+      site: info.site,
+      site_role: info.role,
+      switch_date: info.switch_date,
+      switch_day: info.switch_date && a.window_end ? switchDayN(info.switch_date, String(a.window_end)) : null,
+      replaced_by: info.replaced_by ? nameById.get(info.replaced_by) ?? info.replaced_by : null,
+    };
+    // 新户：换户当天不计，从次日整天开始算日均与可用天数
+    if (info.role === "current" && Array.isArray(a.daily)) {
+      const daily = a.daily as DailyRow[];
+      const st = computeSpendStats(daily.map((d) => d.date), new Map(daily.map((d) => [d.date, Number(d.spend) || 0])), settings.abnormal_ratio, info.switch_date);
+      const validOf = new Map(st.days.map((d) => [d.date, d.valid]));
+      return {
+        ...a, ...extra,
+        avg_daily_spend: st.avg_daily_spend,
+        valid_days: st.valid_days,
+        days_left: daysLeft(a.balance, st.avg_daily_spend),
+        daily: daily.map((d) => ({ ...d, valid: validOf.get(d.date) ?? false })),
+      };
+    }
+    // 旧户 / 未在跑的户：不显示余额与可用天数
+    if (info.role === "switched_out" || info.role === "idle") {
+      return { ...a, ...extra, balance: null, days_left: null };
+    }
+    return { ...a, ...extra };
   });
   return { settings, accounts };
 }
@@ -443,18 +483,20 @@ async function actionRefresh(body: Record<string, unknown>) {
 
 // 飞书消息：交互卡片（群机器人 webhook 支持 msg_type=interactive）。
 // 每次都发（无预警也发完整列表）；卡片头颜色：有户用光 → 红，有户 < X → 黄，否则绿。
-// 列表 = 开了监控的户，按正常日均倒序；列：账号 / 余额 / 日耗 / 可用天数（可用天数按 dayLevel 着色）。
+// 列表 = 开了监控、且不是已切出 / 未在跑的户，按正常日均倒序；列：账号 / 余额 / 日耗 / 可用天数（可用天数按 dayLevel 着色）。
 async function actionBuildMessage(_body: Record<string, unknown>) {
   const { settings, accounts } = await actionList();
   const X = settings.threshold_days;
   const enabled = accounts
-    .filter((a) => a.enabled)
+    .filter((a) => a.enabled && a.site_role !== "switched_out" && a.site_role !== "idle")
     .sort((a, b) => (b.avg_daily_spend ?? -1) - (a.avg_daily_spend ?? -1));
   if (!enabled.length) return { send: false, alerts: 0, broken: 0 };
   const hits = enabled.filter((a) => shouldAlert(true, a.days_left, X));
   const usedUp = enabled.filter((a) => a.days_left != null && a.days_left <= 0);
   const idle = (a: (typeof accounts)[number]) =>
     Array.isArray(a.daily) && (a.daily as Array<{ spend: number }>).every((d) => !(d.spend > 0));
+  // 已切出的旧户：换户日在 10 天窗口内时折叠提示（不显示余额），滑出窗口后不再出现
+  const switchedOut = accounts.filter((a) => a.enabled && a.site_role === "switched_out");
   const broken = enabled.filter((a) => a.days_left == null && a.error && !idle(a));
   const level = overallLevel(enabled.map((a) => a.days_left), X);
 
@@ -501,7 +543,8 @@ async function actionBuildMessage(_body: Record<string, unknown>) {
     row(["**账号**", "**余额**", "**日耗**", "**可用天数**"], true),
     ...enabled.map((a) =>
       row([
-        a.advertiser_name ?? a.advertiser_id,
+        (a.advertiser_name ?? a.advertiser_id) +
+          (a.site_role === "current" && a.switch_day ? `\n<font color='grey'>换户第${a.switch_day}天</font>` : ""),
         a.balance == null ? "—" : `${fmt(a.balance)}${cur(a.currency)}`,
         a.avg_daily_spend == null ? "0.00" : fmt(a.avg_daily_spend),
         dayCell(a.days_left),
@@ -515,11 +558,19 @@ async function actionBuildMessage(_body: Record<string, unknown>) {
         broken.slice(0, 8).map((a) => `- ${a.advertiser_name ?? a.advertiser_id}：${String(a.error).slice(0, 80)}`).join("\n"),
     });
   }
+  if (switchedOut.length) {
+    elements.push({ tag: "hr" }, {
+      tag: "markdown",
+      content: `<font color='grey'>**已切出旧户 ${switchedOut.length} 个**（换户 10 天内提示，不计余额与可用天数）\n` +
+        switchedOut.map((a) => `${a.advertiser_name ?? a.advertiser_id} → ${a.replaced_by ?? "—"}（${String(a.switch_date ?? "").slice(5)} 换户）`).join("\n") +
+        "</font>",
+    });
+  }
   elements.push({
     tag: "note",
     elements: [{
       tag: "plain_text",
-      content: `🔴 可用 < ${X} 天　🟡 ${X}~${X + NEAR_DAYS} 天　🟢 ≥ ${X + NEAR_DAYS} 天｜日耗 = 近10个完整自然日正常日均（剔除日耗 0 / 低于中位数 ${Math.round(settings.abnormal_ratio * 100)}% 的天）`,
+      content: `🔴 可用 < ${X} 天　🟡 ${X}~${X + NEAR_DAYS} 天　🟢 ≥ ${X + NEAR_DAYS} 天｜日耗 = 近10个完整自然日正常日均（剔除日耗 0 / 低于中位数 ${Math.round(settings.abnormal_ratio * 100)}% 的天；换户当天不计）`,
     }],
   });
 

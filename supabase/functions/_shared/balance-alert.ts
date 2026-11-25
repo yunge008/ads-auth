@@ -54,12 +54,15 @@ export function computeSpendStats(
   dates: string[],
   spendByDate: Map<string, number>,
   abnormalRatio = DEFAULT_ABNORMAL_RATIO,
+  /** 换户日：该日及之前的天一律不计（换户当天只有半天），从次日整天开始算 */
+  excludeThrough: string | null = null,
 ): SpendStats {
   const raw = dates.map((date) => ({ date, spend: Math.max(0, Number(spendByDate.get(date) ?? 0) || 0) }));
-  const positives = raw.filter((d) => d.spend > 0).map((d) => d.spend);
+  const counted = (d: { date: string }) => !excludeThrough || d.date > excludeThrough;
+  const positives = raw.filter((d) => d.spend > 0 && counted(d)).map((d) => d.spend);
   const med = median(positives);
   const threshold = med == null ? null : med * abnormalRatio;
-  const days = raw.map((d) => ({ ...d, valid: d.spend > 0 && threshold != null && d.spend >= threshold }));
+  const days = raw.map((d) => ({ ...d, valid: counted(d) && d.spend > 0 && threshold != null && d.spend >= threshold }));
   const valid = days.filter((d) => d.valid);
   const avg = valid.length ? valid.reduce((s, d) => s + d.spend, 0) / valid.length : null;
   return {
@@ -149,4 +152,72 @@ export function overallLevel(daysList: Array<number | null>, X: number): "red" |
   if (daysList.some((d) => d != null && d <= 0)) return "red";
   if (daysList.some((d) => d != null && d < X)) return "yellow";
   return "green";
+}
+
+// ---------- GMV Max 换户识别（2026-11-25 负责人定） ----------
+// 一个站点同一时间只有一个户在跑。按站点看窗口内每户每天日耗：
+//   当前户 = 最后有消耗日期最晚的户（并列取开始消耗更晚的，即新户）；
+//   其他户若之后没有消耗（最后消耗日 ≤ 当前户开始消耗日，或取不到数据/没权限）= 不在跑；
+//   当前户的首个消耗日不是窗口第一天（之前窗口内全是 0）= 换户，首个消耗日 = 换户日。
+// 有换户：当前户 role=current（换户日当天不计日均）；不在跑的户 role=switched_out（卡片/页面折叠提示，不显示余额）。
+//   换户日滑出 10 天窗口后自然不再识别，提示随之消失。
+// 无换户：不在跑的户 role=idle（站点里另有户在跑，本户近 10 天没消耗），不进卡片，页面折叠。
+// 不在跑的户之后又有消耗（最后消耗日 > 当前户开始日）→ 不判定，按普通户展示。
+export type SwitchRole = "normal" | "current" | "switched_out" | "idle";
+export type SwitchInfo = { role: SwitchRole; site: string | null; switch_date: string | null; replaced_by: string | null };
+export type SwitchInput = { id: string; site: string | null; daily: Array<{ date: string; spend: number }> | null };
+
+/** 站点：优先 advertiser_countries.country；没有时按户名结尾「-站点」匹配已知站点（取最长） */
+export function siteOf(country: string | null | undefined, name: string | null | undefined, knownSites: string[]): string | null {
+  if (country && country.trim()) return country.trim();
+  const n = String(name ?? "").toUpperCase();
+  if (!n) return null;
+  const hit = knownSites
+    .filter((c) => c && n.endsWith(`-${c.toUpperCase()}`))
+    .sort((a, b) => b.length - a.length)[0];
+  return hit ?? null;
+}
+
+export function classifySwitch(accts: SwitchInput[]): Map<string, SwitchInfo> {
+  const out = new Map<string, SwitchInfo>();
+  const bySite = new Map<string, SwitchInput[]>();
+  for (const a of accts) {
+    out.set(a.id, { role: "normal", site: a.site, switch_date: null, replaced_by: null });
+    if (!a.site) continue;
+    const arr = bySite.get(a.site) ?? [];
+    arr.push(a);
+    bySite.set(a.site, arr);
+  }
+  for (const [site, list] of bySite) {
+    if (list.length < 2) continue;
+    const span = (a: SwitchInput) => {
+      const pos = (a.daily ?? []).filter((d) => Number(d.spend) > 0).map((d) => d.date).sort();
+      return { first: pos[0] ?? null, last: pos[pos.length - 1] ?? null, start: (a.daily ?? []).map((d) => d.date).sort()[0] ?? null };
+    };
+    const spans = new Map(list.map((a) => [a.id, span(a)]));
+    const spenders = list.filter((a) => spans.get(a.id)!.last);
+    if (!spenders.length) continue;
+    const cur = [...spenders].sort((a, b) => {
+      const x = spans.get(a.id)!, y = spans.get(b.id)!;
+      return (y.last! > x.last! ? 1 : y.last! < x.last! ? -1 : 0) || (y.first! > x.first! ? 1 : y.first! < x.first! ? -1 : 0);
+    })[0];
+    const c = spans.get(cur.id)!;
+    const stopped = list.filter((a) => {
+      if (a.id === cur.id) return false;
+      const l = spans.get(a.id)!.last;
+      return !l || l <= c.first!;
+    });
+    if (!stopped.length) continue;
+    const switched = !!c.start && c.first! > c.start;
+    out.set(cur.id, { role: switched ? "current" : "normal", site, switch_date: switched ? c.first : null, replaced_by: null });
+    for (const a of stopped) {
+      out.set(a.id, { role: switched ? "switched_out" : "idle", site, switch_date: switched ? c.first : null, replaced_by: cur.id });
+    }
+  }
+  return out;
+}
+
+/** 「换户第 N 天」：换户日 = 第 1 天，今天（窗口结束日的次日）= 第 N 天；整天数据天数 = N - 2 */
+export function switchDayN(switchDate: string, windowEnd: string): number {
+  return Math.round((Date.parse(windowEnd) - Date.parse(switchDate)) / 86400_000) + 2;
 }
