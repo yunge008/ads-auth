@@ -6,11 +6,15 @@
 // 范围：tts_shops.daily_sync = true 的店铺（migration 20261125120000 先开 PH、TH）。
 // 每店每部分循环调 Edge Function tts-export kind=sync 直到 finished 或本轮时间用完（下轮从 tts_sync_state.cursor 续跑）。
 // 有报错，或接口出现口径表未登记且非 0 的字段 → 发飞书（FEISHU_BOT_WEBHOOK）；正常不发消息。
+// 空间监控（负责人 2026-11-25：明细永久保存，到 80% 提示）：每轮查数据库大小，≥ 上限 80% 时发飞书，每天最多一次。
+//   上限 = 环境变量 DB_DISK_LIMIT_BYTES，未设时按 ARCHITECTURE 记录「约 2.5GB = 数据盘 40%」推算 6.25GB（⚠️ 推算，未核验）。
 import { isCronCaller } from "@/lib/cron-caller.server";
 import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
 
 const HARD_BUDGET_MS = 8 * 60 * 1000;
+const DISK_LIMIT_BYTES = Number(process.env.DB_DISK_LIMIT_BYTES) || 6.25e9;
+const DISK_ALERT_RATIO = 0.8;
 const PARTS = ["orders", "finance"] as const;
 
 const jsonRes = (body: unknown, status = 200) =>
@@ -90,13 +94,38 @@ export const Route = createFileRoute("/api/public/hooks/tts-sync-cron")({
             });
           }
         }
+        // 空间监控：≥ 80% 每天提醒一次（状态存 tts_sync_state shop_id='_global' kind='db_size'）
+        let dbUsage: { bytes: number; ratio: number } | null = null;
+        try {
+          const { data: bytes } = await db.rpc("db_size_bytes" as never);
+          if (typeof bytes === "number" || typeof bytes === "string") {
+            const b = Number(bytes);
+            dbUsage = { bytes: b, ratio: b / DISK_LIMIT_BYTES };
+            const today = new Date().toISOString().slice(0, 10);
+            const { data: st } = await db.from("tts_sync_state").select("cursor").eq("shop_id", "_global").eq("kind", "db_size").maybeSingle();
+            const lastAlert = (st?.cursor as { last_alert_date?: string } | null)?.last_alert_date;
+            const alert = dbUsage.ratio >= DISK_ALERT_RATIO && lastAlert !== today;
+            if (alert) {
+              await postFeishu("数据库空间告警", [
+                `当前约 ${(b / 1e9).toFixed(2)} GB，占上限 ${(DISK_LIMIT_BYTES / 1e9).toFixed(2)} GB 的 ${(dbUsage.ratio * 100).toFixed(0)}%（阈值 80%）。`,
+                "请在 Lovable Cloud 查看实际磁盘占用，并决定清理或扩容（订单/财务明细按负责人要求永久保存）。",
+              ]);
+            }
+            await db.from("tts_sync_state").upsert({
+              shop_id: "_global", kind: "db_size", last_run_at: new Date().toISOString(),
+              cursor: { bytes: b, limit: DISK_LIMIT_BYTES, ratio: Number(dbUsage.ratio.toFixed(4)), last_alert_date: alert ? today : (lastAlert ?? null) },
+            }, { onConflict: "shop_id,kind" });
+          }
+        } catch (e) {
+          console.error("[tts-sync-cron] 空间检查失败", (e as Error).message);
+        }
         if (problems.length) {
           await postFeishu("TikTok Shop 订单/财务入库：需处理", [
             ...problems.slice(0, 30),
             ...(problems.length > 30 ? [`……共 ${problems.length} 条`] : []),
           ]);
         }
-        return jsonRes({ ok: problems.length === 0, report, problems });
+        return jsonRes({ ok: problems.length === 0, report, problems, db_usage: dbUsage });
       },
     },
   },

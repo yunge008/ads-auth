@@ -857,6 +857,22 @@ function stripBuyerPii(o: Order): Order {
     recipient_address: addr ? Object.fromEntries(Object.entries(addr).filter(([k]) => ADDR_KEEP.has(k))) : undefined,
   } as Order;
 }
+
+/** 入库瘦身（负责人 2026-11-25：按「去掉明确不需要的字段」处理，不做白名单；数字/编号字段一律保留）。
+ *  去掉：商品图片链接、商品标题（有 product_id 可从商品目录查回）、商品行上与订单顶层重复的物流单号/物流商；
+ *  省市区条目里重复的 iso_code / address_level_name。 */
+const LINE_ITEM_DROP = new Set(["sku_image", "product_name", "tracking_number", "shipping_provider_name", "shipping_provider_id"]);
+const DISTRICT_DROP = new Set(["iso_code", "address_level_name"]);
+function slimOrder(o: Order): Order {
+  const addr = o.recipient_address as { district_info?: Array<Record<string, unknown>> } | undefined;
+  return {
+    ...o,
+    line_items: (o.line_items ?? []).map((li) => Object.fromEntries(Object.entries(li).filter(([k]) => !LINE_ITEM_DROP.has(k)))) as LineItem[],
+    recipient_address: addr
+      ? { ...addr, district_info: addr.district_info?.map((d) => Object.fromEntries(Object.entries(d).filter(([k]) => !DISTRICT_DROP.has(k)))) }
+      : undefined,
+  } as Order;
+}
 const nonZero = (v: unknown) => (typeof v === "number" || typeof v === "string") && v !== "" && Number(v) !== 0 && isFinite(Number(v));
 
 // —— 未登记字段检测（不静默：负责人 2026-11-25 要求接口/表头列项变化必须提示）——
@@ -959,7 +975,7 @@ async function syncOrders(shop: Shop, started: number) {
       return {
         shop_id: shop.shop_id, order_id: o.id, status: o.status ?? null,
         create_time: iso(o.create_time), update_time: iso((o as { update_time?: number }).update_time),
-        raw: prune(stripBuyerPii(o)), returns: ret?.length ? ret : null,
+        raw: prune(slimOrder(stripBuyerPii(o))), returns: ret?.length ? ret : null,
         synced_at: new Date().toISOString(),
       };
     });
