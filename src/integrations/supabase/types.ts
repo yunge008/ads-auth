@@ -2382,6 +2382,63 @@ export type Database = {
         }
         Relationships: []
       }
+      review_sku_daily: {
+        Row: {
+          d: string
+          product_id: string
+          s1: number
+          s2: number
+          s3: number
+          s4: number
+          s5: number
+          shop_key: string
+          sku_id: string
+        }
+        Insert: {
+          d: string
+          product_id: string
+          s1?: number
+          s2?: number
+          s3?: number
+          s4?: number
+          s5?: number
+          shop_key: string
+          sku_id: string
+        }
+        Update: {
+          d?: string
+          product_id?: string
+          s1?: number
+          s2?: number
+          s3?: number
+          s4?: number
+          s5?: number
+          shop_key?: string
+          sku_id?: string
+        }
+        Relationships: []
+      }
+      review_skus: {
+        Row: {
+          product_id: string
+          shop_key: string
+          sku_id: string
+          sku_spec: string | null
+        }
+        Insert: {
+          product_id: string
+          shop_key: string
+          sku_id: string
+          sku_spec?: string | null
+        }
+        Update: {
+          product_id?: string
+          shop_key?: string
+          sku_id?: string
+          sku_spec?: string | null
+        }
+        Relationships: []
+      }
       review_snapshot: {
         Row: {
           d: string
@@ -3961,6 +4018,10 @@ export type Database = {
       review_products_fill_sku: { Args: never; Returns: number }
       review_series: {
         Args: { p_from: string; p_q?: string; p_shops: string[]; p_to: string }
+        Returns: Json
+      }
+      review_sku_table: {
+        Args: { p_from: string; p_pid: string; p_shop: string; p_to: string }
         Returns: Json
       }
       review_table: {
