@@ -377,3 +377,4 @@
 2026-11-25 | lovable | [1125.283] 重新部署 balance-alert（main 12baf94，_shared/balance-alert.ts 一并打包，上线 1125.278 的 GMV Max 换户识别）：source_sha256 1851c0c8…da4b11，线上直接调用返回 401 鉴权提示，正常应答。未改代码、未跑 migration、未动其他函数。 | 仅部署，无文件改动 |
 2026-11-25 | claude | [1125.284] 余额预警飞书卡片底部说明拆成两行（颜色图例 / 日耗口径）。待部署 balance-alert。 | supabase/functions/balance-alert/index.ts、src/lib/version.ts、docs/{PLAN,WORKLOG}.md
 2026-11-25 | lovable | [1125.285] 重新部署 balance-alert（main a36c24b，_shared/balance-alert.ts 一并打包，上线 1125.284 的飞书卡片底部说明拆两行）：source_sha256 607f666e…8db6d4，线上直接调用返回 401 鉴权提示，正常应答。未改代码、未跑 migration、未动其他函数。 | 仅部署，无文件改动 |
+2026-11-25 | lovable | [1125.286] 重新部署 bc-list-advertisers（main f1cd269，上线 1125.282 的授权页账户名丢失修复：advertiser/info 整批失败逐户重试、跨连接取名、库缓存兜底）：source_sha256 03250ea9…6120dce4，线上直接调用返回 401 鉴权提示，正常应答。未改代码、未跑 migration、未动其他函数。设置页需登录，页面刷新核验由负责人进行。 | 仅部署，无文件改动 |
