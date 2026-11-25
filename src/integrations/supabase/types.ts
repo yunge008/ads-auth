@@ -2382,6 +2382,42 @@ export type Database = {
         }
         Relationships: []
       }
+      review_snapshot: {
+        Row: {
+          d: string
+          fetched_at: string
+          product_id: string
+          s1: number
+          s2: number
+          s3: number
+          s4: number
+          s5: number
+          shop_key: string
+        }
+        Insert: {
+          d: string
+          fetched_at?: string
+          product_id: string
+          s1?: number
+          s2?: number
+          s3?: number
+          s4?: number
+          s5?: number
+          shop_key: string
+        }
+        Update: {
+          d?: string
+          fetched_at?: string
+          product_id?: string
+          s1?: number
+          s2?: number
+          s3?: number
+          s4?: number
+          s5?: number
+          shop_key?: string
+        }
+        Relationships: []
+      }
       review_texts: {
         Row: {
           content: string | null
@@ -3910,6 +3946,7 @@ export type Database = {
         Args: { p_q: string; p_shops: string[]; p_to: string }
         Returns: {
           d: string
+          init: boolean
           orders: number
           product_id: string
           rated: boolean
