@@ -6,7 +6,7 @@
 //   享受商家折扣后的退款小计 = refund_subtotal_before_discount_amount + seller_discount_refund_amount
 //   总费用 = fee_tax_amount + shipping_cost_amount
 // 结算日期 = statement_time（UTC）的日期 + 1 天（60/60 张结算单验证；接口 statement_time 全为 UTC 0 点）。
-// 新站点接入时须用该站点手工表重跑一次反推（见 docs/AUTO_DATA_PLAN.md），未登记字段由入库同步告警。
+// 列名按站点不同（REGION_LABELS）。新站点接入时须用该站点手工表重跑一次反推（见 docs/AUTO_DATA_PLAN.md），未登记字段由入库同步告警。
 // SKU ID / 数量：接口为订单维度，留空；汇总计算按 finance-order 现有「缺 SKU 时按订单号展开订单表 SKU 行」规则处理（待对账验证）。
 
 export type FinCell = string | number | null;
@@ -54,6 +54,8 @@ export const FIN_FIELD_MAP: Array<[string, string]> = [
   ["品牌疯狂优惠/秒杀服务费", "fee_tax_breakdown.fee.flash_sales_service_fee_amount"],
   ["电商增长服务费", "fee_tax_breakdown.fee.dynamic_commission_amount"],
   ["基础设施费", "fee_tax_breakdown.fee.vn_fix_infrastructure_fee"],
+  ["商家成长服务费", "fee_tax_breakdown.fee.seller_growth_fee_amount"],
+  ["超级优惠券服务费", "fee_tax_breakdown.fee.voucher_xtra_service_fee_amount"],
   ["SFP 服务费", "fee_tax_breakdown.fee.sfp_service_fee_amount"],
   ["调整金额", "adjustment_amount"],
   ["客户付款", "supplementary_component.customer_payment_amount"],
@@ -67,12 +69,28 @@ export const FIN_FIELD_MAP: Array<[string, string]> = [
   ["商家运费折扣", "shipping_cost_breakdown.supplementary_component.seller_shipping_fee_discount_amount"],
 ];
 
-export const FIN_EXPORT_COLUMNS = [
+/**
+ * 同一接口字段在不同站点后台表里列名不同（反推结果）。列名决定 finance-order 归到哪一列，不能混用：
+ * PH 的「物流服务费」= dynamic_commission_amount，finance-order 归 V（SFP）；TH 同字段叫「电商增长服务费」，不归 V。
+ * PH：2026-08～10 共 63198 笔交易逐笔比对，100% 一致。PH2/PHL 未核验，接入时须重跑反推。
+ */
+const REGION_LABELS: Record<string, Record<string, string>> = {
+  PH: {
+    "fee_tax_breakdown.fee.dynamic_commission_amount": "物流服务费",
+    "fee_tax_breakdown.fee.vn_fix_infrastructure_fee": "订单处理手续费",
+  },
+};
+const fieldMap = (region?: string): Array<[string, string]> =>
+  FIN_FIELD_MAP.map(([c, p]) => [REGION_LABELS[region ?? ""]?.[p] ?? c, p]);
+
+export const finExportColumns = (region?: string) => [
   "结算日期", "结算单 ID", "货币", "交易类型", "订单ID/调整单ID", "SKU ID", "数量", "订单创建时间",
   "享受商家折扣后小计", "享受商家折扣后的退款小计", "总费用",
-  ...FIN_FIELD_MAP.map(([c]) => c),
+  ...fieldMap(region).map(([c]) => c),
   "相关订单 ID",
 ];
+/** TH 列名（默认） */
+export const FIN_EXPORT_COLUMNS = finExportColumns();
 
 /** 结算日期：statement_time（UTC 秒）日期 + 1 天，格式 YYYY/MM/DD（与后台导出一致） */
 export function statementDate(statementTimeIso: string | null): string {
@@ -86,6 +104,7 @@ export function financeRow(
   tx: { statement_id: string; statement_time: string | null; order_create_time?: string | null; raw: Tx },
   currency: string,
   localOffsetHours: number,
+  region?: string,
 ): FinCell[] {
   const t = tx.raw;
   const type = String(t.type ?? "ORDER");
@@ -107,6 +126,6 @@ export function financeRow(
     "总费用": r2(get(t, "fee_tax_amount") + get(t, "shipping_cost_amount")),
     "相关订单 ID": isOrder ? String(t.order_id ?? "") : String(t.adjustment_order_id ?? t.associated_order_id ?? t.order_id ?? ""),
   };
-  for (const [col, path] of FIN_FIELD_MAP) rec[col] = r2(get(t, path));
-  return FIN_EXPORT_COLUMNS.map((c) => rec[c] ?? null);
+  for (const [col, path] of fieldMap(region)) rec[col] = r2(get(t, path));
+  return finExportColumns(region).map((c) => rec[c] ?? null);
 }

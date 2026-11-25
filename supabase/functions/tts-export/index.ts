@@ -328,7 +328,7 @@ const FIN_MAP: Array<[string, string]> = [
   ["商家折扣退款", "r.seller_discount_refund_amount"], ["总费用", "calc.total_fee"],
   ["交易手续费", "f.transaction_fee_amount"], ["TikTok Shop 佣金费", "f.platform_commission_amount"], ["商家运费", "top.shipping_cost_amount"],
   ["实际运费", "s.actual_shipping_fee_amount"], ["平台运费减免", "sx.platform_shipping_fee_discount_amount"],
-  ["买家支付运费", "s.customer_paid_shipping_fee_amount"], ["实际退货运费", "s.return_shipping_fee_amount"],
+  ["买家支付运费", "sx.customer_shipping_fee"], ["实际退货运费", "s.return_shipping_fee_amount"],
   ["客户运费退款", "sx.refunded_customer_shipping_fee_amount"], ["运费补贴", "sx.shipping_fee_subsidy_amount"],
   ["Guarantee program reimbursement", "s.shipping_fee_guarantee_reimbursement"],
   ["联盟佣金", "f.affiliate_commission_amount"], ["联盟服务商佣金", "f.affiliate_partner_commission_amount"],
@@ -344,6 +344,20 @@ const FIN_MAP: Array<[string, string]> = [
   ["GMV Max 广告费", "f.gmv_max_ad_fee_amount"], ["Guarantee program fee", "f.shipping_fee_guarantee_service_fee"],
   ["调整金额", "top.adjustment_amount"],
 ];
+// 同一接口字段各站点后台列名不同（2026-11-25 用手工财务表逐笔反推：TH 35549 笔、PH 63198 笔 100% 一致）。
+// PH：物流服务费 = f.dynamic_commission_amount（finance-order 归 V/SFP）、订单处理手续费 = f.vn_fix_infrastructure_fee；
+//   原先取 s.logistics_service_fee / f.fee_per_item_sold_amount，PH 数据里这两个字段从不出现 → 两列恒空（上轮遗漏）。
+// TH：同两个字段叫 电商增长服务费 / 基础设施费，原先导出页没有这两列（上轮遗漏）。其他站点未核验，沿用原列名并补这两列。
+const PH_FIN_PATH: Record<string, string> = { "物流服务费": "f.dynamic_commission_amount", "订单处理手续费": "f.vn_fix_infrastructure_fee" };
+// TH 另缺：进口关税和增值税（finance-order 一级列「关税」来源）、PIT 前联盟佣金。
+// 买家支付运费：原取 s.customer_paid_shipping_fee_amount（TH 35345/35549 笔一致、PH 无此字段），改 sx.customer_shipping_fee（两站点 100%）。
+const NON_PH_EXTRA: Array<[string, string]> = [
+  ["电商增长服务费", "f.dynamic_commission_amount"], ["基础设施费", "f.vn_fix_infrastructure_fee"],
+  ["进口关税和增值税", "t.import_vat_amount"], ["扣除个人所得税（PIT）前的联盟佣金", "f.affiliate_commission_amount_before_pit"],
+];
+const isPhRegion = (shop: Shop) => (shop.region ?? "").toUpperCase().startsWith("PH");
+const finMap = (shop: Shop): Array<[string, string]> =>
+  isPhRegion(shop) ? FIN_MAP.map(([c, p]) => [c, PH_FIN_PATH[c] ?? p]) : [...FIN_MAP.slice(0, -1), ...NON_PH_EXTRA, FIN_MAP[FIN_MAP.length - 1]];
 const FIN_TAIL: Array<[string, string]> = [
   ["客户付款", "x.customer_payment_amount"], ["客户退款", "x.customer_refund_amount"],
   ["商家共同赞助优惠券折扣", "x.seller_cofunded_discount_amount"], ["商家共同赞助优惠券折扣退款", "x.seller_cofunded_discount_refund_amount"],
@@ -379,7 +393,7 @@ function finRow(t: Tx, stmt: { id: string; time: number; currency: string }, sho
     fmtStatementDate(stmt.time), stmt.id, stmt.currency, TX_TYPE[t.type ?? ""] ?? (t.type ?? ""),
     isOrder ? (t.order_id ?? "") : (t.adjustment_id ?? t.id ?? ""), "", null, "", "", num(t.settlement_amount), num(t.revenue_amount),
   ];
-  const mid = FIN_MAP.map(([, p]) => txGet(t, p));
+  const mid = finMap(shop).map(([, p]) => txGet(t, p));
   const rel = isOrder ? "" : (t.adjustment_order_id ?? t.associated_order_id ?? t.order_id ?? "");
   const tail = FIN_TAIL.map(([, p]) => txGet(t, p));
   const raw = apiKeys.map((k) => txGet(t, k));
@@ -416,8 +430,8 @@ const API_KEYS: string[] = [
     "platform_cofunded_discount_refund_amount"].map((k) => `x.${k}`),
   "top.shipping_cost_amount", "top.fee_tax_amount", "top.adjustment_amount",
 ];
-export const FIN_COLUMNS = [
-  ...FIN_HEAD, ...FIN_MAP.map(([c]) => c), "相关订单 ID", ...FIN_TAIL.map(([c]) => c), "API交易类型", "API交易ID", ...API_KEYS.map((k) => `api.${k}`),
+export const finColumns = (shop: Shop) => [
+  ...FIN_HEAD, ...finMap(shop).map(([c]) => c), "相关订单 ID", ...FIN_TAIL.map(([c]) => c), "API交易类型", "API交易ID", ...API_KEYS.map((k) => `api.${k}`),
 ];
 
 type Stmt = {
@@ -464,7 +478,7 @@ async function exportFinance(shop: Shop, b: Record<string, unknown>, started: nu
   }
   const more = cur.idx < cur.stmts.length && !errors.length;
   return {
-    kind: "finance", columns: FIN_COLUMNS, rows, next_cursor: more ? { ...cur } : null,
+    kind: "finance", columns: finColumns(shop), rows, next_cursor: more ? { ...cur } : null,
     progress: { done: cur.done, total: cur.stmts.length, unit: "张结算单" },
     meta: statements
       ? { statement_columns: ["结算日期", "结算单 ID", "结算总金额", "总收入", "总费用", "调整", "运费", "付款 ID", "付款状态", "货币"], statements }
