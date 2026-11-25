@@ -19,12 +19,12 @@
 
 | 函数 | 待上线的改动 | 核验方式 |
 | --- | --- | --- |
-| balance-alert（1125.284） | 飞书卡片底部说明拆成两行 | 页面点「发送到飞书」，卡片最底部图例与日耗口径分两行 |
 | gmv-max-exclusive-auth、gmv-max-adgroup-batch-create（1124.209~211 改动） | **暂不部署（积分用完）**：页面建组/切户已改走免费的服务端路由 `/api/public/hooks/gmv-max-write`，这两个 Edge Function 线上仍是旧版/不存在，前端已不调用 | 无需核验，以后有积分可部署或删除 |
 
 2026-11-23 核验：`tools/check-deploy.sh` 显示 39 个函数全部已是新版 `_shared/auth.ts`（口令注入修复已上线）。
 2026-11-24 核验：`attribution-upload`、`attribution-identity-build`、`tts-listing`、`feishu-read` 已重新部署（1124.253），四个均正常应答（401 鉴权提示），上表对应行已删。
 2026-11-25 核验：`balance-alert` 已重新部署（1125.283，main 12baf94），正常应答（401 鉴权提示），上表对应行已删；功能核验待页面点「立即刷新」看「换户第 N 天」标记。
+2026-11-25 核验：`balance-alert` 已重新部署（1125.285，main a36c24b，上线 1125.284 飞书卡片底部说明拆两行），正常应答（401 鉴权提示），上表对应行已删；功能核验待页面点「发送到飞书」看卡片底部两行。
 2026-11-25 核验：`tts-export` 已按 main 48d14c3 重新部署（1125.265），正常应答（401 鉴权提示），上表对应行已删；**增量取数是否生效仍需负责人跑一次 tts-sync-cron，看 tts_sync_state 是否出现 PH/TH 两行**。
 2026-11-25 核验：`tts-export` 已按 main 58c83f6 重新部署（1125.272），正常应答（401 鉴权提示）→ 1125.271 记录的「需随 tts-export 一并部署」（入库字符串去除空字符，修 PH 订单写入失败卡住）已随本次上线。
 2026-11-25 核验：`tts-export` 已按 main cb8cba2 重新部署（1125.274），正常应答（401 鉴权提示）→ 1125.273 记录的「订单入库瘦身」（slimOrder 去 sku_image/product_name/重复物流字段/省市区重复说明）已随本次上线。**待人工：migration `20261125130000_db_size_monitor.sql` 尚未执行（`public.db_size_bytes()` 不存在），tts-sync-cron 的空间检查会失败。**
