@@ -19,6 +19,7 @@ import { Route as GmvAttributionAdminRouteImport } from './routes/gmv-attributio
 import { Route as GmvMaxCreateRouteImport } from './routes/gmv-max-create'
 import { Route as MaterialPerformanceRouteImport } from './routes/material-performance'
 import { Route as OutreachRouteImport } from './routes/outreach'
+import { Route as ReviewsRouteImport } from './routes/reviews'
 import { Route as SeaInventoryRouteImport } from './routes/sea-inventory'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as TtsExportRouteImport } from './routes/tts-export'
@@ -33,6 +34,7 @@ import { Route as ApiPublicHooksFeishuSyncCronRouteImport } from './routes/api/p
 import { Route as ApiPublicHooksGmvMaxCronRouteImport } from './routes/api/public/hooks/gmv-max-cron'
 import { Route as ApiPublicHooksGmvMaxMaterialRouteImport } from './routes/api/public/hooks/gmv-max-material'
 import { Route as ApiPublicHooksGmvMaxWriteRouteImport } from './routes/api/public/hooks/gmv-max-write'
+import { Route as ApiPublicHooksReviewsCronRouteImport } from './routes/api/public/hooks/reviews-cron'
 import { Route as ApiPublicHooksSeaInventoryCronRouteImport } from './routes/api/public/hooks/sea-inventory-cron'
 import { Route as ApiPublicHooksTtsSyncCronRouteImport } from './routes/api/public/hooks/tts-sync-cron'
 import { Route as ApiPublicHooksTtsTokenCronRouteImport } from './routes/api/public/hooks/tts-token-cron'
@@ -86,6 +88,11 @@ const MaterialPerformanceRoute = MaterialPerformanceRouteImport.update({
 const OutreachRoute = OutreachRouteImport.update({
   id: '/outreach',
   path: '/outreach',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReviewsRoute = ReviewsRouteImport.update({
+  id: '/reviews',
+  path: '/reviews',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SeaInventoryRoute = SeaInventoryRouteImport.update({
@@ -165,6 +172,12 @@ const ApiPublicHooksGmvMaxWriteRoute =
     path: '/api/public/hooks/gmv-max-write',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicHooksReviewsCronRoute =
+  ApiPublicHooksReviewsCronRouteImport.update({
+    id: '/api/public/hooks/reviews-cron',
+    path: '/api/public/hooks/reviews-cron',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicHooksSeaInventoryCronRoute =
   ApiPublicHooksSeaInventoryCronRouteImport.update({
     id: '/api/public/hooks/sea-inventory-cron',
@@ -200,6 +213,7 @@ export interface FileRoutesByFullPath {
   '/gmv-max-create': typeof GmvMaxCreateRoute
   '/material-performance': typeof MaterialPerformanceRoute
   '/outreach': typeof OutreachRoute
+  '/reviews': typeof ReviewsRoute
   '/sea-inventory': typeof SeaInventoryRoute
   '/settings': typeof SettingsRoute
   '/tts-export': typeof TtsExportRoute
@@ -214,6 +228,7 @@ export interface FileRoutesByFullPath {
   '/api/public/hooks/gmv-max-cron': typeof ApiPublicHooksGmvMaxCronRoute
   '/api/public/hooks/gmv-max-material': typeof ApiPublicHooksGmvMaxMaterialRoute
   '/api/public/hooks/gmv-max-write': typeof ApiPublicHooksGmvMaxWriteRoute
+  '/api/public/hooks/reviews-cron': typeof ApiPublicHooksReviewsCronRoute
   '/api/public/hooks/sea-inventory-cron': typeof ApiPublicHooksSeaInventoryCronRoute
   '/api/public/hooks/tts-sync-cron': typeof ApiPublicHooksTtsSyncCronRoute
   '/api/public/hooks/tts-token-cron': typeof ApiPublicHooksTtsTokenCronRoute
@@ -230,6 +245,7 @@ export interface FileRoutesByTo {
   '/gmv-max-create': typeof GmvMaxCreateRoute
   '/material-performance': typeof MaterialPerformanceRoute
   '/outreach': typeof OutreachRoute
+  '/reviews': typeof ReviewsRoute
   '/sea-inventory': typeof SeaInventoryRoute
   '/settings': typeof SettingsRoute
   '/tts-export': typeof TtsExportRoute
@@ -244,6 +260,7 @@ export interface FileRoutesByTo {
   '/api/public/hooks/gmv-max-cron': typeof ApiPublicHooksGmvMaxCronRoute
   '/api/public/hooks/gmv-max-material': typeof ApiPublicHooksGmvMaxMaterialRoute
   '/api/public/hooks/gmv-max-write': typeof ApiPublicHooksGmvMaxWriteRoute
+  '/api/public/hooks/reviews-cron': typeof ApiPublicHooksReviewsCronRoute
   '/api/public/hooks/sea-inventory-cron': typeof ApiPublicHooksSeaInventoryCronRoute
   '/api/public/hooks/tts-sync-cron': typeof ApiPublicHooksTtsSyncCronRoute
   '/api/public/hooks/tts-token-cron': typeof ApiPublicHooksTtsTokenCronRoute
@@ -261,6 +278,7 @@ export interface FileRoutesById {
   '/gmv-max-create': typeof GmvMaxCreateRoute
   '/material-performance': typeof MaterialPerformanceRoute
   '/outreach': typeof OutreachRoute
+  '/reviews': typeof ReviewsRoute
   '/sea-inventory': typeof SeaInventoryRoute
   '/settings': typeof SettingsRoute
   '/tts-export': typeof TtsExportRoute
@@ -275,6 +293,7 @@ export interface FileRoutesById {
   '/api/public/hooks/gmv-max-cron': typeof ApiPublicHooksGmvMaxCronRoute
   '/api/public/hooks/gmv-max-material': typeof ApiPublicHooksGmvMaxMaterialRoute
   '/api/public/hooks/gmv-max-write': typeof ApiPublicHooksGmvMaxWriteRoute
+  '/api/public/hooks/reviews-cron': typeof ApiPublicHooksReviewsCronRoute
   '/api/public/hooks/sea-inventory-cron': typeof ApiPublicHooksSeaInventoryCronRoute
   '/api/public/hooks/tts-sync-cron': typeof ApiPublicHooksTtsSyncCronRoute
   '/api/public/hooks/tts-token-cron': typeof ApiPublicHooksTtsTokenCronRoute
@@ -293,6 +312,7 @@ export interface FileRouteTypes {
     | '/gmv-max-create'
     | '/material-performance'
     | '/outreach'
+    | '/reviews'
     | '/sea-inventory'
     | '/settings'
     | '/tts-export'
@@ -307,6 +327,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/gmv-max-cron'
     | '/api/public/hooks/gmv-max-material'
     | '/api/public/hooks/gmv-max-write'
+    | '/api/public/hooks/reviews-cron'
     | '/api/public/hooks/sea-inventory-cron'
     | '/api/public/hooks/tts-sync-cron'
     | '/api/public/hooks/tts-token-cron'
@@ -323,6 +344,7 @@ export interface FileRouteTypes {
     | '/gmv-max-create'
     | '/material-performance'
     | '/outreach'
+    | '/reviews'
     | '/sea-inventory'
     | '/settings'
     | '/tts-export'
@@ -337,6 +359,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/gmv-max-cron'
     | '/api/public/hooks/gmv-max-material'
     | '/api/public/hooks/gmv-max-write'
+    | '/api/public/hooks/reviews-cron'
     | '/api/public/hooks/sea-inventory-cron'
     | '/api/public/hooks/tts-sync-cron'
     | '/api/public/hooks/tts-token-cron'
@@ -353,6 +376,7 @@ export interface FileRouteTypes {
     | '/gmv-max-create'
     | '/material-performance'
     | '/outreach'
+    | '/reviews'
     | '/sea-inventory'
     | '/settings'
     | '/tts-export'
@@ -367,6 +391,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/gmv-max-cron'
     | '/api/public/hooks/gmv-max-material'
     | '/api/public/hooks/gmv-max-write'
+    | '/api/public/hooks/reviews-cron'
     | '/api/public/hooks/sea-inventory-cron'
     | '/api/public/hooks/tts-sync-cron'
     | '/api/public/hooks/tts-token-cron'
@@ -384,6 +409,7 @@ export interface RootRouteChildren {
   GmvMaxCreateRoute: typeof GmvMaxCreateRoute
   MaterialPerformanceRoute: typeof MaterialPerformanceRoute
   OutreachRoute: typeof OutreachRoute
+  ReviewsRoute: typeof ReviewsRoute
   SeaInventoryRoute: typeof SeaInventoryRoute
   SettingsRoute: typeof SettingsRoute
   TtsExportRoute: typeof TtsExportRoute
@@ -398,6 +424,7 @@ export interface RootRouteChildren {
   ApiPublicHooksGmvMaxCronRoute: typeof ApiPublicHooksGmvMaxCronRoute
   ApiPublicHooksGmvMaxMaterialRoute: typeof ApiPublicHooksGmvMaxMaterialRoute
   ApiPublicHooksGmvMaxWriteRoute: typeof ApiPublicHooksGmvMaxWriteRoute
+  ApiPublicHooksReviewsCronRoute: typeof ApiPublicHooksReviewsCronRoute
   ApiPublicHooksSeaInventoryCronRoute: typeof ApiPublicHooksSeaInventoryCronRoute
   ApiPublicHooksTtsSyncCronRoute: typeof ApiPublicHooksTtsSyncCronRoute
   ApiPublicHooksTtsTokenCronRoute: typeof ApiPublicHooksTtsTokenCronRoute
@@ -474,6 +501,13 @@ declare module '@tanstack/react-router' {
       path: '/outreach'
       fullPath: '/outreach'
       preLoaderRoute: typeof OutreachRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reviews': {
+      id: '/reviews'
+      path: '/reviews'
+      fullPath: '/reviews'
+      preLoaderRoute: typeof ReviewsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/sea-inventory': {
@@ -574,6 +608,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicHooksGmvMaxWriteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/hooks/reviews-cron': {
+      id: '/api/public/hooks/reviews-cron'
+      path: '/api/public/hooks/reviews-cron'
+      fullPath: '/api/public/hooks/reviews-cron'
+      preLoaderRoute: typeof ApiPublicHooksReviewsCronRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/hooks/sea-inventory-cron': {
       id: '/api/public/hooks/sea-inventory-cron'
       path: '/api/public/hooks/sea-inventory-cron'
@@ -616,6 +657,7 @@ const rootRouteChildren: RootRouteChildren = {
   GmvMaxCreateRoute: GmvMaxCreateRoute,
   MaterialPerformanceRoute: MaterialPerformanceRoute,
   OutreachRoute: OutreachRoute,
+  ReviewsRoute: ReviewsRoute,
   SeaInventoryRoute: SeaInventoryRoute,
   SettingsRoute: SettingsRoute,
   TtsExportRoute: TtsExportRoute,
@@ -630,6 +672,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicHooksGmvMaxCronRoute: ApiPublicHooksGmvMaxCronRoute,
   ApiPublicHooksGmvMaxMaterialRoute: ApiPublicHooksGmvMaxMaterialRoute,
   ApiPublicHooksGmvMaxWriteRoute: ApiPublicHooksGmvMaxWriteRoute,
+  ApiPublicHooksReviewsCronRoute: ApiPublicHooksReviewsCronRoute,
   ApiPublicHooksSeaInventoryCronRoute: ApiPublicHooksSeaInventoryCronRoute,
   ApiPublicHooksTtsSyncCronRoute: ApiPublicHooksTtsSyncCronRoute,
   ApiPublicHooksTtsTokenCronRoute: ApiPublicHooksTtsTokenCronRoute,

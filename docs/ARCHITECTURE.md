@@ -228,3 +228,9 @@ GMV Max 导入记录，逐商品一行：batch_id / kind(excel|single|copy) / so
 - 订单：`/order/202309/orders/search` 按 `update_time` 增量（往回重叠 2 小时），附 Search Returns 退货汇总，原文 upsert `tts_orders`。结算：`/finance/202309/statements` 按 `statement_time`（重叠 2 天）upsert `tts_finance_statements`；交易明细未入库的结算单逐张拉 `/finance/202501/statements/{id}/statement_transactions` upsert `tts_finance_tx`，完成后标 `tx_synced_at`。
 - 订单入库按 denylist 瘦身（`slimOrder`：去 sku_image、product_name、商品行重复物流字段、省市区重复说明；数字字段全保留）。空间监控：`tts-sync-cron` 每轮调 `db_size_bytes()`（migration 20261125130000），≥ 上限（DB_DISK_LIMIT_BYTES，默认 7.6GB = Lovable Cloud 数据盘 8GB − 约 0.4GB 非数据库开销）80% 时发飞书，每日一次，状态存 `tts_sync_state(_global, db_size)`。
 - 原文去空值/0 存 jsonb；每轮订单同步先刷新仓库 ID→名称，存 `tts_sync_state`（kind=`warehouses`，cursor 为映射）；**订单原文入库前剔除买家个人信息**（`stripBuyerPii`：去 buyer_email、user_id，收件地址只留 postal_code/region_code/district_info）；口径映射在汇总计算层。未登记且非 0 的字段（结算分项、订单 payment / line_item 金额字段）记入 `tts_sync_state.unknown_fields`，首次出现时路由发飞书；有报错也发飞书。
+
+### Listing 评价监控 / 评论查看（2026-11-25，migration 20261126100000；计划 docs/LISTING_REVIEWS_PLAN.md）
+- 页面 `/reviews`（tab key `reviews`）→ Edge Function `reviews`（verifyPasscode(req,'reviews')；step/reconcile 需管理员；cron 身份只放行 step / alert_scan）。
+- 表：`review_daily`（站点×商品×日×来源 crawl/api 的 1–5 星条数 + api 出单量；d ≤ `review_shops.crawl_until` 用 crawl，之后用 api）、`review_texts`（只存有留言/回复的评价）、`review_products`（卖家 SKU、提示状态 below_4）、`review_shops`（抓取覆盖 + 同步游标）、`review_settings`（评价数门槛、提示分数）、`review_uploads`。RPC：`review_series` / `review_table` / `review_alert_scan` / `review_texts_upsert` / `review_products_fill_sku`。
+- 每晚：pg_cron `reviews-nightly`（`35 16,17,18 * * *` = 北京 00:35/01:35/02:35）→ `/api/public/hooks/reviews-cron` → 循环 `reviews` step（每次 ≤ 约 100s，游标续跑）→ 全部完成后 `alert_scan`（新跌破门槛的合并发飞书 FEISHU_BOT_WEBHOOK）。
+- 接口：Analytics 商品表现列表（选近 90 天有出单的商品）+ 商品表现详情（星级合计 + 逐日出单，整段比对后二分到天）；每周日补 Search Products 全部在售。

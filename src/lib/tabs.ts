@@ -4,7 +4,7 @@
 // `key` is the permission key stored in app_accounts.tab_permissions — never rename.
 // `label` = full name (permissions UI, toasts); `navLabel` = short name shown
 // inside its sidebar group.
-import { Boxes, Database, FileDown, Handshake, Megaphone, PlusCircle, Settings, Store, Target, TerminalSquare, TrendingUp, Users, Zap, type LucideIcon } from "lucide-react";
+import { Boxes, Database, FileDown, Handshake, Megaphone, MessageSquareText, PlusCircle, Settings, Store, Target, TerminalSquare, TrendingUp, Users, Zap, type LucideIcon } from "lucide-react";
 
 export type NavGroupKey = "material" | "gmv-max" | "attribution" | "shop";
 
@@ -38,6 +38,7 @@ export const TABS: TabDef[] = [
   { key: "gmv-attribution", label: "GMV 归因", navLabel: "归因结果", to: "/gmv-attribution", icon: Target, group: "attribution" },
   { key: "gmv-attribution-admin", label: "GMV 归因·管理", navLabel: "归因管理", to: "/gmv-attribution-admin", icon: Target, group: "attribution" },
   { key: "outreach", label: "达人建联", to: "/outreach", icon: Handshake },
+  { key: "reviews", label: "评论查看", to: "/reviews", icon: MessageSquareText },
   { key: "tts-export", label: "店铺数据导出", navLabel: "数据导出", to: "/tts-export", icon: FileDown, group: "shop" },
   { key: "sea-inventory", label: "SEA库存监控", navLabel: "SEA 库存", to: "/sea-inventory", icon: Boxes, group: "shop" },
   { key: "settings", label: "设置", to: "/settings", icon: Settings, position: "bottom" },
