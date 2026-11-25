@@ -1226,3 +1226,159 @@ export async function probePostedTime(
   if (e2) throw new Error(e2.message);
   return { probe_batch_id: b.id, ...out };
 }
+
+// ───────────────────────── 一次性：batch_performance 覆盖面探测 ─────────────────────────
+// 2026-11-25 实测 /analytics/202609/shop_videos/batch_performance 可用（video_ids 逗号分隔），返回
+// video.username（达人 handle）与 video.video_post_time（站点当地时间）。这里拿某站点某月上传表里
+// 全部有花费的 VID 去查，只存解析后的字段，回答：覆盖率、定时发布视频的发布时间是否与导出一致、username 能否对上登记。
+export async function probeBatchPerformance(
+  db: SupabaseClient,
+  country: string,
+  month: string,
+  passcode: string,
+  adminName: string,
+) {
+  if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("month 格式应为 YYYY-MM");
+  const { data: advs } = await db
+    .from("advertiser_countries")
+    .select("shop_id")
+    .eq("country", country)
+    .limit(1);
+  const shopId = String(advs?.[0]?.shop_id ?? "");
+  if (!shopId) throw new Error(`站点 ${country} 没有店铺 ID`);
+  const { data: ups, error } = await db
+    .from("ad_uploads")
+    .select("id, file_name")
+    .eq("country", country)
+    .eq("month", month)
+    .eq("status", "READY");
+  if (error) throw new Error(error.message);
+  if (!ups?.length) throw new Error(`${country} ${month} 没有已上传的表`);
+  type U = {
+    upload_id: string;
+    vid: string;
+    account_name: string;
+    posted_at: string | null;
+    cost: number;
+  };
+  const byVid = new Map<
+    string,
+    { file: string; names: Set<string>; posted: string | null; cost: number }
+  >();
+  for (const u of ups) {
+    const rows = await readAll<U>((f, t) =>
+      db
+        .from("ad_upload_agg")
+        .select("upload_id, vid, account_name, posted_at, cost")
+        .eq("upload_id", u.id)
+        .neq("vid", "")
+        .gt("cost", 0)
+        .order("id")
+        .range(f, t),
+    );
+    for (const r of rows) {
+      const v = byVid.get(r.vid) ?? {
+        file: u.file_name,
+        names: new Set<string>(),
+        posted: r.posted_at,
+        cost: 0,
+      };
+      if (r.account_name) v.names.add(r.account_name);
+      if (r.posted_at && (!v.posted || r.posted_at < v.posted)) v.posted = r.posted_at;
+      v.cost += num(r.cost);
+      byVid.set(r.vid, v);
+    }
+  }
+  const vids = [...byVid.keys()];
+  const winStart = `${month}-01`;
+  const today = new Date().toISOString().slice(0, 10);
+  const e = new Date(Date.parse(`${winStart}T00:00:00Z`) + 59 * 86400_000)
+    .toISOString()
+    .slice(0, 10);
+  const winEnd = e < today ? e : today;
+  const anonKey = process.env.SUPABASE_ANON_KEY ?? process.env.SUPABASE_PUBLISHABLE_KEY ?? "";
+  const got = new Map<string, { username: string | null; post: string | null }>();
+  const errors: string[] = [];
+  const BATCH = 200;
+  for (let i = 0; i < vids.length; i += BATCH) {
+    const chunkVids = vids.slice(i, i + BATCH);
+    const r = await fetch(`${process.env.SUPABASE_URL}/functions/v1/tts-p0-probe`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: anonKey,
+        Authorization: `Bearer ${anonKey}`,
+        "x-admin-passcode": passcode,
+        "x-admin-name": adminName,
+      },
+      body: JSON.stringify({
+        action: "raw",
+        shop_id: shopId,
+        method: "GET",
+        path: "/analytics/202609/shop_videos/batch_performance",
+        query: {
+          video_ids: chunkVids.join(","),
+          start_date_ge: winStart,
+          end_date_lt: winEnd,
+          currency: "LOCAL",
+        },
+      }),
+    });
+    const j = (await r.json().catch(() => ({}))) as {
+      ok?: boolean;
+      message?: string;
+      error?: string;
+      data?: { videos?: { video_id?: string; video?: Record<string, unknown> }[] };
+    };
+    if (!r.ok || j.ok === false || j.error) {
+      errors.push(`第 ${i / BATCH + 1} 批：HTTP ${r.status} ${j.error ?? j.message ?? ""}`);
+      continue;
+    }
+    for (const v of j.data?.videos ?? []) {
+      const id = String(v.video_id ?? v.video?.id ?? "");
+      if (!id) continue;
+      got.set(id, {
+        username: v.video?.username == null ? null : String(v.video.username),
+        post: v.video?.video_post_time == null ? null : String(v.video.video_post_time),
+      });
+    }
+  }
+  const rows = vids.map((vid) => {
+    const u = byVid.get(vid)!;
+    const g = got.get(vid);
+    return {
+      vid,
+      file: u.file,
+      cost: r2(u.cost),
+      names: [...u.names].join(" / "),
+      upload_posted: u.posted,
+      returned: !!g,
+      username: g?.username ?? null,
+      api_post: g?.post ?? null,
+    };
+  });
+  const summary = {
+    country,
+    month,
+    window: [winStart, winEnd],
+    requested: vids.length,
+    returned: got.size,
+    cost_total: r2(rows.reduce((x, r) => x + r.cost, 0)),
+    cost_returned: r2(rows.filter((r) => r.returned).reduce((x, r) => x + r.cost, 0)),
+    errors,
+  };
+  const { data: b, error: e2 } = await db
+    .from("gmv_max_material_batches")
+    .insert({
+      country,
+      month,
+      status: "READY",
+      triggered_by: "probe:batch_performance",
+      fields: { probe_batch: { summary, rows } },
+      finished_at: new Date().toISOString(),
+    })
+    .select("id")
+    .single();
+  if (e2) throw new Error(e2.message);
+  return { probe_batch_id: b.id, ...summary };
+}

@@ -5,6 +5,7 @@
 //   {action:"retry", batch_id}         失败的广告户放回队列
 //   {action:"reconcile", batch_id}     与该站点该月已上传的表对账，报告写进批次
 //   {action:"probe_posted", country}  一次性：探测按 VID 取发布时间的候选接口，原始返回存库
+//   {action:"probe_batch", country, month}  一次性：该站点该月上传表全部有花费 VID 查 batch_performance（覆盖率/发布时间/username）
 //   {action:"list"} / {action:"get", batch_id}  只读
 // 鉴权：x-admin-passcode，需「归因管理」页面权限（经 attribution-upload 校验）。
 // 只写 gmv_max_material_* / gmv_max_adv_daily 三张独立表，不影响归因计算。
@@ -14,6 +15,7 @@ import {
   checkAttributionPasscode,
   getBatch,
   listBatches,
+  probeBatchPerformance,
   probePostedTime,
   reconcileBatch,
   retryFailed,
@@ -66,6 +68,18 @@ export const Route = createFileRoute("/api/public/hooks/gmv-max-material")({
                   String(body.country ?? "")
                     .trim()
                     .toUpperCase(),
+                  request.headers.get("x-admin-passcode") ?? "",
+                  request.headers.get("x-admin-name") ?? "",
+                ),
+              );
+            case "probe_batch":
+              return jsonRes(
+                await probeBatchPerformance(
+                  db,
+                  String(body.country ?? "")
+                    .trim()
+                    .toUpperCase(),
+                  String(body.month ?? "").trim(),
                   request.headers.get("x-admin-passcode") ?? "",
                   request.headers.get("x-admin-name") ?? "",
                 ),

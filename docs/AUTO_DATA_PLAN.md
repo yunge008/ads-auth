@@ -162,4 +162,12 @@
 
 7. 负责人 2026-11-25 提供的外部资料称 TikTok Shop `/analytics/202609/shop_videos/batch_performance`（2026-09 新版）返回 `video.video_post_time`（Unix 秒）与 `video.username`，一次 ≤500 个 VID、日期区间 ≤60 天 —— **未核验**，1125.290 已加入 ⏱ 探测（`video_ids` 按 JSON 数组、逗号分隔两种传法各试一次）。资料首推的「VID 反推」不采用为首选：上文实测 VID 时间戳是创建时间，定时发布会晚 1～14 天（按分卷时区日期一致 90.6%～99.4%）；最多作兜底并标来源。第三方 TikAPI（要外部密钥、数据外发）与 Display API（要逐个达人授权）不考虑。
 
+8. **⏱ 探测结果（2026-11-25 VN，已核验）**：
+   - `/analytics/202609/shop_videos/batch_performance` **可用**：`video_ids` 必须逗号分隔（JSON 数组报 `36009004 array type invalid`）；返回 `video.username`、`video.video_post_time`、`video.title`、`duration` 及区间内 GMV/曝光/点击。
+   - `video_post_time` 是**站点当地时间**字符串（VN 样本 `2026-03-24 20:48:37` = VID 时间戳 UTC 13:48:30 + 7h；导出表同一视频是 `21:48`，即广告户时区 +8）。
+   - `username` 是达人 **handle**（`namreview861`），导出表「TikTok 账号」是**昵称**（`Nam thích mặc đẹp`）；达人登记表两者都有（`handle_norm` / `nickname_norm`），handle 能直接对上（例：`namreview861` → 林丽洪）。
+   - 返回的 2 个样本都不是定时发布，所以**还不能判断 `video_post_time` 是真实发布时间还是创建时间**；定时发布样本因探测截断返回体未取到。
+   - `/analytics/202605/shop_videos/performance` 日期区间 ≤30 天；`/analytics/202409/...` 可用；`/gmv_max/video/get/` 两户均返回空列表 → 不可用。
+   - 1125.292 新增覆盖面探测：某站点某月上传表全部有花费 VID 逐批（200 个）查 batch_performance，只存解析字段 → 回答覆盖率（按花费）、定时发布视频发布时间是否与导出一致、username 覆盖。
+
 **结论（目前）**：金额（花费/GMV/订单）接口与上传表逐 VID 一致，差异全部可解释；但接口缺达人名、发布时间，**现在还不能替代上传表**。下一步：⏱ 探测 TikTok Shop 视频分析接口与 `/gmv_max/video/get/` 能否按 VID 补齐这两项。

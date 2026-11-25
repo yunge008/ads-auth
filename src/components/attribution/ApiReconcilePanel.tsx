@@ -207,7 +207,11 @@ export function ApiReconcilePanel() {
     run(async () => {
       const site = country.split(/[,，\s]+/).filter(Boolean)[0] ?? "";
       setProgress(`${site} 发布时间接口探测中…`);
-      await call({ action: "probe_posted", country: site });
+      // 站点 × 起止月份内每个月都跑一次 batch_performance 覆盖面探测
+      for (const m of [month, monthTo].filter((x, i, arr) => x && arr.indexOf(x) === i)) {
+        setProgress(`${site} ${m} 发布时间/账号覆盖探测中…`);
+        await call({ action: "probe_batch", country: site, month: m });
+      }
       setProgress("");
       toast.success(`${site} 发布时间探测完成`);
     });
