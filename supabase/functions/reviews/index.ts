@@ -3,22 +3,22 @@
 // 数据来源：
 //   1. 抓取表（负责人爬虫导出，网页端解析后分片上传）：逐日 1–5 星条数（全部行）+ 有留言/回复的评价内容
 //   2. TikTok Shop Analytics 商品表现详情 GET /analytics/202509/shop_products/{product_id}/performance
-//      ratings[] 只给整个区间一份（不随 granularity=1D 拆分），intervals[].sales.orders 按天给出单量
-//      → 先查整段，与库内同段合计比对，不一致才二分到天（可加性待核对，见 reconcile）
+//      实测（2026-11-25）：ratings[] 不受日期参数影响，是该 listing 截至调用时的全部历史累计；intervals[].sales.orders 按天给出单量
+//      → 每晚每个商品 1 次调用：存累计快照，当日新增 = 今晚快照 − 上一份快照
 //
 // action：
 //   页面（口令 + 「reviews」页面权限）：meta / series / table / texts / alerts / save_settings
 //     upload_begin / upload_daily / upload_texts / upload_end（抓取表入库）
-//   管理员：reconcile（接口 vs 抓取表逐日核对 + 整段可加性）/ step（手动同步某站点）
+//   管理员：reconcile（接口当前累计 vs 本系统累计，逐商品）/ step（手动同步某站点）
 //   cron（x-cron-key）：step（每晚同步，时间预算内分片续跑）/ alert_scan（提交差评提示状态，返回新跌破的 listing）
 import { admin, requireAdmin, verifyPasscode } from "../_shared/auth.ts";
 import { cronAuthed } from "../_shared/cron.ts";
 import { corsHeaders } from "../_shared/feishu.ts";
 import { ttsCall, type TtsResult } from "../_shared/tts.ts";
 
-const PRODUCT_START_LIMIT_MS = 70_000; // 超过 70s 不再开新商品（Edge Function 墙钟 150s；一个商品回填最坏约 60 次调用）
+const PRODUCT_START_LIMIT_MS = 90_000; // 超过 90s 不再开新商品（Edge Function 墙钟 150s；每个商品 1～3 次调用）
 const DETAIL_PATH = (pid: string) => `/analytics/202509/shop_products/${pid}/performance`;
-const MAX_SPAN_DAYS = 60; // 单次查询最长跨度（接口上限未核验，保守分段）
+const MAX_SPAN_DAYS = 60; // 出单查询单次最长跨度（接口上限未核验，保守分段；只影响首次回补）
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -31,7 +31,6 @@ const apiErr = (name: string, r: TtsResult) => `${name}：http=${r.http_status} 
 
 // ── 日期（全部按 YYYY-MM-DD 字符串，店铺当地日）────────────────────────────
 const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86400_000).toISOString().slice(0, 10);
-const diffDays = (a: string, b: string) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400_000);
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const asDate = (v: unknown, name: string) => {
   const s = String(v ?? "");
@@ -72,56 +71,79 @@ async function detail(shop: Shop, pid: string, from: string, toIncl: string, dai
   if (daily) for (const iv of r.data?.performance?.intervals ?? []) if (iv.start_date) orders.set(iv.start_date, Number(iv.sales?.orders ?? 0) || 0);
   return { stars, orders, latest: r.data?.latest_available_date ?? null };
 }
-const sameStars = (a: Stars, b: Stars) => a.every((v, i) => v === b[i]);
 const sumStars = (rows: { s1: number; s2: number; s3: number; s4: number; s5: number }[]): Stars =>
   rows.reduce<Stars>((t, r) => [t[0] + r.s1, t[1] + r.s2, t[2] + r.s3, t[3] + r.s4, t[4] + r.s5], [0, 0, 0, 0, 0]);
 
-/** 同步一个商品 [from, to]：整段 1D 查一次拿出单 + 星级合计；与库内 api 行比对，不一致的段二分到天。返回调用次数。 */
-async function syncProduct(shop: Shop, pid: string, from: string, to: string): Promise<number> {
+/**
+ * 同步一个商品（2026-11-25 实测口径：ratings 是截至调用时的全部历史累计，不随日期参数变化）：
+ * 1 次 granularity=1D 调用 [from, end]：逐日出单写 api 行；ratings 存为 end 日快照；
+ * end 日新增 = 本次快照 − 上一份快照（source=api）；没有上一份快照时 = 快照 − 已知累计（抓取表 + 已有接口行），记 api_init。
+ * 出单区间超过 MAX_SPAN_DAYS 时分段（只影响首次回补）。返回调用次数。
+ */
+async function syncProduct(shop: Shop, pid: string, from: string, end: string, crawlUntil: string | null): Promise<number> {
   const db = admin();
   let calls = 0;
-  for (let a = from; a <= to; a = addDays(a, MAX_SPAN_DAYS)) {
-    const b = [addDays(a, MAX_SPAN_DAYS - 1), to].sort()[0];
-    const { data: have, error } = await db.from("review_daily").select("d,s1,s2,s3,s4,s5,orders")
-      .eq("shop_key", shop.key).eq("product_id", pid).eq("source", "api").gte("d", a).lte("d", b);
-    if (error) throw error;
-    const stored = new Map((have ?? []).map((r) => [String(r.d), r]));
-    const top = await detail(shop, pid, a, b, true);
+  let snap: Stars | null = null;
+  const orders = new Map<string, number>();
+  for (let a = from; a <= end; a = addDays(a, MAX_SPAN_DAYS)) {
+    const b = [addDays(a, MAX_SPAN_DAYS - 1), end].sort()[0];
+    const r = await detail(shop, pid, a, b, true);
     calls++;
-    const rows = new Map<string, { d: string; s: Stars | null; orders: number }>();
-    for (const [d, o] of top.orders) {
-      const old = stored.get(d);
-      if (o > 0 || old) rows.set(d, { d, s: null, orders: o });
-    }
-    // 二分：只在「接口合计 ≠ 库内合计」的段继续拆
-    const storedSum = (x: string, y: string) => sumStars([...stored.values()].filter((r) => r.d >= x && r.d <= y));
-    const queue: Array<[string, string, Stars]> = [[a, b, top.stars]];
-    while (queue.length) {
-      const [x, y, apiStars] = queue.shift()!;
-      if (sameStars(apiStars, storedSum(x, y))) continue;
-      if (x === y) {
-        const cur = rows.get(x) ?? { d: x, s: null, orders: top.orders.get(x) ?? 0 };
-        cur.s = apiStars;
-        rows.set(x, cur);
-        continue;
-      }
-      const mid = addDays(x, Math.floor(diffDays(x, y) / 2));
-      const left = await detail(shop, pid, x, mid, false);
-      calls++;
-      const right: Stars = apiStars.map((v, i) => v - left.stars[i]) as Stars; // 右半 = 整段 − 左半（依赖可加性）
-      queue.push([x, mid, left.stars], [addDays(mid, 1), y, right]);
-    }
-    const up = [...rows.values()].map((r) => {
-      const old = stored.get(r.d);
-      const s = r.s ?? (old ? [old.s1, old.s2, old.s3, old.s4, old.s5] : [0, 0, 0, 0, 0]);
-      return { shop_key: shop.key, product_id: pid, d: r.d, source: "api", s1: s[0], s2: s[1], s3: s[2], s4: s[3], s5: s[4], orders: r.orders, updated_at: new Date().toISOString() };
-    });
-    if (up.length) {
-      const { error: e2 } = await db.from("review_daily").upsert(up, { onConflict: "shop_key,product_id,d,source" });
-      if (e2) throw e2;
-    }
+    for (const [d, o] of r.orders) orders.set(d, o);
+    snap = r.stars; // 与日期无关，取最后一次
+  }
+  const { data: have, error } = await db.from("review_daily").select("d,s1,s2,s3,s4,s5,orders")
+    .eq("shop_key", shop.key).eq("product_id", pid).eq("source", "api").gte("d", from).lte("d", end);
+  if (error) throw error;
+  const rows = new Map<string, Record<string, unknown>>();
+  for (const r of have ?? []) rows.set(String(r.d), { ...r });
+  for (const [d, o] of orders) {
+    if (o > 0 || rows.has(d)) rows.set(d, { ...(rows.get(d) ?? { d, s1: 0, s2: 0, s3: 0, s4: 0, s5: 0 }), orders: o });
+  }
+  // 快照 → 新增
+  await upsertOrThrow("review_snapshot", [{ shop_key: shop.key, product_id: pid, d: end, s1: snap![0], s2: snap![1], s3: snap![2], s4: snap![3], s5: snap![4], fetched_at: new Date().toISOString() }], "shop_key,product_id,d");
+  const { data: prev } = await db.from("review_snapshot").select("d,s1,s2,s3,s4,s5").eq("shop_key", shop.key).eq("product_id", pid)
+    .lt("d", end).order("d", { ascending: false }).limit(1).maybeSingle();
+  let init: Stars | null = null;
+  if (prev) {
+    const delta = snap!.map((v, i) => v - [prev.s1, prev.s2, prev.s3, prev.s4, prev.s5][i]) as Stars;
+    rows.set(end, { ...(rows.get(end) ?? { d: end, orders: orders.get(end) ?? 0 }), s1: delta[0], s2: delta[1], s3: delta[2], s4: delta[3], s5: delta[4] });
+  } else {
+    // 已知累计 = 抓取表（≤ crawl_until）+ 已有接口行（> crawl_until 且 < end）
+    const cu = crawlUntil ?? "1900-01-01";
+    const sel = (src: string) => db.from("review_daily").select("s1,s2,s3,s4,s5").eq("shop_key", shop.key).eq("product_id", pid).eq("source", src).order("d");
+    const crawlRows = await readAll<{ s1: number; s2: number; s3: number; s4: number; s5: number }>((f, t) => sel("crawl").lte("d", cu).range(f, t));
+    const apiRows = await readAll<{ s1: number; s2: number; s3: number; s4: number; s5: number }>((f, t) => sel("api").gt("d", cu).lt("d", end).range(f, t));
+    const known = sumStars([...crawlRows, ...apiRows]);
+    init = snap!.map((v, i) => v - known[i]) as Stars;
+    // end 日的新增并入初始差额；end 日 api 行只留出单
+    rows.set(end, { d: end, s1: 0, s2: 0, s3: 0, s4: 0, s5: 0, orders: orders.get(end) ?? 0 });
+  }
+  const now = new Date().toISOString();
+  const up = [...rows.values()].map((r) => ({
+    shop_key: shop.key, product_id: pid, d: r.d, source: "api", s1: r.s1 ?? 0, s2: r.s2 ?? 0, s3: r.s3 ?? 0, s4: r.s4 ?? 0, s5: r.s5 ?? 0,
+    orders: r.orders ?? 0, updated_at: now,
+  }));
+  if (up.length) await upsertOrThrow("review_daily", up, "shop_key,product_id,d,source");
+  if (init && init.some((v) => v !== 0)) {
+    await upsertOrThrow("review_daily", [{ shop_key: shop.key, product_id: pid, d: end, source: "api_init", s1: init[0], s2: init[1], s3: init[2], s4: init[3], s5: init[4], orders: null, updated_at: now }], "shop_key,product_id,d,source");
   }
   return calls;
+}
+async function upsertOrThrow(table: string, rows: Record<string, unknown>[], onConflict: string) {
+  for (let i = 0; i < rows.length; i += 1000) {
+    const { error } = await admin().from(table).upsert(rows.slice(i, i + 1000), { onConflict });
+    if (error) throw new Error(`${table}：${error.message}`);
+  }
+}
+async function readAll<T>(page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
+  const out: T[] = [];
+  for (let f = 0; ; f += 1000) {
+    const { data, error } = await page(f, f + 999);
+    if (error) throw new Error(error.message);
+    out.push(...(data ?? []));
+    if (!data || data.length < 1000) return out;
+  }
 }
 
 // ── 每晚同步：选商品 → 逐个 syncProduct（游标存 review_shops.state）────────
@@ -171,7 +193,7 @@ async function stepShop(shop: Shop, started: number): Promise<{ shop: string; do
   let st = (row?.state ?? {}) as ShopState;
   try {
     if (st.run_date !== runDate) {
-      // 新的一晚：截止日 = 店铺当地昨天；起点 = 上次同步到的日子往前 7 天（覆盖迟到/删除的评价），首次 = 抓取表覆盖之后，最多回补 90 天
+      // 新的一晚：截止日 = 店铺当地昨天；出单起点 = 上次同步之后往前 7 天（出单会因取消/退款回改），首次 = 抓取表覆盖之后，最多回补 120 天
       const end = addDays(localToday(shop.region), -1);
       const since = row?.api_until ?? row?.crawl_until ?? addDays(end, -90);
       const from = [addDays(end, -7), addDays(since, 1)].sort()[0];
@@ -183,7 +205,7 @@ async function stepShop(shop: Shop, started: number): Promise<{ shop: string; do
     }
     const list = st.products ?? [];
     while (!st.done && (st.idx ?? 0) < list.length && Date.now() - started < PRODUCT_START_LIMIT_MS) {
-      st.calls = (st.calls ?? 0) + await syncProduct(shop, list[st.idx!], st.from!, st.end!);
+      st.calls = (st.calls ?? 0) + await syncProduct(shop, list[st.idx!], st.from!, st.end!, row?.crawl_until ?? null);
       st.idx = (st.idx ?? 0) + 1;
     }
     const finished = (st.idx ?? 0) >= list.length;
@@ -223,39 +245,40 @@ async function step(b: Record<string, unknown>, started: number) {
   return { finished: pending.length === 0, pending, results };
 }
 
-// ── 核对：接口逐日 vs 抓取表；整段 vs 逐日之和 ──────────────────────────────
+// ── 核对：接口累计快照（当前）vs 本系统累计（抓取表 + 接口新增 + 初始差额）────────
+// 每个商品 1 次调用；差 = 抓取表/接口都没覆盖到的评价（如抓取截止日之后、今晚同步之前新增的）
 async function reconcile(b: Record<string, unknown>) {
   const key = String(b.shop_key ?? "");
-  const from = asDate(b.from, "from");
-  const to = asDate(b.to, "to");
-  if (diffDays(from, to) < 0 || diffDays(from, to) > 13) bad("核对区间 1～14 天");
   const shop = (await loadShops()).find((s) => s.key === key);
   if (!shop) bad(`站点 ${key} 没有已授权店铺`);
   const db = admin();
-  let pids = (Array.isArray(b.product_ids) ? b.product_ids : []).map(String).filter(Boolean);
-  const { data: crawl, error } = await db.from("review_daily").select("product_id,d,s1,s2,s3,s4,s5")
-    .eq("shop_key", key).eq("source", "crawl").gte("d", from).lte("d", to);
-  if (error) throw error;
-  if (!pids.length) {
-    const tot = new Map<string, number>();
-    for (const r of crawl ?? []) tot.set(r.product_id, (tot.get(r.product_id) ?? 0) + r.s1 + r.s2 + r.s3 + r.s4 + r.s5);
-    pids = [...tot.entries()].sort((x, y) => y[1] - x[1]).slice(0, 3).map((x) => x[0]);
+  const { data: sh } = await db.from("review_shops").select("crawl_until").eq("shop_key", key).maybeSingle();
+  const cu = sh?.crawl_until ?? "1900-01-01";
+  let pids = (Array.isArray(b.product_ids) ? b.product_ids : []).map(String).filter(Boolean).slice(0, 20);
+  const rows = await readAll<{ product_id: string; d: string; source: string; s1: number; s2: number; s3: number; s4: number; s5: number }>((f, t) => {
+    let q = db.from("review_daily").select("product_id,d,source,s1,s2,s3,s4,s5").eq("shop_key", key).order("product_id").order("d").order("source");
+    if (pids.length) q = q.in("product_id", pids);
+    return q.range(f, t);
+  });
+  const ours = new Map<string, Stars>();
+  for (const r of rows) {
+    const ok = (r.source === "crawl" && r.d <= cu) || (r.source !== "crawl" && r.d > cu);
+    if (!ok) continue;
+    const t = ours.get(r.product_id) ?? [0, 0, 0, 0, 0];
+    ours.set(r.product_id, [t[0] + r.s1, t[1] + r.s2, t[2] + r.s3, t[3] + r.s4, t[4] + r.s5]);
   }
-  if (!pids.length) bad(`${key} ${from}～${to} 没有抓取表数据，先上传`);
+  const tot = (x: Stars) => x.reduce((a, c) => a + c, 0);
+  if (!pids.length) pids = [...ours.entries()].sort((x, y) => tot(y[1]) - tot(x[1])).slice(0, 10).map((x) => x[0]); // 默认评价最多的 10 个
+  if (!pids.length) bad(`${key} 没有数据，先上传抓取表`);
+  const end = addDays(localToday(shop.region), -1);
   const out = [];
-  for (const pid of pids.slice(0, 5)) {
-    const days = [];
-    let sum: Stars = [0, 0, 0, 0, 0];
-    for (let d = from; d <= to; d = addDays(d, 1)) {
-      const a = await detail(shop, pid, d, d, true);
-      sum = sum.map((v, i) => v + a.stars[i]) as Stars;
-      const c = sumStars((crawl ?? []).filter((r) => r.product_id === pid && r.d === d));
-      days.push({ d, api: a.stars, crawl: c, orders: a.orders.get(d) ?? 0, same: sameStars(a.stars, c) });
-    }
-    const whole = await detail(shop, pid, from, to, false);
-    out.push({ pid, days, whole: whole.stars, sum_of_days: sum, additive: sameStars(whole.stars, sum), match_days: days.filter((x) => x.same).length, total_days: days.length });
+  for (const pid of pids) {
+    const api = (await detail(shop, pid, end, end, false)).stars;
+    const our = ours.get(pid) ?? [0, 0, 0, 0, 0];
+    const avg = (s: Stars) => { const n = s.reduce((a, c) => a + c, 0); return n ? s.reduce((a, c, i) => a + c * (i + 1), 0) / n : null; };
+    out.push({ pid, api, ours: our, diff: api.map((v, i) => v - our[i]), api_avg: avg(api), our_avg: avg(our as Stars) });
   }
-  return { shop_key: key, from, to, products: out };
+  return { shop_key: key, crawl_until: sh?.crawl_until ?? null, products: out };
 }
 
 // ── 上传（网页端解析抓取表后分片调用）─────────────────────────────────────

@@ -21,7 +21,7 @@ const COLS: { k: K; label: string; help?: string; left?: boolean }[] = [
 export function LinksTable({ rows, onPick, picked }: { rows: Row[] | null; onPick: (pid: string) => void; picked: string | null }) {
   const [sort, setSort] = React.useState<{ k: K; dir: 1 | -1 }>({ k: "badr", dir: -1 });
   const data = React.useMemo(() => (rows ?? []).map((r) => {
-    const end = addS(r.base, r.range);
+    const end = addS(addS(r.base, r.range), r.rinit);
     const cnt = sumS(r.range), bad = r.range[0] + r.range[1];
     const cum = avgS(end), start = avgS(r.base);
     return {

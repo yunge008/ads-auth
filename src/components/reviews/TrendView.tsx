@@ -22,8 +22,9 @@ export function TrendView({ series, from, to, texts, onStars, stars }: Props) {
     for (let d = prevFrom; d <= to; d = addDays(d, 1)) {
       const x = byDay.get(d);
       const s: Stars = x ? [x.s1, x.s2, x.s3, x.s4, x.s5] : ZERO;
+      const init: Stars = x ? [x.i1, x.i2, x.i3, x.i4, x.i5] : ZERO;
       if (d === from) cumAtFrom = cum;
-      cum = addS(cum, s);
+      cum = addS(addS(cum, s), init);
       if (d < from) { prev = addS(prev, s); prevOrders += x?.orders ?? 0; continue; }
       cur = addS(cur, s);
       curOrders += x?.orders ?? 0;
@@ -39,7 +40,7 @@ export function TrendView({ series, from, to, texts, onStars, stars }: Props) {
   const kpis = [
     { label: "评价数", v: n.toLocaleString(), d: n - pn, fmt: (x: number) => Math.round(x).toLocaleString(), good: true },
     { label: "区间平均分", help: "区间内全部评价按条数加权：Σ(星级×条数) / 总条数，不是每日平均分的再平均。", v: f2(avgS(calc.cur)), d: diff(avgS(calc.cur), avgS(calc.prev)), fmt: (x: number) => x.toFixed(2), good: true },
-    { label: "累计平均分", help: "截至结束日全部历史评价的加权平均，即 listing 当天显示分。11-09 及以前来自上传的抓取表，之后来自接口逐日累加。变化 = 区间内的变化。", v: f2(avgS(calc.cumEnd)), d: diff(avgS(calc.cumEnd), avgS(calc.cumAtFrom)), fmt: (x: number) => x.toFixed(3), good: true, inRange: true },
+    { label: "累计平均分", help: "截至结束日全部历史评价的加权平均，即 listing 当天显示分。抓取表覆盖的日期用抓取表，之后用接口每晚的累计快照。变化 = 区间内的变化。", v: f2(avgS(calc.cumEnd)), d: diff(avgS(calc.cumEnd), avgS(calc.cumAtFrom)), fmt: (x: number) => x.toFixed(3), good: true, inRange: true },
     { label: "差评率", help: "1–2 星条数 / 区间评价数。", v: pct(bad), d: diff(bad, pbad), fmt: (x: number) => `${(x * 100).toFixed(1)}pp`, good: false },
   ];
   const cumVals = calc.rows.map((r) => r.cumAvg).filter((v): v is number => v != null);

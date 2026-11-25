@@ -168,48 +168,49 @@ function SyncButton({ shop, onDone }: { shop: string; onDone: () => void }) {
 
 function ReconcileCard({ sites }: { sites: string[] }) {
   const [site, setSite] = React.useState(sites[0] ?? "PH");
-  const [from, setFrom] = React.useState("2026-11-01");
-  const [to, setTo] = React.useState("2026-11-09");
   const [pids, setPids] = React.useState("");
   const [res, setRes] = React.useState<Reconcile | null>(null);
   const [busy, setBusy] = React.useState(false);
   const run = async () => {
     setBusy(true);
-    try { setRes(await reviewsApi.reconcile(site, from, to, pids.split(/[\s,，]+/).filter(Boolean))); } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
+    try { setRes(await reviewsApi.reconcile(site, pids.split(/[\s,，]+/).filter(Boolean))); } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
   };
   const fmt = (s: number[]) => [4, 3, 2, 1, 0].map((i) => s[i]).join(" / ");
+  const two = (v: number | null) => (v == null ? "—" : v.toFixed(2));
   return (
     <Card><CardContent className="p-3 grid gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm font-semibold">接口核对</span>
-        <Help label="接口核对说明" text="对每个商品：接口逐日查询 vs 抓取表同日的 1–5 星条数（检验接口按评论日期统计）；整段一次查询 vs 逐日之和（检验可加性，每晚同步依赖它）。不填商品 ID 时取该段抓取表评价最多的 3 个。只读，不写库。" />
+        <Help label="接口核对说明" text="接口返回的是每个 listing 当前的全部历史累计星级。本系统累计 = 抓取表（覆盖到的日期）+ 接口每晚新增 + 初始差额。差 = 两边都没覆盖到的评价（如抓取截止日之后、首次同步之前新增的）。首次同步后应全部为 0。不填商品 ID 时取评价最多的 10 个。只读。" />
         <select id="rv-rc-site" aria-label="站点" value={site} onChange={(e) => setSite(e.target.value)} className="h-8 rounded-md border bg-background px-2 text-sm">
           {sites.map((s) => <option key={s}>{s}</option>)}
         </select>
-        <Input id="rv-rc-from" type="date" aria-label="开始" value={from} onChange={(e) => setFrom(e.target.value)} className="h-8 w-auto" />
-        <Input id="rv-rc-to" type="date" aria-label="结束" value={to} onChange={(e) => setTo(e.target.value)} className="h-8 w-auto" />
         <Input id="rv-rc-pids" placeholder="商品 ID（可空）" value={pids} onChange={(e) => setPids(e.target.value)} className="h-8 w-56 font-mono" />
         <Button size="sm" onClick={run} disabled={busy}>{busy ? "核对中…" : "核对"}</Button>
+        {res && <span className="text-xs text-muted-foreground">抓取表到 {res.crawl_until ?? "—"}</span>}
       </div>
-      {res && res.products.map((p) => (
-        <div key={p.pid} className="rounded-md border overflow-x-auto">
-          <div className="px-3 py-2 text-sm flex flex-wrap gap-x-4 gap-y-1 border-b tabular-nums">
-            <span className="font-mono">{p.pid}</span>
-            <span className={p.match_days === p.total_days ? "text-green-600" : "text-red-600"}>逐日一致 {p.match_days}/{p.total_days}</span>
-            <span className={p.additive ? "text-green-600" : "text-red-600"}>可加性 {p.additive ? "成立" : "不成立"}（整段 {fmt(p.whole)} · 逐日和 {fmt(p.sum_of_days)}）</span>
-          </div>
+      {res && (
+        <div className="rounded-md border overflow-x-auto">
           <Table className="tabular-nums text-xs">
-            <TableHeader><TableRow><TableHead>日期</TableHead><TableHead className="text-right">接口 5→1★</TableHead><TableHead className="text-right">抓取表 5→1★</TableHead><TableHead className="text-right">出单</TableHead></TableRow></TableHeader>
+            <TableHeader><TableRow>
+              <TableHead>商品 ID</TableHead><TableHead className="text-right">接口 5→1★</TableHead><TableHead className="text-right">本系统 5→1★</TableHead>
+              <TableHead className="text-right">差</TableHead><TableHead className="text-right">接口均分</TableHead><TableHead className="text-right">本系统均分</TableHead>
+            </TableRow></TableHeader>
             <TableBody>
-              {p.days.map((d) => (
-                <TableRow key={d.d} className={d.same ? "" : "bg-red-500/10"}>
-                  <TableCell>{d.d}</TableCell><TableCell className="text-right">{fmt(d.api)}</TableCell><TableCell className="text-right">{fmt(d.crawl)}</TableCell><TableCell className="text-right">{d.orders}</TableCell>
-                </TableRow>
-              ))}
+              {res.products.map((p) => {
+                const same = p.diff.every((v) => v === 0);
+                return (
+                  <TableRow key={p.pid} className={same ? "" : "bg-red-500/10"}>
+                    <TableCell className="font-mono">{p.pid}</TableCell><TableCell className="text-right">{fmt(p.api)}</TableCell>
+                    <TableCell className="text-right">{fmt(p.ours)}</TableCell><TableCell className="text-right">{fmt(p.diff)}</TableCell>
+                    <TableCell className="text-right">{two(p.api_avg)}</TableCell><TableCell className="text-right">{two(p.our_avg)}</TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </div>
-      ))}
+      )}
     </CardContent></Card>
   );
 }
