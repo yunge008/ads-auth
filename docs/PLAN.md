@@ -29,6 +29,7 @@
 2026-11-25 核验：`tts-export` 已按 main 58c83f6 重新部署（1125.272），正常应答（401 鉴权提示）→ 1125.271 记录的「需随 tts-export 一并部署」（入库字符串去除空字符，修 PH 订单写入失败卡住）已随本次上线。
 2026-11-25 核验：`tts-export` 已按 main cb8cba2 重新部署（1125.274），正常应答（401 鉴权提示）→ 1125.273 记录的「订单入库瘦身」（slimOrder 去 sku_image/product_name/重复物流字段/省市区重复说明）已随本次上线。**待人工：migration `20261125130000_db_size_monitor.sql` 尚未执行（`public.db_size_bytes()` 不存在），tts-sync-cron 的空间检查会失败。**
 2026-11-25 核验：`tts-export` 已按 main 69e7ea6 的函数代码重新部署（1125.295，部署时 HEAD f4c3db6，其后提交未碰函数），正常应答（401 鉴权提示）→ 财务导出列名按站点区分、导出页 PH/TH 财务列取数映射修复已上线。
+2026-11-25 核验：`tts-export` 再次按 main 重新部署（1125.307，HEAD 1f25889，69e7ea6 后函数未变，source_sha256 与 1125.295 相同），正常应答（401 鉴权提示）。
 ~~同时说明 Lovable 在同步 main 后会自动重新部署 Edge Function~~ **2026-11-24 证伪**：新函数 gmv-max-exclusive-auth 推 main 后仍 404，Edge Function 只在 Lovable 手动部署（耗积分）时更新；前端与服务端路由随 main 同步免费上线。
 
 ## 任务板
