@@ -103,6 +103,14 @@
   Edge Function 侧的 cron 免口令统一走 `_shared/cron.ts` 的 `cronAuthed(req)`（`x-cron-key` → `verify_gmv_cron_key` RPC）；
   `attribution-feishu` 只对 `sync-targets` / `sync-handovers` 放行 cron 身份，回写飞书类 action 仍必须带管理口令。
 
+## GMV MAX 素材接口抓取（归因用，阶段 A：对账中，未接入归因）
+
+- 服务端路由 `/api/public/hooks/gmv-max-material`（逻辑 `src/lib/gmv-max-material.server.ts`，直接 import `supabase/functions/_shared/tiktok.ts` 的 `ttGet` 与 `gmv-max-report.ts` 的 `fetchReport`）；鉴权借 `attribution-upload` 的口令校验（归因管理页权限）。
+- `gmv_max_material_batches`：一次 站点×月 抓取（`advertisers` jsonb 存每户进度与 campaign 级合计，`fields` 存接口实际返回的字段/内容类型/币种，`report` 存对账结果）。
+- `gmv_max_material_agg`：campaign × 商品组 × item_id 的月合计（只存金额非 0 行），唯一键 `(batch_id, advertiser_id, campaign_id, product_id, item_id)`。
+- `gmv_max_adv_daily`：广告户 × 天 消耗（换户检测用），主键 `(advertiser_id, stat_date)`。
+- 三表 RLS 开启无 policy（仅 service_role）；与 `ad_uploads` / `ad_upload_agg` 完全独立，归因不读。页面入口：归因管理 → Excel 上传 → 「接口对账」TAB（只在打开并点击时请求）。
+
 ## GMV 归因 V3（阶段 1–2 已落地，引擎尚未切换）
 
 按 `GMV_ATTRIBUTION_V3_PLAN`（v3.0）推进。**到阶段 2 为止，归因数字与切换前完全一致**——新表已建、数据已生成，但归因引擎（`attribution-run` / `attribution-upload` / `_shared/attribution.ts`）仍然读 `creator_ownership` 的单值归属。

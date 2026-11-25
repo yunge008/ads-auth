@@ -31,6 +31,7 @@ import { Route as ApiPublicHooksEcoRouteImport } from './routes/api/public/hooks
 import { Route as ApiPublicHooksEcoPingRouteImport } from './routes/api/public/hooks/eco-ping'
 import { Route as ApiPublicHooksFeishuSyncCronRouteImport } from './routes/api/public/hooks/feishu-sync-cron'
 import { Route as ApiPublicHooksGmvMaxCronRouteImport } from './routes/api/public/hooks/gmv-max-cron'
+import { Route as ApiPublicHooksGmvMaxMaterialRouteImport } from './routes/api/public/hooks/gmv-max-material'
 import { Route as ApiPublicHooksGmvMaxWriteRouteImport } from './routes/api/public/hooks/gmv-max-write'
 import { Route as ApiPublicHooksSeaInventoryCronRouteImport } from './routes/api/public/hooks/sea-inventory-cron'
 import { Route as ApiPublicHooksTtsSyncCronRouteImport } from './routes/api/public/hooks/tts-sync-cron'
@@ -152,6 +153,12 @@ const ApiPublicHooksGmvMaxCronRoute =
     path: '/api/public/hooks/gmv-max-cron',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicHooksGmvMaxMaterialRoute =
+  ApiPublicHooksGmvMaxMaterialRouteImport.update({
+    id: '/api/public/hooks/gmv-max-material',
+    path: '/api/public/hooks/gmv-max-material',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicHooksGmvMaxWriteRoute =
   ApiPublicHooksGmvMaxWriteRouteImport.update({
     id: '/api/public/hooks/gmv-max-write',
@@ -205,6 +212,7 @@ export interface FileRoutesByFullPath {
   '/api/public/hooks/eco-ping': typeof ApiPublicHooksEcoPingRoute
   '/api/public/hooks/feishu-sync-cron': typeof ApiPublicHooksFeishuSyncCronRoute
   '/api/public/hooks/gmv-max-cron': typeof ApiPublicHooksGmvMaxCronRoute
+  '/api/public/hooks/gmv-max-material': typeof ApiPublicHooksGmvMaxMaterialRoute
   '/api/public/hooks/gmv-max-write': typeof ApiPublicHooksGmvMaxWriteRoute
   '/api/public/hooks/sea-inventory-cron': typeof ApiPublicHooksSeaInventoryCronRoute
   '/api/public/hooks/tts-sync-cron': typeof ApiPublicHooksTtsSyncCronRoute
@@ -234,6 +242,7 @@ export interface FileRoutesByTo {
   '/api/public/hooks/eco-ping': typeof ApiPublicHooksEcoPingRoute
   '/api/public/hooks/feishu-sync-cron': typeof ApiPublicHooksFeishuSyncCronRoute
   '/api/public/hooks/gmv-max-cron': typeof ApiPublicHooksGmvMaxCronRoute
+  '/api/public/hooks/gmv-max-material': typeof ApiPublicHooksGmvMaxMaterialRoute
   '/api/public/hooks/gmv-max-write': typeof ApiPublicHooksGmvMaxWriteRoute
   '/api/public/hooks/sea-inventory-cron': typeof ApiPublicHooksSeaInventoryCronRoute
   '/api/public/hooks/tts-sync-cron': typeof ApiPublicHooksTtsSyncCronRoute
@@ -264,6 +273,7 @@ export interface FileRoutesById {
   '/api/public/hooks/eco-ping': typeof ApiPublicHooksEcoPingRoute
   '/api/public/hooks/feishu-sync-cron': typeof ApiPublicHooksFeishuSyncCronRoute
   '/api/public/hooks/gmv-max-cron': typeof ApiPublicHooksGmvMaxCronRoute
+  '/api/public/hooks/gmv-max-material': typeof ApiPublicHooksGmvMaxMaterialRoute
   '/api/public/hooks/gmv-max-write': typeof ApiPublicHooksGmvMaxWriteRoute
   '/api/public/hooks/sea-inventory-cron': typeof ApiPublicHooksSeaInventoryCronRoute
   '/api/public/hooks/tts-sync-cron': typeof ApiPublicHooksTtsSyncCronRoute
@@ -295,6 +305,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/eco-ping'
     | '/api/public/hooks/feishu-sync-cron'
     | '/api/public/hooks/gmv-max-cron'
+    | '/api/public/hooks/gmv-max-material'
     | '/api/public/hooks/gmv-max-write'
     | '/api/public/hooks/sea-inventory-cron'
     | '/api/public/hooks/tts-sync-cron'
@@ -324,6 +335,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/eco-ping'
     | '/api/public/hooks/feishu-sync-cron'
     | '/api/public/hooks/gmv-max-cron'
+    | '/api/public/hooks/gmv-max-material'
     | '/api/public/hooks/gmv-max-write'
     | '/api/public/hooks/sea-inventory-cron'
     | '/api/public/hooks/tts-sync-cron'
@@ -353,6 +365,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/eco-ping'
     | '/api/public/hooks/feishu-sync-cron'
     | '/api/public/hooks/gmv-max-cron'
+    | '/api/public/hooks/gmv-max-material'
     | '/api/public/hooks/gmv-max-write'
     | '/api/public/hooks/sea-inventory-cron'
     | '/api/public/hooks/tts-sync-cron'
@@ -383,6 +396,7 @@ export interface RootRouteChildren {
   ApiPublicHooksEcoPingRoute: typeof ApiPublicHooksEcoPingRoute
   ApiPublicHooksFeishuSyncCronRoute: typeof ApiPublicHooksFeishuSyncCronRoute
   ApiPublicHooksGmvMaxCronRoute: typeof ApiPublicHooksGmvMaxCronRoute
+  ApiPublicHooksGmvMaxMaterialRoute: typeof ApiPublicHooksGmvMaxMaterialRoute
   ApiPublicHooksGmvMaxWriteRoute: typeof ApiPublicHooksGmvMaxWriteRoute
   ApiPublicHooksSeaInventoryCronRoute: typeof ApiPublicHooksSeaInventoryCronRoute
   ApiPublicHooksTtsSyncCronRoute: typeof ApiPublicHooksTtsSyncCronRoute
@@ -546,6 +560,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicHooksGmvMaxCronRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/hooks/gmv-max-material': {
+      id: '/api/public/hooks/gmv-max-material'
+      path: '/api/public/hooks/gmv-max-material'
+      fullPath: '/api/public/hooks/gmv-max-material'
+      preLoaderRoute: typeof ApiPublicHooksGmvMaxMaterialRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/hooks/gmv-max-write': {
       id: '/api/public/hooks/gmv-max-write'
       path: '/api/public/hooks/gmv-max-write'
@@ -607,6 +628,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicHooksEcoPingRoute: ApiPublicHooksEcoPingRoute,
   ApiPublicHooksFeishuSyncCronRoute: ApiPublicHooksFeishuSyncCronRoute,
   ApiPublicHooksGmvMaxCronRoute: ApiPublicHooksGmvMaxCronRoute,
+  ApiPublicHooksGmvMaxMaterialRoute: ApiPublicHooksGmvMaxMaterialRoute,
   ApiPublicHooksGmvMaxWriteRoute: ApiPublicHooksGmvMaxWriteRoute,
   ApiPublicHooksSeaInventoryCronRoute: ApiPublicHooksSeaInventoryCronRoute,
   ApiPublicHooksTtsSyncCronRoute: ApiPublicHooksTtsSyncCronRoute,

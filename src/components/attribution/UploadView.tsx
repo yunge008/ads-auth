@@ -23,6 +23,7 @@ import {
 } from "@/lib/attributionApi";
 import { uploadQueue, itemPercent, type Viewing } from "@/lib/uploadQueue";
 import { UploadStatusMatrix } from "./UploadStatusMatrix";
+import { ApiReconcilePanel } from "./ApiReconcilePanel";
 
 
 const HISTORY_PAGE_SIZE = 20;
@@ -529,6 +530,7 @@ export function UploadView({
             <TabsList>
               <TabsTrigger value="matrix">上传状态矩阵</TabsTrigger>
               <TabsTrigger value="list">列表</TabsTrigger>
+              <TabsTrigger value="api">接口对账</TabsTrigger>
             </TabsList>
             <TabsContent value="list" className="mt-3 space-y-2">
               <div className="border rounded-md overflow-x-auto">
@@ -625,6 +627,9 @@ export function UploadView({
             </TabsContent>
             <TabsContent value="matrix" className="mt-3">
               <UploadStatusMatrix history={history} />
+            </TabsContent>
+            <TabsContent value="api" className="mt-3">
+              <ApiReconcilePanel />
             </TabsContent>
           </Tabs>
         </CardContent>
