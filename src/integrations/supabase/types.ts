@@ -1597,6 +1597,36 @@ export type Database = {
         }
         Relationships: []
       }
+      gmv_max_adv_daily: {
+        Row: {
+          advertiser_id: string
+          cost: number
+          country: string
+          fetched_at: string
+          gross_revenue: number
+          orders: number
+          stat_date: string
+        }
+        Insert: {
+          advertiser_id: string
+          cost?: number
+          country: string
+          fetched_at?: string
+          gross_revenue?: number
+          orders?: number
+          stat_date: string
+        }
+        Update: {
+          advertiser_id?: string
+          cost?: number
+          country?: string
+          fetched_at?: string
+          gross_revenue?: number
+          orders?: number
+          stat_date?: string
+        }
+        Relationships: []
+      }
       gmv_max_import_logs: {
         Row: {
           advertiser_id: string
@@ -1669,6 +1699,119 @@ export type Database = {
           source_bc_name?: string
           source_campaign_id?: string
           status?: string
+        }
+        Relationships: []
+      }
+      gmv_max_material_agg: {
+        Row: {
+          account_name: string | null
+          advertiser_id: string
+          batch_id: string
+          campaign_id: string
+          clicks: number | null
+          content_type_raw: string | null
+          cost: number
+          creative_type: string
+          currency: string | null
+          gross_revenue: number
+          id: number
+          impressions: number | null
+          item_id: string
+          orders: number
+          posted_raw: string | null
+          product_id: string
+          title: string | null
+        }
+        Insert: {
+          account_name?: string | null
+          advertiser_id: string
+          batch_id: string
+          campaign_id: string
+          clicks?: number | null
+          content_type_raw?: string | null
+          cost?: number
+          creative_type: string
+          currency?: string | null
+          gross_revenue?: number
+          id?: never
+          impressions?: number | null
+          item_id: string
+          orders?: number
+          posted_raw?: string | null
+          product_id: string
+          title?: string | null
+        }
+        Update: {
+          account_name?: string | null
+          advertiser_id?: string
+          batch_id?: string
+          campaign_id?: string
+          clicks?: number | null
+          content_type_raw?: string | null
+          cost?: number
+          creative_type?: string
+          currency?: string | null
+          gross_revenue?: number
+          id?: never
+          impressions?: number | null
+          item_id?: string
+          orders?: number
+          posted_raw?: string | null
+          product_id?: string
+          title?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gmv_max_material_agg_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "gmv_max_material_batches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      gmv_max_material_batches: {
+        Row: {
+          advertisers: Json
+          country: string
+          error: string | null
+          fields: Json
+          finished_at: string | null
+          id: string
+          month: string
+          reconciled_at: string | null
+          report: Json | null
+          started_at: string
+          status: string
+          triggered_by: string | null
+        }
+        Insert: {
+          advertisers?: Json
+          country: string
+          error?: string | null
+          fields?: Json
+          finished_at?: string | null
+          id?: string
+          month: string
+          reconciled_at?: string | null
+          report?: Json | null
+          started_at?: string
+          status?: string
+          triggered_by?: string | null
+        }
+        Update: {
+          advertisers?: Json
+          country?: string
+          error?: string | null
+          fields?: Json
+          finished_at?: string | null
+          id?: string
+          month?: string
+          reconciled_at?: string | null
+          report?: Json | null
+          started_at?: string
+          status?: string
+          triggered_by?: string | null
         }
         Relationships: []
       }
@@ -3518,6 +3661,7 @@ export type Database = {
         Args: { _rows: Json; _run_id: string }
         Returns: number
       }
+      db_size_bytes: { Args: never; Returns: number }
       get_gmv_cron_secret: { Args: never; Returns: string }
       gmv_attr_monthly_agg: {
         Args: {
