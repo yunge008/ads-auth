@@ -52,6 +52,8 @@ export type ParsedFile = {
     unexpectedCurrencies: string[];
     /** 表头里没被识别的列（原文），用于发现 TikTok 改了列名 */
     unmappedHeaders: string[];
+    /** 没被识别、列名像金额/订单、且有非 0 数值的列 —— 新增的钱不许悄悄丢掉（例：2026-10 起的 Cost (affiliate)） */
+    unmappedMoney?: { header: string; nonZeroRows: number; sum: number }[];
   };
 };
 
@@ -115,6 +117,10 @@ const HEADER_MAP: Record<string, keyof ParsedRow> = {
   "productadimpressions": "impressions",
   "productadclicks": "clicks",
   "currency": "currency",
+  // 英文新版导出（2026-10 起出现，如「MY / MX-NE / MX-SJ MAX 202610.xlsx」）：视频 ID 改叫 Post ID、标题改叫 Creative。
+  // 已核验：Post ID 取值与库内 2026-08 上传表的视频 ID 逐值一致、达人账号相同（例 7586886812505869576 → nervia988）。
+  "postid": "vid",
+  "creative": "video_title",
 };
 
 const REQUIRED: Array<keyof ParsedRow> = [
@@ -250,6 +256,17 @@ export async function parseAdExcel(file: File): Promise<ParsedFile> {
     .map((h) => String(h ?? "").trim())
     .filter((h) => h && !HEADER_MAP[normHeader(h)])
     .slice(0, 12);
+  const MONEY_LIKE = /cost|revenue|gmv|order|成本|花费|收入|订单/i;
+  const moneyCols = headerRow
+    .map((h, i) => ({ header: String(h ?? "").trim(), i }))
+    .filter(
+      (x) =>
+        x.header &&
+        !HEADER_MAP[normHeader(x.header)] &&
+        MONEY_LIKE.test(x.header) &&
+        !/per|rate|ratio|率|平均|单均|每/i.test(x.header), // 比例/均值列天然非 0，不算新增金额
+    )
+    .map((x) => ({ ...x, nonZeroRows: 0, sum: 0 }));
   const rows: ParsedRow[] = [];
   const totals = { gmv: 0, cost: 0, rows: 0, productCardRows: 0, gmvRows: 0 };
   const curMap = new Map<string, CurrencyTotal>();
@@ -293,6 +310,13 @@ export async function parseAdExcel(file: File): Promise<ParsedFile> {
       currency: cellStr(r, "currency").toUpperCase() || "USD",
     };
     if (!cellStr(r, "currency")) blankCurrencyRows++;
+    for (const m of moneyCols) {
+      const v = parseNumeric(r[m.i]);
+      if (isFinite(v) && v !== 0) {
+        m.nonZeroRows++;
+        m.sum += v;
+      }
+    }
     rows.push(row);
     totals.gmv += row.gross_revenue;
     totals.cost += row.cost;
@@ -321,6 +345,9 @@ export async function parseAdExcel(file: File): Promise<ParsedFile> {
       blankCurrencyRows,
       unexpectedCurrencies: Array.from(curMap.keys()).filter((c) => !EXPECTED_CURRENCIES.includes(c)).sort(),
       unmappedHeaders,
+      unmappedMoney: moneyCols
+        .filter((m) => m.nonZeroRows > 0)
+        .map((m) => ({ header: m.header, nonZeroRows: m.nonZeroRows, sum: Math.round(m.sum * 100) / 100 })),
     },
   };
 }

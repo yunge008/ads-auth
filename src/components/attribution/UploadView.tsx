@@ -151,6 +151,9 @@ export function UploadView({
       if (d.badNumberCells) {
         out.push(`${n}：有 ${d.badNumberCells} 个金额单元格解析不出数字（样本：${d.badNumberSamples.join(" / ")}），这些行的成本/GMV 记为 0。`);
       }
+      for (const m of d.unmappedMoney ?? []) {
+        out.push(`${n}：未识别的金额列「${m.header}」有 ${m.nonZeroRows} 行非 0（合计 ${m.sum}），这部分没有计入成本/GMV，请确认口径。`);
+      }
       if (f.stats.byCurrency.length > 1) {
         out.push(`${n}：文件里存在多个币种（${f.stats.byCurrency.map((c) => `${c.currency} ${c.rows} 行`).join("、")}），请确认每个币种都已在设置页维护汇率。`);
       }
