@@ -161,7 +161,7 @@ function SyncButton({ shop, onDone }: { shop: string; onDone: () => void }) {
   const stop = React.useRef(false);
   const run = async () => {
     stop.current = false;
-    setBusy("开始…");
+    setBusy("同步中…");
     let calls = 0;
     try {
       for (let round = 1; round <= 60 && !stop.current; round++) {
@@ -170,13 +170,19 @@ function SyncButton({ shop, onDone }: { shop: string; onDone: () => void }) {
         if (!x) { toast.success(`${shop}：今晚已同步完`); break; }
         if (x.error) { toast.error(`${shop}：${x.error}`); break; }
         calls = x.calls;
-        setBusy(`${x.idx}/${x.total}`);
+        setBusy(`同步中 ${x.idx}/${x.total}`);
+        onDone(); // 刷新「今晚进度」列
         if (x.done) { toast.success(`${shop}：完成 ${x.total} 个商品，接口调用 ${calls} 次`); break; }
       }
       onDone();
     } catch (e) { toast.error((e as Error).message); } finally { setBusy(null); }
   };
-  if (busy) return <Button size="sm" variant="ghost" onClick={() => { stop.current = true; }} title="点击停止">{busy} · 停止</Button>;
+  if (busy) return (
+    <span className="inline-flex items-center gap-2 whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+      {busy}
+      <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => { stop.current = true; setBusy("停止中…"); }}>停止</Button>
+    </span>
+  );
   return <Button size="sm" variant="ghost" onClick={run}>同步</Button>;
 }
 
