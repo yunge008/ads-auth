@@ -20,7 +20,7 @@ Lovable 积分已充值 → Edge Function 改动可以部署（B 类：给 Lovab
 | G1 | 部署 `attribution-upload`、`attribution-identity-build`、`tts-listing`、`feishu-read` | 🔧 Lovable | ✅ 1124.253 已部署，四个均在线应答 |
 | G2 | 5 个 migration 是否已执行（outreach_core / tts_multi_app / outreach_settings_rls / gmv_max_import_logs / _src_dst） | 🔧 SQL | ✅ 2026-11-24 负责人跑检查 SQL，6 项全部 true，已登记 `docs/MIGRATIONS.md` |
 | G3 | AI 数据库只读通道 v2（`rpc/ai_db_query`，口令头 + ai_reader + 只读事务） | — | ✅ 已执行并实测可用；单条查询上限 3 秒（anon 平台默认，函数内无法放宽）。Lovable 扫描报「ai_db_query 拼 SQL」Critical 属设计如此，已建议忽略 |
-| G4 | 定时任务密钥 `gmv_max_cron_secret` 明文写在历史 migration `20260605144834`（Lovable Critical） | 🔧 SQL | ✅ 2026-11-24 已轮换（64 位随机）；读取方均运行时取 vault，无需部署。✅ 当晚 23:00 飞书同步、23:30 归因快照（6/7/8 月）均正常；次日 19:00 自动授权待核对（已设提醒）。历史 migration 不改，扫描可能仍报，可标已处理 |
+| G4 | 定时任务密钥 `gmv_max_cron_secret` 明文写在历史 migration `20260605144834`（Lovable Critical） | 🔧 SQL | ✅ 2026-11-24 已轮换（64 位随机）；读取方均运行时取 vault，无需部署。✅ 当晚 23:00 飞书同步、23:30 归因快照（6/7/8 月）均正常；✅ 11-25 19:00 自动授权正常（成功 3、失败 0、无鉴权错误）。历史 migration 不改，扫描可能仍报，可标已处理 |
 | G6 | 财务/订单每日入库 | — | ✅ 全部已部署/执行/发布；空间监控已生效（3.45GB / 上限 7.6GB = 45%） |
 | G7 | 部署 `bc-list-advertisers`（设置→授权 账户名显示成 ID 的修复，1125.282） | 🔧 Lovable | ⚠️ 待部署；部署后刷新设置页核对账户名 |
 | G5 | 导出防公式注入：素材成效已修（Lovable 1124.257）；「TikTok授权结果」CSV 与其他 Excel 导出待 Lovable 修/检查 | Lovable 免费修 | 进行中 |
