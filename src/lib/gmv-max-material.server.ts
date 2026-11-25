@@ -950,6 +950,7 @@ export async function listBatches(db: SupabaseClient, limit = 20) {
     .select(
       "id, country, month, status, triggered_by, started_at, finished_at, reconciled_at, error, report->pass, report->totals",
     )
+    .or("triggered_by.is.null,triggered_by.not.like.probe:*")
     .order("started_at", { ascending: false })
     .limit(limit);
   if (error) throw new Error(error.message);
@@ -965,4 +966,141 @@ export async function getBatch(db: SupabaseClient, id: string) {
   if (error) throw new Error(error.message);
   if (!data) throw new Error("批次不存在");
   return data;
+}
+
+// ───────────────────────── 一次性：发布时间来源探测 ─────────────────────────
+// GMV MAX 报表接口没有发布时间字段（2026-11-25 实测 Invalid metric）。这里对同一批 VID
+// 同时试三个候选接口，原始返回存进一个探测批次（triggered_by='probe:posted'），供对账文档取证。
+// 候选：①TikTok Shop Analytics 单视频表现 ②TikTok Shop Analytics 视频列表 ③Business API /gmv_max/video/get/
+export async function probePostedTime(
+  db: SupabaseClient,
+  country: string,
+  passcode: string,
+  adminName: string,
+) {
+  const { data: advs, error } = await db
+    .from("advertiser_countries")
+    .select("advertiser_id, shop_id")
+    .eq("country", country);
+  if (error) throw new Error(error.message);
+  const shopId = String(advs?.[0]?.shop_id ?? "");
+  if (!shopId) throw new Error(`站点 ${country} 没有店铺 ID`);
+  // 样本 VID：该站点最近一个月上传表里花费最高、带发布时间的 5 个视频 + 已知的定时发布样本
+  const { data: ups } = await db
+    .from("ad_uploads")
+    .select("id, month")
+    .eq("country", country)
+    .eq("status", "READY")
+    .order("month", { ascending: false })
+    .limit(2);
+  const sample: { vid: string; upload_posted_at: string | null }[] = [];
+  if (ups?.length) {
+    const { data: rows } = await db
+      .from("ad_upload_agg")
+      .select("vid, posted_at, cost")
+      .in(
+        "upload_id",
+        ups.map((u) => u.id),
+      )
+      .neq("vid", "")
+      .not("posted_at", "is", null)
+      .order("cost", { ascending: false })
+      .limit(5);
+    for (const r of rows ?? [])
+      sample.push({ vid: String(r.vid), upload_posted_at: r.posted_at as string });
+  }
+  if (country === "VN")
+    sample.push({ vid: "7559874631184911623", upload_posted_at: "2025-10-12T13:00:00+00:00" });
+
+  const anonKey = process.env.SUPABASE_ANON_KEY ?? process.env.SUPABASE_PUBLISHABLE_KEY ?? "";
+  const raw = async (path: string, query: Record<string, string>) => {
+    const r = await fetch(`${process.env.SUPABASE_URL}/functions/v1/tts-p0-probe`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: anonKey,
+        Authorization: `Bearer ${anonKey}`,
+        "x-admin-passcode": passcode,
+        "x-admin-name": adminName,
+      },
+      body: JSON.stringify({ action: "raw", shop_id: shopId, method: "GET", path, query }),
+    });
+    const text = await r.text();
+    return { http: r.status, body: text.slice(0, 6000) };
+  };
+  const today = new Date().toISOString().slice(0, 10);
+  const yearAgo = new Date(Date.now() - 360 * 86400_000).toISOString().slice(0, 10);
+  const out: Record<string, unknown> = {
+    country,
+    shop_id: shopId,
+    sample,
+    at: new Date().toISOString(),
+  };
+
+  // ① 单视频表现
+  const detail: Record<string, unknown> = {};
+  for (const s of sample.slice(0, 3).concat(sample.slice(5))) {
+    detail[s.vid] = await raw(`/analytics/202509/shop_videos/${s.vid}/performance`, {
+      start_date_ge: yearAgo,
+      end_date_lt: today,
+      granularity: "ALL",
+      currency: "LOCAL",
+    });
+  }
+  out.shop_video_detail = detail;
+  // ② 视频列表（两个版本号都试）
+  out.shop_video_list = {
+    v202605: await raw("/analytics/202605/shop_videos/performance", {
+      start_date_ge: yearAgo,
+      end_date_lt: today,
+      page_size: "5",
+      currency: "LOCAL",
+    }),
+    v202409: await raw("/analytics/202409/shop_videos/performance", {
+      start_date_ge: yearAgo,
+      end_date_lt: today,
+      page_size: "5",
+      currency: "LOCAL",
+    }),
+  };
+  // ③ Business API GMV Max 可投视频（需 store_authorized_bc_id；用连接的 bc_id）
+  const gm: Record<string, unknown> = {};
+  for (const a of (advs ?? []).slice(0, 3)) {
+    const { data: conns } = await db
+      .from("tiktok_connections")
+      .select("access_token, bc_id")
+      .contains("advertiser_ids", [String(a.advertiser_id)]);
+    for (const c of (conns ?? []) as { access_token: string; bc_id: string | null }[]) {
+      if (!c.bc_id) continue;
+      try {
+        const d = await ttGet(c.access_token, "/gmv_max/video/get/", {
+          advertiser_id: String(a.advertiser_id),
+          store_id: shopId,
+          store_authorized_bc_id: c.bc_id,
+          page: "1",
+          page_size: "5",
+        });
+        gm[`${a.advertiser_id}@${c.bc_id}`] = JSON.stringify(d).slice(0, 6000);
+        break;
+      } catch (e) {
+        gm[`${a.advertiser_id}@${c.bc_id}`] = `ERROR ${(e as Error).message}`;
+      }
+    }
+  }
+  out.gmv_max_video_get = gm;
+
+  const { data: b, error: e2 } = await db
+    .from("gmv_max_material_batches")
+    .insert({
+      country,
+      month: today.slice(0, 7),
+      status: "READY",
+      triggered_by: "probe:posted",
+      fields: { probe: out },
+      finished_at: new Date().toISOString(),
+    })
+    .select("id")
+    .single();
+  if (e2) throw new Error(e2.message);
+  return { probe_batch_id: b.id, ...out };
 }

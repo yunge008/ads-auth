@@ -4,6 +4,7 @@
 //   {action:"step", batch_id}          跑一步（每步 ≤30 次 TikTok 调用），返回 done=true 为止
 //   {action:"retry", batch_id}         失败的广告户放回队列
 //   {action:"reconcile", batch_id}     与该站点该月已上传的表对账，报告写进批次
+//   {action:"probe_posted", country}  一次性：探测按 VID 取发布时间的候选接口，原始返回存库
 //   {action:"list"} / {action:"get", batch_id}  只读
 // 鉴权：x-admin-passcode，需「归因管理」页面权限（经 attribution-upload 校验）。
 // 只写 gmv_max_material_* / gmv_max_adv_daily 三张独立表，不影响归因计算。
@@ -13,6 +14,7 @@ import {
   checkAttributionPasscode,
   getBatch,
   listBatches,
+  probePostedTime,
   reconcileBatch,
   retryFailed,
   startBatch,
@@ -57,6 +59,17 @@ export const Route = createFileRoute("/api/public/hooks/gmv-max-material")({
               return jsonRes(await retryFailed(db, id));
             case "reconcile":
               return jsonRes(await reconcileBatch(db, id));
+            case "probe_posted":
+              return jsonRes(
+                await probePostedTime(
+                  db,
+                  String(body.country ?? "")
+                    .trim()
+                    .toUpperCase(),
+                  request.headers.get("x-admin-passcode") ?? "",
+                  request.headers.get("x-admin-name") ?? "",
+                ),
+              );
             case "list":
               return jsonRes({ batches: await listBatches(db) });
             case "get":

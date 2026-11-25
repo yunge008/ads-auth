@@ -12,7 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { CircleHelp, Download, RotateCcw } from "lucide-react";
+import { CircleHelp, Clock, Download, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { getAdminName, getPasscode } from "@/lib/api";
 
@@ -192,6 +192,15 @@ export function ApiReconcilePanel() {
       await call({ action: "retry", batch_id: batchId });
       await drive(batchId);
     });
+  // 一次性：探测按 VID 取发布时间的候选接口（结果存库，Claude 读取）
+  const probe = () =>
+    run(async () => {
+      const site = country.split(/[,，\s]+/).filter(Boolean)[0] ?? "";
+      setProgress(`${site} 发布时间接口探测中…`);
+      await call({ action: "probe_posted", country: site });
+      setProgress("");
+      toast.success(`${site} 发布时间探测完成`);
+    });
   const download = () =>
     batchId &&
     run(async () => {
@@ -262,6 +271,16 @@ export function ApiReconcilePanel() {
             {busy ? "进行中…" : "抓取并对账"}
           </Button>
           <Help text="站点可填多个（逗号分隔），月份为起止区间，逐个 站点×月 顺序跑。从接口抓已登记广告户（含未启用）的 GMV MAX 素材数据，与已上传的表逐项比。数据只存独立表，不影响归因结果。" />
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={probe}
+            disabled={busy}
+            aria-label="探测发布时间接口（第一个站点）"
+            title="探测发布时间接口（第一个站点）"
+          >
+            <Clock className="h-4 w-4" />
+          </Button>
           {batchId ? (
             <>
               <Button
