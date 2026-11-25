@@ -92,8 +92,9 @@ function Help({ text }: { text: string }) {
 }
 
 export function ApiReconcilePanel() {
-  const [country, setCountry] = React.useState("PH");
-  const [month, setMonth] = React.useState("2026-08");
+  const [country, setCountry] = React.useState("VN,JP");
+  const [month, setMonth] = React.useState("2026-06");
+  const [monthTo, setMonthTo] = React.useState("2026-08");
   const [busy, setBusy] = React.useState(false);
   const [progress, setProgress] = React.useState("");
   const [batchId, setBatchId] = React.useState<string | null>(null);
@@ -107,7 +108,7 @@ export function ApiReconcilePanel() {
   }, []);
   React.useEffect(loadHistory, [loadHistory]);
 
-  const drive = async (id: string) => {
+  const drive = async (id: string, label = "") => {
     for (let i = 0; i < 500; i++) {
       const s = await call<{
         done: boolean;
@@ -125,10 +126,10 @@ export function ApiReconcilePanel() {
       if (s.done) break;
       const a = s.advertiser!;
       setProgress(
-        `${a.name || a.id}：${a.status === "FAILED" ? `失败 ${a.error}` : `剩 ${a.pending_campaigns ?? "?"} 个 campaign · 已存 ${a.rows} 行`}（待处理户 ${s.advertisers_left}）`,
+        `${label}${a.name || a.id}：${a.status === "FAILED" ? `失败 ${a.error}` : `剩 ${a.pending_campaigns ?? "?"} 个 campaign · 已存 ${a.rows} 行`}（待处理户 ${s.advertisers_left}）`,
       );
     }
-    setProgress("对账中…");
+    setProgress(`${label}对账中…`);
     setReport(await call<Report>({ action: "reconcile", batch_id: id }));
     setProgress("");
   };
@@ -149,9 +150,25 @@ export function ApiReconcilePanel() {
   const start = () =>
     run(async () => {
       setReport(null);
-      const r = await call<{ batch_id: string }>({ action: "start", country, month });
-      setBatchId(r.batch_id);
-      await drive(r.batch_id);
+      // 站点可逗号分隔，月份为起止区间：逐个 站点×月 顺序跑
+      const sites = country
+        .split(/[,，\s]+/)
+        .map((x) => x.trim())
+        .filter(Boolean);
+      const months: string[] = [];
+      for (let m = month; m && m <= (monthTo || month); ) {
+        months.push(m);
+        const [y, mm] = m.split("-").map(Number);
+        m = mm === 12 ? `${y + 1}-01` : `${y}-${String(mm + 1).padStart(2, "0")}`;
+      }
+      for (const site of sites) {
+        for (const m of months) {
+          const r = await call<{ batch_id: string }>({ action: "start", country: site, month: m });
+          setBatchId(r.batch_id);
+          await drive(r.batch_id, `${site} ${m} · `);
+          loadHistory();
+        }
+      }
     });
   const open = (id: string) =>
     run(async () => {
@@ -228,10 +245,17 @@ export function ApiReconcilePanel() {
             value={month}
             onChange={(e) => setMonth(e.target.value)}
           />
+          <Input
+            aria-label="结束月份"
+            type="month"
+            className="h-8 w-40"
+            value={monthTo}
+            onChange={(e) => setMonthTo(e.target.value)}
+          />
           <Button size="sm" onClick={start} disabled={busy}>
             {busy ? "进行中…" : "抓取并对账"}
           </Button>
-          <Help text="从接口抓该站点该月所有已登记广告户（含未启用）的 GMV MAX 素材数据，与已上传的表逐项比。数据只存独立表，不影响归因结果。" />
+          <Help text="站点可填多个（逗号分隔），月份为起止区间，逐个 站点×月 顺序跑。从接口抓已登记广告户（含未启用）的 GMV MAX 素材数据，与已上传的表逐项比。数据只存独立表，不影响归因结果。" />
           {batchId ? (
             <>
               <Button

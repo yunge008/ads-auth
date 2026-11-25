@@ -784,7 +784,11 @@ export async function reconcileBatch(db: SupabaseClient, batchId: string) {
           Number.isFinite(ta) && Number.isFinite(tu) ? Math.round((ta - tu) / 60000) : null;
         const bucket = offsetMin == null ? "无法解析/一边为空" : `${offsetMin} 分钟`;
         postedOffsetHist[bucket] = (postedOffsetHist[bucket] ?? 0) + 1;
-        if (offsetMin !== 0) postedDiff.push({ ...base, api: a, upload: u, offset_min: offsetMin });
+        // 判定口径同现行归因 skill：只比源日历日期（不做时区换算）；分钟时差只作信息
+        const dateA = /^\d{4}-\d{2}-\d{2}/.test(a) ? a.slice(0, 10) : "";
+        const dateU = Number.isFinite(tu) ? new Date(tu).toISOString().slice(0, 10) : "";
+        if (!dateA || dateA !== dateU)
+          postedDiff.push({ ...base, api: a, upload: u, offset_min: offsetMin });
       }
     }
   }
@@ -827,11 +831,12 @@ export async function reconcileBatch(db: SupabaseClient, batchId: string) {
   const report = {
     generated_at: new Date().toISOString(),
     pass: {
-      totals: ok(tot.api, tot.upload),
-      key_sets: !onlyApi.length && !onlyUpload.length,
-      amounts_per_key: !amountDiff.length,
-      account_names: !nameDiff.length,
-      posted_at: !postedDiff.length,
+      // 没有可比的数据不算通过（上轮错误：两边一边为 0 行时达人名/发布时间显示 ✓）
+      totals: tot.api.rows > 0 && ok(tot.api, tot.upload),
+      key_sets: matched > 0 && !onlyApi.length && !onlyUpload.length,
+      amounts_per_key: matched > 0 && !amountDiff.length,
+      account_names: nameChecked > 0 && !nameDiff.length,
+      posted_at: postedChecked > 0 && !postedDiff.length,
       no_warnings: !warnings.length,
     },
     totals: { api: round(tot.api), upload: round(tot.upload) },
