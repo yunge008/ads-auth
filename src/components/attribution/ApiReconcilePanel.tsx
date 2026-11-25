@@ -37,6 +37,12 @@ type Report = {
     offset_hist: Record<string, number>;
   };
   warnings: string[];
+  uploads?: {
+    file_name: string;
+    nonzero_cost?: number;
+    paired_advertiser?: string | null;
+    excluded?: string | null;
+  }[];
 };
 type BatchRow = {
   id: string;
@@ -343,6 +349,19 @@ export function ApiReconcilePanel() {
                 发布时间不一致 {report.posted_at.diff}/{report.posted_at.checked}
               </span>
             </div>
+            {report.uploads?.length ? (
+              <div className="text-xs flex flex-wrap gap-x-4 gap-y-1">
+                {report.uploads.map((u) => (
+                  <span
+                    key={u.file_name}
+                    className={u.excluded ? "text-muted-foreground line-through" : ""}
+                    title={u.excluded ?? undefined}
+                  >
+                    {u.file_name}（{f2(u.nonzero_cost ?? 0)}）→ {u.paired_advertiser ?? "未配对"}
+                  </span>
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : null}
 

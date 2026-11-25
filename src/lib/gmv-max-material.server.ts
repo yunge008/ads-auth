@@ -85,6 +85,10 @@ type Fields = {
   item_id_samples?: Record<string, string[]>; // 每种内容类型的 item_id 原值样本
   meta_conflicts?: number; // 同一 VID 多次返回的达人名/内容类型不一致次数
   warnings?: string[];
+  // 元数据（标题/发布时间）查询整体被接口拒绝时的原文；之后不再重复请求
+  meta_unavailable?: string;
+  // 每种内容类型第一行的 metrics 原样（诊断字段名与取值，不含个人信息）
+  sample_metrics?: Record<string, Record<string, unknown>>;
 };
 type Batch = {
   id: string;
@@ -457,6 +461,8 @@ async function fetchCampaignMaterial(
         (fields.content_types![ctRaw ?? "(null)"] ?? 0) + 1;
       const cur = m.currency == null ? "(null)" : str(m.currency);
       fields.currencies![cur] = (fields.currencies![cur] ?? 0) + 1;
+      fields.sample_metrics ??= {};
+      fields.sample_metrics[ctRaw ?? "(null)"] ??= m;
       const samples = (fields.item_id_samples![ct] ??= []);
       if (samples.length < 5 && !samples.includes(item)) samples.push(item);
       byKey.set(key, {
@@ -477,24 +483,35 @@ async function fetchCampaignMaterial(
         clicks: m.product_clicks == null ? null : num(m.product_clicks),
       });
     }
+    fields.money_metrics_seen = [...seenMoney].sort();
     // 元数据只查有钱的组（全 0 行最终不落库）
     const moneyGroups = new Set(
       [...byKey.values()]
         .filter((r) => !isZero(r) && batch.includes(r.product_id))
         .map((r) => r.product_id),
     );
-    if (!moneyGroups.size) continue;
-    const meta: RawRow[] = await fetchReport(
-      token,
-      adv.advertiser_id,
-      adv.shop_id,
-      start,
-      end,
-      ["item_group_id", "item_id"],
-      { campaign_ids: [cid], item_group_ids: [...moneyGroups] },
-      META_METRICS,
-      get,
-    );
+    if (!moneyGroups.size || fields.meta_unavailable) continue;
+    // 实测 2026-11-25（VN/JP）：title 与三个发布时间候选全部被判 Invalid metric —— 接口没有这些字段。
+    // 不能因此让整户失败：记下原文、之后不再请求，对账报告里显式警告。
+    let meta: RawRow[] = [];
+    try {
+      meta = await fetchReport(
+        token,
+        adv.advertiser_id,
+        adv.shop_id,
+        start,
+        end,
+        ["item_group_id", "item_id"],
+        { campaign_ids: [cid], item_group_ids: [...moneyGroups] },
+        META_METRICS,
+        get,
+      );
+    } catch (e) {
+      const msg = (e as Error).message;
+      if (!/Invalid metric/i.test(msg)) throw e;
+      fields.meta_unavailable = msg;
+      continue;
+    }
     for (const r of meta) {
       const d = (r.dimensions ?? {}) as Record<string, unknown>;
       const m = (r.metrics ?? {}) as Record<string, unknown>;
@@ -610,6 +627,43 @@ export async function reconcileBatch(db: SupabaseClient, batchId: string) {
       truncated_100k: u.row_count === 100000,
     });
   }
+  // —— 分卷配对 ——
+  // 分卷 .1/.2 = 独立广告户（现行归因 skill 口径）。上传表不带广告户 ID，只能按金额配对：
+  // 每个抓取成功且有消耗的户，找 花费 与其 campaign 级合计相差 < 2% 的分卷（取最接近的）。
+  // 有户抓取失败时，只拿配上对的分卷参与对账，没配上的分卷列为「排除」并写明原因 —— 不静默丢弃。
+  const upCost = new Map<string, number>();
+  for (const r of uRows) upCost.set(r.upload_id, (upCost.get(r.upload_id) ?? 0) + num(r.cost));
+  const pairs: Record<string, string> = {}; // upload_id → advertiser_id
+  for (const adv of batch.advertisers) {
+    if (adv.status !== "DONE") continue;
+    const c = Object.values(adv.campaign_totals ?? {}).reduce((x, m) => x + m.cost, 0);
+    if (c <= 0) continue;
+    let best: string | null = null;
+    let bestDiff = Infinity;
+    for (const u of uploads) {
+      if (pairs[u.id]) continue;
+      const d = Math.abs((upCost.get(u.id) ?? 0) - c) / c;
+      if (d < 0.02 && d < bestDiff) {
+        best = u.id;
+        bestDiff = d;
+      }
+    }
+    if (best) pairs[best] = adv.advertiser_id;
+  }
+  const anyFailed = batch.advertisers.some((a) => a.status === "FAILED");
+  const usedUploads = new Set(uploads.filter((u) => !anyFailed || pairs[u.id]).map((u) => u.id));
+  for (const info of uploadInfo) {
+    const u = uploads.find((x) => x.file_name === info.file_name)!;
+    const adv = batch.advertisers.find((a) => a.advertiser_id === pairs[u.id]);
+    info.nonzero_cost = r2(upCost.get(u.id) ?? 0);
+    info.paired_advertiser = adv ? `${adv.name || adv.advertiser_id}` : null;
+    info.excluded = usedUploads.has(u.id)
+      ? null
+      : "有广告户接口取不到，且该分卷金额对不上任何已抓取成功的户 → 不参与本次对账";
+  }
+  const excludedRows = uRows.filter((r) => !usedUploads.has(r.upload_id));
+  uRows.splice(0, uRows.length, ...uRows.filter((r) => usedUploads.has(r.upload_id)));
+
   type ARow = MatRow & { id: number };
   const aRows = await readAll<ARow>((f, t) =>
     db
@@ -818,6 +872,8 @@ export async function reconcileBatch(db: SupabaseClient, batchId: string) {
   for (const m of MONEY_METRICS)
     if (fields.money_metrics_seen && !fields.money_metrics_seen.includes(m))
       warnings.push(`接口没有返回 metric「${m}」（可能被改名或下线）`);
+  if (fields.meta_unavailable)
+    warnings.push(`标题/发布时间查询被接口拒绝：${fields.meta_unavailable}`);
   if (!fields.posted_field)
     warnings.push(`发布时间：候选字段 ${POSTED_CANDIDATES.join(" / ")} 都没有返回值`);
   if (batch.advertisers.some((a) => a.status === "FAILED"))
@@ -847,6 +903,12 @@ export async function reconcileBatch(db: SupabaseClient, batchId: string) {
       Object.entries(byCur).map(([k, v]) => [k, { api: round(v.api), upload: round(v.upload) }]),
     ),
     uploads: uploadInfo,
+    excluded_upload_totals: (() => {
+      const t = side();
+      for (const r of excludedRows)
+        addTo(t, { cost: num(r.cost), gross_revenue: num(r.gross_revenue), orders: num(r.orders) });
+      return round(t);
+    })(),
     api_internal: internal,
     keys: {
       total: keys.size,
