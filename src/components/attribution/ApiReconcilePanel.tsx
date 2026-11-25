@@ -205,15 +205,31 @@ export function ApiReconcilePanel() {
   // 一次性：探测按 VID 取发布时间的候选接口（结果存库，Claude 读取）
   const probe = () =>
     run(async () => {
-      const site = country.split(/[,，\s]+/).filter(Boolean)[0] ?? "";
-      setProgress(`${site} 发布时间接口探测中…`);
-      // 站点 × 起止月份内每个月都跑一次 batch_performance 覆盖面探测
-      for (const m of [month, monthTo].filter((x, i, arr) => x && arr.indexOf(x) === i)) {
-        setProgress(`${site} ${m} 发布时间/账号覆盖探测中…`);
-        await call({ action: "probe_batch", country: site, month: m });
+      // 一次性：逐个 站点 × 月 跑 batch_performance 覆盖面探测；单个失败不中断，结果存库
+      const sites = country
+        .split(/[,，\s]+/)
+        .map((x) => x.trim())
+        .filter(Boolean);
+      const months: string[] = [];
+      for (let m = month; m && m <= (monthTo || month); ) {
+        months.push(m);
+        const [y, mm] = m.split("-").map(Number);
+        m = mm === 12 ? `${y + 1}-01` : `${y}-${String(mm + 1).padStart(2, "0")}`;
+      }
+      const failed: string[] = [];
+      for (const site of sites) {
+        for (const m of months) {
+          setProgress(`${site} ${m} 发布时间/账号覆盖探测中…`);
+          try {
+            await call({ action: "probe_batch", country: site, month: m });
+          } catch (e) {
+            failed.push(`${site} ${m}：${(e as Error).message}`);
+          }
+        }
       }
       setProgress("");
-      toast.success(`${site} 发布时间探测完成`);
+      if (failed.length) toast.error(`探测失败 ${failed.length} 组：${failed.join("；")}`);
+      else toast.success("探测完成");
     });
   const download = () =>
     batchId &&

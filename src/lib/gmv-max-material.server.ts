@@ -1289,7 +1289,9 @@ export async function probeBatchPerformance(
       byVid.set(r.vid, v);
     }
   }
-  const vids = [...byVid.keys()];
+  // 大站一个月可能上万个 VID：按花费取前 3000 个（≤15 次调用），覆盖到的花费比例写进 summary
+  const allVids = [...byVid.keys()].sort((x, y) => byVid.get(y)!.cost - byVid.get(x)!.cost);
+  const vids = allVids.slice(0, 3000);
   const winStart = `${month}-01`;
   const today = new Date().toISOString().slice(0, 10);
   const e = new Date(Date.parse(`${winStart}T00:00:00Z`) + 59 * 86400_000)
@@ -1362,6 +1364,8 @@ export async function probeBatchPerformance(
     month,
     window: [winStart, winEnd],
     requested: vids.length,
+    vids_total: allVids.length,
+    cost_all_vids: r2(allVids.reduce((x, v) => x + byVid.get(v)!.cost, 0)),
     returned: got.size,
     cost_total: r2(rows.reduce((x, r) => x + r.cost, 0)),
     cost_returned: r2(rows.filter((r) => r.returned).reduce((x, r) => x + r.cost, 0)),
