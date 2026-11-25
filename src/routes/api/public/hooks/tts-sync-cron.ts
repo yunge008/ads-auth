@@ -83,7 +83,7 @@ export const Route = createFileRoute("/api/public/hooks/tts-sync-cron")({
                 if (!r.ok || j.error) throw new Error(j.error ?? `HTTP ${r.status}`);
                 last = j;
                 for (const e of j.errors ?? []) problems.push(`${label} ${part}：${e}`);
-                for (const u of j.new_unknown ?? []) problems.push(`${label} ${part} 接口出现未登记的非 0 字段：${u}`);
+                for (const u of j.new_unknown ?? []) problems.push(`${label} ${part} 接口字段变化/白名单校验：${u}`); // 新字段 / 缺字段 / 白名单不一致 / 未登记金额字段
                 if (j.finished || (j.errors?.length ?? 0) > 0) break;
               } catch (e) {
                 problems.push(`${label} ${part}：${(e as Error).message}`);
