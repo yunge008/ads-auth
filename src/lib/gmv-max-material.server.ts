@@ -676,6 +676,74 @@ export async function reconcileBatch(db: SupabaseClient, batchId: string) {
       .range(f, t),
   );
 
+  // —— 口径对齐（2026-11-25 VN/JP 实测后加，全部在报告 alignment 里显式列出） ——
+  // ①接口已不返回 shop_content_type：item_id="-1" 推断为商品卡（VN 6 月 399/399 个商品卡键金额一致），
+  //   15–20 位数字推断为视频，其余保持未识别。直播的 item_id 形态未见过，未核验。
+  // ②接口有、但拆不到商品/VID 的金额 = campaign 合计 − 明细合计，补一行「无商品ID」残差；
+  //   上传表 product_id 非数字（N/A / NULL）的行归到同一类。残差里也含被舍成 0.00 的小额花费。
+  const NO_PID = "(无商品ID)";
+  let inferredCard = 0,
+    inferredVideo = 0;
+  for (const r of aRows) {
+    if (r.content_type_raw != null && r.creative_type) continue;
+    if (r.item_id === "-1") {
+      r.creative_type = "product_card";
+      inferredCard++;
+    } else if (/^\d{15,20}$/.test(r.item_id)) {
+      r.creative_type = "video";
+      inferredVideo++;
+    }
+  }
+  for (const r of uRows) {
+    if (!/^\d+$/.test(r.product_id)) {
+      r.creative_type = NO_PID;
+      r.product_id = "N/A";
+      r.vid = "";
+    }
+  }
+  const residuals: Record<string, unknown>[] = [];
+  for (const adv of batch.advertisers) {
+    if (adv.status !== "DONE") continue;
+    const camp = Object.values(adv.campaign_totals ?? {}).reduce(
+      (x, m) => ({
+        cost: x.cost + m.cost,
+        gross_revenue: x.gross_revenue + m.gross_revenue,
+        orders: x.orders + m.orders,
+      }),
+      { cost: 0, gross_revenue: 0, orders: 0 },
+    );
+    const det = { cost: 0, gross_revenue: 0, orders: 0 };
+    for (const r of aRows)
+      if (r.advertiser_id === adv.advertiser_id) {
+        det.cost += num(r.cost);
+        det.gross_revenue += num(r.gross_revenue);
+        det.orders += num(r.orders);
+      }
+    const res = {
+      cost: r2(camp.cost - det.cost),
+      gross_revenue: r2(camp.gross_revenue - det.gross_revenue),
+      orders: camp.orders - det.orders,
+    };
+    if (isZero(res)) continue;
+    residuals.push({ advertiser: adv.name || adv.advertiser_id, ...res });
+    aRows.push({
+      id: -1,
+      advertiser_id: adv.advertiser_id,
+      campaign_id: "",
+      product_id: "N/A",
+      item_id: "",
+      content_type_raw: "(campaign 残差)",
+      creative_type: NO_PID,
+      account_name: null,
+      title: null,
+      posted_raw: null,
+      currency: null,
+      impressions: null,
+      clicks: null,
+      ...res,
+    });
+  }
+
   // —— 合计 ——
   const tot = { api: side(), upload: side() };
   const byType: Record<string, { api: Side; upload: Side }> = {};
@@ -790,6 +858,8 @@ export async function reconcileBatch(db: SupabaseClient, batchId: string) {
   let matched = 0,
     nameChecked = 0,
     postedChecked = 0;
+  const belowPrecision: Record<string, unknown>[] = [];
+  const sumBelow = side();
   const sum = {
     only_api: side(),
     only_upload: side(),
@@ -801,6 +871,17 @@ export async function reconcileBatch(db: SupabaseClient, batchId: string) {
     if (!k.upload.rows) {
       onlyApi.push({ ...base, ...round(k.api), names: [...k.api_names] });
       addTo(sum.only_api, k.api);
+      continue;
+    }
+    // 接口金额只到 2 位小数，上传表花费有 3 位：花费不足 1 分（< 0.01，可能由多行各 0.00x 组成、分属不同 campaign 时逐行被舍成 0.00）且 GMV、订单为 0 的键，接口里是全 0 行
+    if (
+      !k.api.rows &&
+      k.upload.cost < 0.01 &&
+      k.upload.gross_revenue === 0 &&
+      k.upload.orders === 0
+    ) {
+      belowPrecision.push({ ...base, ...round(k.upload) });
+      addTo(sumBelow, k.upload);
       continue;
     }
     if (!k.api.rows) {
@@ -863,7 +944,12 @@ export async function reconcileBatch(db: SupabaseClient, batchId: string) {
 
   const fields = batch.fields ?? {};
   const warnings = [...(fields.warnings ?? [])];
+  if (inferredCard + inferredVideo)
+    warnings.push(
+      `接口未返回内容类型，已按 item_id 推断：商品卡 ${inferredCard} 行（item_id=-1）、视频 ${inferredVideo} 行（推断值，不是接口原值；直播形态未核验）`,
+    );
   for (const ct of Object.keys(fields.content_types ?? {})) {
+    if (ct === "(null)" && inferredCard + inferredVideo) continue;
     if (!["video", "product_card", "live"].includes(normContentType(ct === "(null)" ? "" : ct)))
       warnings.push(
         `接口返回未识别的内容类型「${ct}」（${fields.content_types![ct]} 行），未归入视频/商品卡/直播`,
@@ -896,6 +982,15 @@ export async function reconcileBatch(db: SupabaseClient, batchId: string) {
       no_warnings: !warnings.length,
     },
     totals: { api: round(tot.api), upload: round(tot.upload) },
+    alignment: {
+      inferred_content_type: { product_card: inferredCard, video: inferredVideo },
+      campaign_residuals: residuals,
+      below_api_precision: {
+        count: belowPrecision.length,
+        ...round(sumBelow),
+        samples: belowPrecision.slice(0, 50),
+      },
+    },
     by_type: Object.fromEntries(
       Object.entries(byType).map(([k, v]) => [k, { api: round(v.api), upload: round(v.upload) }]),
     ),

@@ -37,6 +37,16 @@ type Report = {
     offset_hist: Record<string, number>;
   };
   warnings: string[];
+  alignment?: {
+    inferred_content_type: { product_card: number; video: number };
+    campaign_residuals: {
+      advertiser: string;
+      cost: number;
+      gross_revenue: number;
+      orders: number;
+    }[];
+    below_api_precision: { count: number; cost: number };
+  };
   uploads?: {
     file_name: string;
     nonzero_cost?: number;
@@ -368,6 +378,24 @@ export function ApiReconcilePanel() {
                 发布时间不一致 {report.posted_at.diff}/{report.posted_at.checked}
               </span>
             </div>
+            {report.alignment ? (
+              <div className="text-xs text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
+                <span>
+                  推断类型：商品卡 {report.alignment.inferred_content_type.product_card} · 视频{" "}
+                  {report.alignment.inferred_content_type.video}
+                </span>
+                <span>
+                  低于接口精度 {report.alignment.below_api_precision.count}（花费{" "}
+                  {f2(report.alignment.below_api_precision.cost)}）
+                </span>
+                {report.alignment.campaign_residuals.map((r) => (
+                  <span key={r.advertiser}>
+                    {r.advertiser} 无商品ID残差 花费 {f2(r.cost)} / GMV {f2(r.gross_revenue)} / 订单{" "}
+                    {r.orders}
+                  </span>
+                ))}
+              </div>
+            ) : null}
             {report.uploads?.length ? (
               <div className="text-xs flex flex-wrap gap-x-4 gap-y-1">
                 {report.uploads.map((u) => (
