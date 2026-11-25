@@ -196,7 +196,7 @@
 
 ## 运行环境（Lovable Cloud，2026-11-23 Lovable 回复记录，仅供参考）
 
-- 数据库：Lovable Cloud 托管 Supabase `ifwyjsdvptbfuqhonnzd`，ap-southeast-1（新加坡），Postgres 17.6，约 2.5 GB（数据盘 40%），实例 Tiny。负责人决定不迁移自有 Supabase（免费版 500MB 放不下，不开 Pro）。
+- 数据库：Lovable Cloud 托管 Supabase `ifwyjsdvptbfuqhonnzd`，ap-southeast-1（新加坡），Postgres 17.6，约 2.5 GB（数据盘 40%），实例 Tiny。2026-11-25 后台：Database storage 3.49 GB of 8 GB（pg_database_size 3.34GB）。负责人决定不迁移自有 Supabase（免费版 500MB 放不下，不开 Pro）。
 - 导出：More → Database → Manage → Settings → Export project data（pg_dump custom-format `.backup`，≤5 GB，24h 一次；不含 secrets、Storage 文件、Edge Function 代码，pg_cron 不保证）。
 - 改接外部 Supabase：Settings → General → External Supabase；不自动迁移数据，**单向不可回 Cloud**；前端与 `ads-auth.lovable.app` 不变。
 - Edge Function secrets（19 个，名字）：ADMIN_PASSCODE、DINGMIAO_APP_KEY、DINGMIAO_APP_SECRET、DINGMIAO_BASE_URL、ECO_PASSWORD、ECO_USERNAME、FEISHU_APP_ID、FEISHU_APP_SECRET、FEISHU_BOT_WEBHOOK、FEISHU_EDITOR_SPREADSHEET_TOKEN、FEISHU_SKU_SPREADSHEET_TOKEN、FEISHU_SPREADSHEET_TOKEN、LOVABLE_API_KEY（系统托管）、QIANYI_ACCESS_ID、QIANYI_SECRET_KEY、TIKTOK_APP_ID、TIKTOK_APP_SECRET、TIKTOK_BC_ACCESS_TOKEN、TIKTOK_BC_ID。
@@ -218,5 +218,5 @@ GMV Max 导入记录，逐商品一行：batch_id / kind(excel|single|copy) / so
 - pg_cron `tts-daily-sync`（每小时第 17 分）→ `/api/public/hooks/tts-sync-cron`（x-cron-key；管理员可带口令手动触发，body `{shop_ids?, parts?}`）→ 逐店逐部分循环调 `tts-export` `kind=sync part=orders|finance`（cron 只放行 sync），单轮 8 分钟，未完成的从 `tts_sync_state.cursor` 下轮续跑。
 - 范围：`tts_shops.daily_sync = true`（先 PH、TH）。首次从 2026-08-01（店铺本地 0 点）回填。
 - 订单：`/order/202309/orders/search` 按 `update_time` 增量（往回重叠 2 小时），附 Search Returns 退货汇总，原文 upsert `tts_orders`。结算：`/finance/202309/statements` 按 `statement_time`（重叠 2 天）upsert `tts_finance_statements`；交易明细未入库的结算单逐张拉 `/finance/202501/statements/{id}/statement_transactions` upsert `tts_finance_tx`，完成后标 `tx_synced_at`。
-- 订单入库按 denylist 瘦身（`slimOrder`：去 sku_image、product_name、商品行重复物流字段、省市区重复说明；数字字段全保留）。空间监控：`tts-sync-cron` 每轮调 `db_size_bytes()`（migration 20261125130000），≥ 上限（DB_DISK_LIMIT_BYTES，默认推算 6.25GB）80% 时发飞书，每日一次，状态存 `tts_sync_state(_global, db_size)`。
+- 订单入库按 denylist 瘦身（`slimOrder`：去 sku_image、product_name、商品行重复物流字段、省市区重复说明；数字字段全保留）。空间监控：`tts-sync-cron` 每轮调 `db_size_bytes()`（migration 20261125130000），≥ 上限（DB_DISK_LIMIT_BYTES，默认 7.6GB = Lovable Cloud 数据盘 8GB − 约 0.4GB 非数据库开销）80% 时发飞书，每日一次，状态存 `tts_sync_state(_global, db_size)`。
 - 原文去空值/0 存 jsonb；每轮订单同步先刷新仓库 ID→名称，存 `tts_sync_state`（kind=`warehouses`，cursor 为映射）；**订单原文入库前剔除买家个人信息**（`stripBuyerPii`：去 buyer_email、user_id，收件地址只留 postal_code/region_code/district_info）；口径映射在汇总计算层。未登记且非 0 的字段（结算分项、订单 payment / line_item 金额字段）记入 `tts_sync_state.unknown_fields`，首次出现时路由发飞书；有报错也发飞书。

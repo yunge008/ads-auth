@@ -39,3 +39,4 @@ git show <提交号>:supabase/migrations/<文件名>
 | 2026-11-24 | `20261124150000_ai_readonly.sql` | `059b319` | AI 只读通道 v1：角色 ai_reader、按列授权、RLS 只读策略（834 列 / 61 策略 / 屏蔽 10 列） |
 | 2026-11-24 | `20261124160000_ai_readonly_direct.sql` | `e8dc6ac` | AI 只读通道 v2：ai_key_ok / ai_db_query / ai_db_refresh_grants，删 ai_readonly_query |
 | 2026-11-25 | `20261125120000_tts_daily_sync.sql` | `48d14c3` | 订单/财务每日入库 4 表 + tts_shops.daily_sync（PH/TH）+ pg_cron tts-daily-sync；授权后 867 列 |
+| 2026-11-25 | `20261125130000_db_size_monitor.sql` | `cb8cba2` | 只读函数 db_size_bytes()（仅 service_role），供 tts-sync-cron 空间 80% 告警 |

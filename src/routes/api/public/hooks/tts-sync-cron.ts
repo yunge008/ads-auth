@@ -7,13 +7,15 @@
 // 每店每部分循环调 Edge Function tts-export kind=sync 直到 finished 或本轮时间用完（下轮从 tts_sync_state.cursor 续跑）。
 // 有报错，或接口出现口径表未登记且非 0 的字段 → 发飞书（FEISHU_BOT_WEBHOOK）；正常不发消息。
 // 空间监控（负责人 2026-11-25：明细永久保存，到 80% 提示）：每轮查数据库大小，≥ 上限 80% 时发飞书，每天最多一次。
-//   上限 = 环境变量 DB_DISK_LIMIT_BYTES，未设时按 ARCHITECTURE 记录「约 2.5GB = 数据盘 40%」推算 6.25GB（⚠️ 推算，未核验）。
+//   上限 = 环境变量 DB_DISK_LIMIT_BYTES，未设时 7.6e9（Lovable Cloud 数据盘 8GB − 约 0.4GB 非数据库开销）。
 import { isCronCaller } from "@/lib/cron-caller.server";
 import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
 
 const HARD_BUDGET_MS = 8 * 60 * 1000;
-const DISK_LIMIT_BYTES = Number(process.env.DB_DISK_LIMIT_BYTES) || 6.25e9;
+// Lovable Cloud 截图（负责人 2026-11-25）：Database storage「3.49 GB of 8 GB used」，同时 pg_database_size=3.34e9；
+// 磁盘另含 WAL 等开销约 0.15–0.4GB，按保守值从 8GB 扣 0.4GB，保证告警不晚于后台 80%
+const DISK_LIMIT_BYTES = Number(process.env.DB_DISK_LIMIT_BYTES) || 7.6e9;
 const DISK_ALERT_RATIO = 0.8;
 const PARTS = ["orders", "finance"] as const;
 
