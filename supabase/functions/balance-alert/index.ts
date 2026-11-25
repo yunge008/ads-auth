@@ -570,7 +570,7 @@ async function actionBuildMessage(_body: Record<string, unknown>) {
     tag: "note",
     elements: [{
       tag: "plain_text",
-      content: `🔴 可用 < ${X} 天　🟡 ${X}~${X + NEAR_DAYS} 天　🟢 ≥ ${X + NEAR_DAYS} 天｜日耗 = 近10个完整自然日正常日均（剔除日耗 0 / 低于中位数 ${Math.round(settings.abnormal_ratio * 100)}% 的天；换户当天不计）`,
+      content: `🔴 可用 < ${X} 天　🟡 ${X}~${X + NEAR_DAYS} 天　🟢 ≥ ${X + NEAR_DAYS} 天\n日耗 = 近10个完整自然日正常日均（剔除日耗 0 / 低于中位数 ${Math.round(settings.abnormal_ratio * 100)}% 的天；换户当天不计）`,
     }],
   });
 
