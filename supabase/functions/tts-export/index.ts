@@ -828,8 +828,10 @@ const SYNC_FROM = "2026-08-01"; // 负责人 2026-11-25：对账用过去三个�
 const ORDER_OVERLAP_S = 2 * 3600; // 订单增量窗口往回重叠 2 小时，防止分页期间被更新的订单漏掉
 const STMT_OVERLAP_S = 2 * 86400; // 结算单往回重叠 2 天
 
-/** 去掉 null / "" / 0 / "0.00" / 空对象，保留数组与布尔 */
+/** 去掉 null / "" / 0 / "0.00" / 空对象，保留数组与布尔；字符串去掉 \u0000（Postgres jsonb 不接受，
+ *  2026-11-25 PH 订单因此整页写入失败「unsupported Unicode escape sequence」） */
 function prune(v: unknown): unknown {
+  if (typeof v === "string") return v.replace(/\u0000/g, "");
   if (Array.isArray(v)) return v.map(prune);
   if (v && typeof v === "object") {
     const o: Record<string, unknown> = {};
