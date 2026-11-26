@@ -2404,6 +2404,7 @@ export type Database = {
           last_error: string | null
           last_run_at: string | null
           latest_available_date: string | null
+          orders_from: string | null
           shop_key: string
           state: Json
         }
@@ -2414,6 +2415,7 @@ export type Database = {
           last_error?: string | null
           last_run_at?: string | null
           latest_available_date?: string | null
+          orders_from?: string | null
           shop_key: string
           state?: Json
         }
@@ -2424,6 +2426,7 @@ export type Database = {
           last_error?: string | null
           last_run_at?: string | null
           latest_available_date?: string | null
+          orders_from?: string | null
           shop_key?: string
           state?: Json
         }
