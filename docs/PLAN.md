@@ -19,7 +19,6 @@
 
 | 函数 | 待上线的改动 | 核验方式 |
 | --- | --- | --- |
-| gmv-max-exclusive-auth、gmv-max-adgroup-batch-create（1124.209~211 改动） | **暂不部署（积分用完）**：页面建组/切户已改走免费的服务端路由 `/api/public/hooks/gmv-max-write`，这两个 Edge Function 线上仍是旧版/不存在，前端已不调用 | 无需核验，以后有积分可部署或删除 |
 
 2026-11-23 核验：`tools/check-deploy.sh` 显示 39 个函数全部已是新版 `_shared/auth.ts`（口令注入修复已上线）。
 2026-11-24 核验：`attribution-upload`、`attribution-identity-build`、`tts-listing`、`feishu-read` 已重新部署（1124.253），四个均正常应答（401 鉴权提示），上表对应行已删。

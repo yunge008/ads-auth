@@ -301,7 +301,7 @@ function GmvMaxCreatePage() {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const TEMPLATE_HEADERS = ["广告户ID", "广告组名称", "商品ID", "ROI", "预算", "开始时间", "结束时间"];
-  const TEMPLATE_ROWS = 200; // matches gmv-max-adgroup-batch-create 单次上限
+  const TEMPLATE_ROWS = 200; // 模板行数上限（原 gmv-max-adgroup-batch-create 单次上限，沿用）
 
   const downloadTemplate = () => {
     const example = ["7672316437213757461", "示例广告组", "1731973887448024673,1731912594758796897", 3.2, 30, "", ""];

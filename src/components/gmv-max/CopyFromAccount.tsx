@@ -1,5 +1,5 @@
 // 「从账户复制」：读源广告户全部 Product GMV Max 广告组（gmv-max-campaign-info），
-// 勾选后逐个在目标广告户新建（gmv-max-adgroup-batch-create，每次 1 行）。
+// 勾选后逐个在目标广告户新建（服务端路由 /api/public/hooks/gmv-max-write action=create，每次 1 行）。
 // 复制：名称 / 商品 / ROI / 预算 / identity_list / affiliate_posts_enabled。
 // 不复制、标「手动」：手选视频组。全店商品组以 商品ID=ALL 复制。商品 >50 / 视频账号 >20 由服务端先降级建组再 update 补全。
 import * as React from "react";

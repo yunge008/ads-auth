@@ -1,6 +1,6 @@
 // GMV Max 写操作（服务端路由版）：建组 + 店铺独占授权。
 // 为什么不用 Edge Function：Lovable Cloud 部署 Edge Function 要耗积分，服务端路由随 main 同步免费上线。
-// 逻辑与 supabase/functions/gmv-max-adgroup-batch-create 一致（两边改动需同步）。
+// 原 Edge Function gmv-max-adgroup-batch-create 已于 1126.315 删除，建组逻辑只在本文件维护。
 import process from "node:process";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
@@ -466,10 +466,22 @@ async function createCore(db: SupabaseClient, r: CreateRow, ctx: Ctx): Promise<C
     }
   }
   // 补全：update 参数（advertiser_id / campaign_id + 要改的字段）按 create 惯例推断，未见文档。
-  const update = async (patch: Record<string, unknown>) =>
-    withConns(conns, (token) => tt(token, "/campaign/gmv_max/update/", {
-      method: "POST", body: { advertiser_id: advertiserId, campaign_id: campaignId, ...patch },
-    }));
+  // TikTok 异步应用上一次商品变更期间，再 update 会报「Product changes are being applied. Please come back later.」
+  // （2026-11-24 PH 大组：150 个商品因此被误记为补全失败）→ 视为「忙」，退避等待后原样重试，不当作商品被拒。
+  const BUSY = /being applied|come back later/i;
+  const update = async (patch: Record<string, unknown>) => {
+    for (const wait of [5000, 10000, 20000, 0]) {
+      try {
+        return await withConns(conns, (token) => tt(token, "/campaign/gmv_max/update/", {
+          method: "POST", body: { advertiser_id: advertiserId, campaign_id: campaignId, ...patch },
+        }));
+      } catch (e) {
+        if (!wait || !BUSY.test((e as Error).message)) throw e;
+        await sleep(wait);
+      }
+    }
+    throw new Error("unreachable");
+  };
   const UNAVAILABLE = /unavailable/i;
   const rejectReason = (msg: string) => `不可用（TikTok 拒绝：${msg.replace(/^.*?: /, "")}）`;
 
