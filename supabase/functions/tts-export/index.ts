@@ -872,55 +872,70 @@ function stripBuyerPii(o: Order): Order {
   } as Order;
 }
 
-/** 入库白名单（负责人 2026-11-26 变更：由「去掉明确不需要的字段」改为白名单）。
- *  白名单 = 订单导出转换（orderRows / src/lib/tts-order-export.ts）实际读取的字段 + product_id / is_sample_order /
- *  is_replacement_order / is_gift / update_time / region_code。不再保存：各类 SLA 时间、delivery_option_id、shipping_provider_id、
- *  商品行 id / package_id / display_status / package_status / rts_time / cancel_reason 等。
- *  一次性回刷存量的 SQL（20261126150100_tts_orders_whitelist.sql）与这里字段必须一致。
- *  2026-11-26 用库内 17,360 单（约 9%）验证：白名单前后转出的导出行逐格相同（商品标题列除外，早已不入库）。 */
-const TOP_KEEP = ["id", "status", "create_time", "update_time", "paid_time", "rts_time", "collection_time", "delivery_time", "cancel_time",
-  "cancellation_initiator", "cancel_reason", "fulfillment_type", "tracking_number", "delivery_option_name", "shipping_provider", "buyer_message",
-  "payment_method_name", "seller_note", "warehouse_id", "is_sample_order", "is_replacement_order", "payment"];
-const LI_KEEP = ["sku_id", "product_id", "seller_sku", "sku_name", "sku_type", "original_price", "sale_price", "seller_discount", "platform_discount", "is_gift"];
-const pick = (o: Record<string, unknown>, keys: string[]) => Object.fromEntries(keys.filter((k) => k in o).map((k) => [k, o[k]]));
+/** 入库瘦身：黑名单（负责人 2026-11-26：撤回当天的白名单方案，仍按「去掉明确不需要的字段」，再筛一遍尽量多去）。
+ *  接口新出现的字段默认照存（并提示），不会因为没登记而丢。
+ *  ① 直接去掉：顶层 8 个时限字段（TOP_DROP，导出与汇总都不用）、delivery_option_id / shipping_provider_id（名称照存）；
+ *     商品行图片、商品标题、行上重复的物流单号/物流商（原有）；省市区 iso_code / address_level_name（原有）。
+ *  ② 等于订单级 / 默认值才去掉（无损；读原文时字段缺省 = 取订单级值或默认值）：
+ *     商品行 currency = payment.currency、rts_time = 订单 rts_time、package_id = packages[0].id、display_status = 订单 status、
+ *     cancel_user = 订单 cancellation_initiator、cancel_reason = 订单 cancel_reason、sku_type = "NORMAL"；
+ *     顶层 delivery_type = "HOME_DELIVERY"、shipping_type = "TIKTOK"、order_type = "NORMAL"；顶层与商品行所有布尔值 false（缺省即 false）。
+ *  依据：2026-11-26 库内抽 2%（3,899 个商品行）——上述行级字段与订单级 100% 相同（cancel_reason 467/473，不同的照存），
+ *  delivery_type / shipping_type 全部为上述默认值，没有多包裹订单。
+ *  存量回刷 SQL（20261126160000_tts_orders_slim.sql）与这里规则必须一致。 */
+const TOP_DROP = new Set(["tts_sla_time", "cancel_order_sla_time", "rts_sla_time", "shipping_due_time", "collection_due_time",
+  "fast_rts_sla_time", "fast_dispatch_sla_time", "fast_collection_sla_time", "delivery_option_id", "shipping_provider_id"]);
+const TOP_DEFAULT: Record<string, unknown> = { delivery_type: "HOME_DELIVERY", shipping_type: "TIKTOK", order_type: "NORMAL" };
+const LINE_ITEM_DROP = new Set(["sku_image", "product_name", "tracking_number", "shipping_provider_name", "shipping_provider_id"]);
+const DISTRICT_DROP = new Set(["iso_code", "address_level_name"]);
 function slimOrder(o: Order): Order {
   const src = o as unknown as Record<string, unknown>;
-  const addr = o.recipient_address as { postal_code?: unknown; region_code?: unknown; district_info?: Array<Record<string, unknown>> } | undefined;
-  return {
-    ...pick(src, TOP_KEEP),
-    packages: o.packages?.length ? o.packages.map((p) => pick(p as Record<string, unknown>, ["id"])) : undefined,
-    recipient_address: addr
-      ? { postal_code: addr.postal_code, region_code: addr.region_code, district_info: addr.district_info?.length ? addr.district_info.map((d) => pick(d, ["address_level", "address_name"])) : undefined }
-      : undefined,
-    line_items: o.line_items?.length ? o.line_items.map((li) => pick(li as Record<string, unknown>, LI_KEEP)) : undefined,
-  } as unknown as Order;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(src)) {
+    if (TOP_DROP.has(k) || v === false || (k in TOP_DEFAULT && v === TOP_DEFAULT[k])) continue;
+    out[k] = v;
+  }
+  const pkg0 = (o.packages?.[0] as { id?: unknown } | undefined)?.id;
+  const same: Record<string, unknown> = {
+    currency: o.payment?.currency, rts_time: src.rts_time, package_id: pkg0, display_status: src.status,
+    cancel_user: src.cancellation_initiator, cancel_reason: src.cancel_reason, sku_type: "NORMAL",
+  };
+  if (o.line_items) {
+    out.line_items = o.line_items.map((li) => Object.fromEntries(Object.entries(li as Record<string, unknown>).filter(([k, v]) =>
+      !LINE_ITEM_DROP.has(k) && v !== false && !(k in same && v !== undefined && v === same[k]))));
+  }
+  const addr = o.recipient_address as { district_info?: Array<Record<string, unknown>> } | undefined;
+  if (addr) {
+    out.recipient_address = { ...addr, district_info: addr.district_info?.map((d) => Object.fromEntries(Object.entries(d).filter(([k]) => !DISTRICT_DROP.has(k)))) };
+  }
+  return out as unknown as Order;
 }
 
-// —— 白名单校验（负责人 2026-11-26：白名单必须带接口变化、数据不一致提示）——
-// 已知、确认不需要的字段（2026-11-26 库内实见）。不在白名单也不在这里的非空字段 = 接口新字段 → 提示。
-// 收件地址整体跳过（买家个人信息，永不入库，字段多少不影响）。
-const TOP_DROP_KNOWN = new Set(["line_items", "packages", "recipient_address", "buyer_email", "user_id", "delivery_option_id", "shipping_provider_id",
-  "delivery_type", "commerce_platform", "order_type", "shipping_type", "authentication_required", "has_updated_recipient_address", "is_on_hold_order",
-  "is_cod", "is_refundable_sample", "tts_sla_time", "cancel_order_sla_time", "rts_sla_time", "shipping_due_time", "collection_due_time",
-  "fast_rts_sla_time", "fast_dispatch_sla_time", "fast_collection_sla_time"]);
-const LI_DROP_KNOWN = new Set(["id", "package_id", "rts_time", "display_status", "package_status", "currency", "cancel_reason", "cancel_user",
-  "product_name", "sku_image", "tracking_number", "shipping_provider_name", "shipping_provider_id", "gift_retail_price", "room_id"]);
-const TOP_KEEP_SET = new Set(TOP_KEEP), LI_KEEP_SET = new Set(LI_KEEP);
-// 每单必须有的字段：缺了说明接口结构变了（字段改名/挪位置），白名单会静默丢数
+// —— 瘦身校验（负责人 2026-11-26：要有接口变化、数据不一致提示）——
+// 已见过的字段（2026-11-26 库内实见 + 瘦身去掉的）。不在其中的非空字段 = 接口新字段 → 照存并提示。收件地址跳过（个人信息，入库前已裁掉）。
+const TOP_SEEN = new Set(["id", "status", "create_time", "update_time", "paid_time", "rts_time", "collection_time", "delivery_time", "cancel_time",
+  "cancellation_initiator", "cancel_reason", "fulfillment_type", "tracking_number", "delivery_option_name", "shipping_provider", "buyer_message",
+  "payment_method_name", "seller_note", "warehouse_id", "is_sample_order", "is_replacement_order", "payment", "line_items", "packages",
+  "recipient_address", "buyer_email", "user_id", "delivery_type", "commerce_platform", "order_type", "shipping_type", "authentication_required",
+  "has_updated_recipient_address", "is_on_hold_order", "is_cod", "is_refundable_sample", "is_buyer_request_cancel", ...TOP_DROP]);
+const LI_SEEN = new Set(["id", "sku_id", "product_id", "seller_sku", "sku_name", "sku_type", "original_price", "sale_price", "seller_discount",
+  "platform_discount", "is_gift", "package_id", "rts_time", "display_status", "package_status", "currency", "cancel_reason", "cancel_user",
+  "gift_retail_price", "room_id", ...LINE_ITEM_DROP]);
+// 每单必须有的字段：缺了说明接口结构变了（字段改名/挪位置）
 const REQUIRED_TOP = ["id", "status", "create_time", "update_time", "payment"];
 const REQUIRED_LI = ["sku_id", "sale_price", "original_price"];
 const present = (v: unknown) => v !== undefined && v !== null && v !== "" && !(Array.isArray(v) && !v.length);
 // 对比导出行时跳过「Product Name」：商品标题 2026-11-25 起就不入库（负责人定），不算不一致
 const PRODUCT_NAME_COL = ORDER_COLUMNS.indexOf("Product Name");
 const PRODUCT_NAME_COL_TH = ORDER_COLUMNS_TH.indexOf("Product Name");
-/** 返回本单是否「白名单后导出结果不变」；不一致时调用方改存完整原文（去个人信息），不丢数 */
+/** 返回本单「瘦身后导出结果不变」；不一致时调用方改存完整原文（去个人信息），不丢数 */
 function checkSlim(o: Order, slim: Order, shop: Shop, found: Map<string, string>): boolean {
   const src = o as unknown as Record<string, unknown>;
-  for (const [k, v] of Object.entries(src)) if (present(v) && !TOP_KEEP_SET.has(k) && !TOP_DROP_KNOWN.has(k)) found.set(`orders.新字段.${k}`, `${o.id}=${JSON.stringify(v).slice(0, 80)}`);
+  for (const [k, v] of Object.entries(src)) if (present(v) && !TOP_SEEN.has(k)) found.set(`orders.新字段.${k}`, `${o.id}=${JSON.stringify(v).slice(0, 80)}`);
   for (const k of REQUIRED_TOP) if (!present(src[k])) found.set(`orders.缺字段.${k}`, o.id);
   if (!(o.line_items ?? []).length) found.set("orders.缺字段.line_items", o.id);
   for (const li of (o.line_items ?? []) as Array<Record<string, unknown>>) {
-    for (const [k, v] of Object.entries(li)) if (present(v) && !LI_KEEP_SET.has(k) && !LI_DROP_KNOWN.has(k)) found.set(`orders.新字段.line_items.${k}`, `${o.id}=${JSON.stringify(v).slice(0, 80)}`);
+    for (const [k, v] of Object.entries(li)) if (present(v) && !LI_SEEN.has(k)) found.set(`orders.新字段.line_items.${k}`, `${o.id}=${JSON.stringify(v).slice(0, 80)}`);
     for (const k of REQUIRED_LI) if (!present(li[k])) found.set(`orders.缺字段.line_items.${k}`, o.id);
   }
   for (const p of (o.packages ?? []) as Array<Record<string, unknown>>) {
@@ -930,7 +945,7 @@ function checkSlim(o: Order, slim: Order, shop: Shop, found: Map<string, string>
   const skip = th ? PRODUCT_NAME_COL_TH : PRODUCT_NAME_COL;
   const rows = (x: Order) => JSON.stringify(orderRows(x, shop, th).map((r) => r.filter((_, i) => i !== skip)));
   if (rows(o) === rows(slim)) return true;
-  found.set("orders.白名单不一致", `${o.id}：白名单前后导出行不同，该单已改存完整原文（之后同类单照此处理，只首次提示）`);
+  found.set("orders.瘦身不一致", `${o.id}：瘦身前后导出行不同，该单已改存完整原文（之后同类单照此处理，只首次提示）`);
   return false;
 }
 const nonZero = (v: unknown) => (typeof v === "number" || typeof v === "string") && v !== "" && Number(v) !== 0 && isFinite(Number(v));
