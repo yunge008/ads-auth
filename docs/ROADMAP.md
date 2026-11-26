@@ -7,7 +7,7 @@
 > 标记：✅ 已核验 ｜ ⚠️ 未核验（代码写了但没实测或无权限确认）｜ 🙋 需负责人决策/提供 ｜ 🔧 需负责人手动操作（跑 SQL / 让 Lovable 部署）
 > 优先级：P0 本轮必须做 ｜ P1 本轮争取 ｜ P2 之后
 
-最后更新：2026-11-26（1126.315）
+最后更新：2026-11-26（1126.316）
 
 ---
 
@@ -66,10 +66,10 @@ Lovable 积分已充值 → Edge Function 改动可以部署（B 类：给 Lovab
 | 优先 | 待办 | 备注 |
 |---|---|---|
 | — | MX-AR 等户迁移 | ✅ 2026-11-26 核实已完成：11-24 MX-AR（复制 45 + Excel 41 成功）、MX-NE、MX-SJ 导入成功；ECO9B 的 MX-AR/NE/SJ、PH、PH2、MY、TH 自 11-24 起有消耗、旧 ECO9 户 11-25 起为 0。JP、VN 仍在 ECO9 旧户正常投放（ECO9B 无 VN 户），未列入迁移 |
-| P1 🔧 | 「商品可投预检」需要 `/store/product/get/` 权限（11-24 导入日志全部报 40001）：负责人 2026-11-26 定**现在开**——TikTok for Business 开发者后台给应用开含该接口的权限（权限名⚠️未核验）→ 设置→授权 三个连接（SEA店铺BC / ECO9B / ADFLY-test）逐个重新授权并选对 BC | 核验：下次建组导入记录的组备注不再出现「40001」 |
+| P1 | 「商品可投预检」需要 `/store/product/get/` 权限 | ✅ 应用权限已批（负责人 2026-11-26 截图：TikTok Shop 权限组含 `/store/product/get/`，状态 approved）。⚠️ 三个连接是否带上新权限**未核验**：库里三条连接均建于 11-24 16:14 / 16:15、11-25 12:20（北京时间），之后没有新保存的授权；11-24 报 40001 的导入（13:39–14:53）都早于这三个 token，之后没有新建组 → 目前没有任何户「不行」的证据，也没有「行」的证据。核验：下次建组看组备注是否还有「40001」 |
 | — | `exclusive_authorization/create` 参数未核验 | ✅ 关闭（不做）：切户按钮已下线，改为对方手动同意；路由 `auth_grant` 保留未用 |
 | — | 大组 update 补全失败根因 | ✅ 1126.315 查明并修：11-24 PH 150 个「组成功商品未纳入」全部是 TikTok「Product changes are being applied. Please come back later」（上一次变更仍在异步生效），代码只对「unavailable」重试 → 二分到单个全判失败。现在遇到该提示退避 5/10/20 秒原样重试。⚠️ 未实测（下次大组导入看结果） |
-| — | 删除不再调用的 Edge Function `gmv-max-adgroup-batch-create` / `gmv-max-exclusive-auth` | ✅ 1126.315 仓库代码已删；🔧 线上删除交给 Lovable（负责人 2026-11-26 定） |
+| — | 删除不再调用的 Edge Function `gmv-max-adgroup-batch-create` / `gmv-max-exclusive-auth` | ✅ 1126.315 仓库代码已删；✅ `gmv-max-exclusive-auth` 线上本来就不存在（404）；🔧 `gmv-max-adgroup-batch-create` 线上仍在（2026-11-26 探测 401），待 Lovable 删除 |
 
 **注意**：一个商品只能在一个启用组、每店一个全店组；开始/结束时间按 UTC+0；BC 必须选对（连接重新授权会丢 bc_id，回调页已要求必填）。
 
