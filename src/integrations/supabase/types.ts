@@ -14,7 +14,7 @@ export type Database = {
   }
   public: {
     Tables: {
-      ad_upload_agg: {
+      ad_upload_agg_nz: {
         Row: {
           account_name: string
           clicks: number
@@ -84,6 +84,53 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "ad_upload_agg_upload_id_fkey"
+            columns: ["upload_id"]
+            isOneToOne: false
+            referencedRelation: "ad_uploads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ad_upload_agg_zero: {
+        Row: {
+          account_name: string
+          country: string
+          creative_type: string
+          currency: string
+          month: string
+          posted_at: string | null
+          product_id: string
+          rows_count: number
+          upload_id: string
+          vid: string
+        }
+        Insert: {
+          account_name?: string
+          country?: string
+          creative_type?: string
+          currency?: string
+          month?: string
+          posted_at?: string | null
+          product_id?: string
+          rows_count?: number
+          upload_id: string
+          vid?: string
+        }
+        Update: {
+          account_name?: string
+          country?: string
+          creative_type?: string
+          currency?: string
+          month?: string
+          posted_at?: string | null
+          product_id?: string
+          rows_count?: number
+          upload_id?: string
+          vid?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ad_upload_agg_zero_upload_id_fkey"
             columns: ["upload_id"]
             isOneToOne: false
             referencedRelation: "ad_uploads"
@@ -3617,6 +3664,31 @@ export type Database = {
       }
     }
     Views: {
+      ad_upload_agg: {
+        Row: {
+          account_name: string | null
+          clicks: number | null
+          cost: number | null
+          cost_usd: number | null
+          country: string | null
+          created_at: string | null
+          creative_type: string | null
+          currency: string | null
+          gmv_usd: number | null
+          gross_revenue: number | null
+          id: string | null
+          impressions: number | null
+          month: string | null
+          orders: number | null
+          posted_at: string | null
+          product_id: string | null
+          rows_count: number | null
+          upload_id: string | null
+          usd_rate: number | null
+          vid: string | null
+        }
+        Relationships: []
+      }
       attribution_creator_audit: {
         Row: {
           最早动作日: string | null
@@ -3707,6 +3779,7 @@ export type Database = {
       ai_db_refresh_grants: { Args: never; Returns: Json }
       ai_key_ok: { Args: never; Returns: boolean }
       ai_reader_refresh_grants: { Args: never; Returns: Json }
+      attribution_agg_move_zero: { Args: { _month: string }; Returns: number }
       attribution_apply_run: {
         Args: { _month: string; _run_id: string }
         Returns: {
