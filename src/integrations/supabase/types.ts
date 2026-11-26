@@ -2530,6 +2530,7 @@ export type Database = {
           content: string | null
           content_zh: string | null
           img_count: number
+          imgs: Json | null
           order_id: string | null
           product_id: string
           reply: string | null
@@ -2546,6 +2547,7 @@ export type Database = {
           content?: string | null
           content_zh?: string | null
           img_count?: number
+          imgs?: Json | null
           order_id?: string | null
           product_id: string
           reply?: string | null
@@ -2562,6 +2564,7 @@ export type Database = {
           content?: string | null
           content_zh?: string | null
           img_count?: number
+          imgs?: Json | null
           order_id?: string | null
           product_id?: string
           reply?: string | null
@@ -4090,6 +4093,18 @@ export type Database = {
           s5: number
           shop_key: string
         }[]
+      }
+      review_list: {
+        Args: {
+          p_from: string
+          p_limit: number
+          p_offset: number
+          p_q: string
+          p_shops: string[]
+          p_stars: number[]
+          p_to: string
+        }
+        Returns: Json
       }
       review_products_fill_sku: { Args: never; Returns: number }
       review_series: {
