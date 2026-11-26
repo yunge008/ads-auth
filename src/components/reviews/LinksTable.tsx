@@ -2,7 +2,7 @@ import * as React from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ChevronRight } from "lucide-react";
 import { addS, avgS, reviewsApi, sumS, type SkuTable, type TableRow as Row } from "@/lib/reviewsApi";
-import { f2, Help, pct, StarBar } from "./shared";
+import { f2, Help, Pager, pct, StarBar, useFitRows } from "./shared";
 
 type K = "site" | "sku" | "cum" | "delta" | "cnt" | "avg" | "bad" | "badr" | "ord" | "revr" | "obadr";
 const COLS: { k: K; label: string; help?: string; left?: boolean }[] = [
@@ -23,6 +23,10 @@ export function LinksTable({ rows, onPick, picked, from, to }: { rows: Row[] | n
   const [sort, setSort] = React.useState<{ k: K; dir: 1 | -1 }>({ k: "badr", dir: -1 });
   const [open, setOpen] = React.useState<Set<string>>(new Set());
   React.useEffect(() => setOpen(new Set()), [from, to]);
+  const boxRef = React.useRef<HTMLDivElement>(null);
+  const per = useFitRows(boxRef);
+  const [page, setPage] = React.useState(0);
+  React.useEffect(() => setPage(0), [rows, sort, per]);
   const toggle = (key: string) => setOpen((o) => { const n = new Set(o); if (n.has(key)) n.delete(key); else n.add(key); return n; });
   const data = React.useMemo(() => (rows ?? []).map((r) => {
     const end = addS(addS(r.base, r.range), r.rinit);
@@ -39,8 +43,11 @@ export function LinksTable({ rows, onPick, picked, from, to }: { rows: Row[] | n
     return ((A ?? -1e9) - (B ?? -1e9)) * sort.dir;
   }), [rows, sort]);
 
-  if (!rows) return <div className="text-sm text-muted-foreground py-10 text-center">加载中…</div>;
+  const pages = Math.max(1, Math.ceil(data.length / per));
+  const shown = data.slice(page * per, page * per + per);
+  if (!rows) return <div ref={boxRef} className="text-sm text-muted-foreground py-10 text-center">加载中…</div>;
   return (
+    <div ref={boxRef} className="grid gap-2">
     <div className="rounded-md border overflow-x-auto">
       <Table className="tabular-nums text-sm">
         <TableHeader>
@@ -62,7 +69,7 @@ export function LinksTable({ rows, onPick, picked, from, to }: { rows: Row[] | n
         </TableHeader>
         <TableBody>
           {data.length === 0 && <TableRow><TableCell colSpan={COLS.length + 1} className="text-center text-muted-foreground py-8">没有数据</TableCell></TableRow>}
-          {data.map((x) => {
+          {shown.map((x) => {
             const key = `${x.site}|${x.r.pid}`;
             return (<React.Fragment key={key}>
             <TableRow tabIndex={0} aria-selected={picked === x.r.pid}
@@ -75,7 +82,7 @@ export function LinksTable({ rows, onPick, picked, from, to }: { rows: Row[] | n
                 </button>
                 {x.site}
               </TableCell>
-              <TableCell className="max-w-[260px]">
+              <TableCell className="min-w-[280px] max-w-[480px]">
                 <div className="truncate" title={x.sku}>{x.sku || "—"}</div>
                 <div className="font-mono text-[11px] text-muted-foreground">{x.r.pid}</div>
               </TableCell>
@@ -100,6 +107,8 @@ export function LinksTable({ rows, onPick, picked, from, to }: { rows: Row[] | n
           })}
         </TableBody>
       </Table>
+    </div>
+    <Pager page={page} pages={pages} total={data.length} onPage={setPage} />
     </div>
   );
 }
@@ -126,7 +135,7 @@ function SkuRows({ site, pid, from, to, cols }: { site: string; pid: string; fro
         return (
           <TableRow key={k.sku_id} className="bg-muted/40 text-xs">
             <TableCell />
-            <TableCell className="pl-6 max-w-[260px]">
+            <TableCell className="pl-6 max-w-[420px]">
               <div className="truncate" title={k.spec ?? ""}>{k.spec ?? "—"}</div>
               <div className="font-mono text-[11px] text-muted-foreground">{k.sku_id}</div>
             </TableCell>

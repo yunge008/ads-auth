@@ -151,22 +151,40 @@ type ShopState = {
   run_date?: string; from?: string; end?: string; products?: string[]; idx?: number; done?: boolean; calls?: number;
   errors?: string[];                        // 单个商品失败不阻塞整店，记前 20 条
   bf_from?: string; bf_to?: string; bf_idx?: number; bf_done?: boolean; // 出单回补（一次性，到 end − 179 天）
+  bf_list?: string[];      // 本轮回补的商品（首轮 = products，重试轮 = 上一轮失败的）
+  bf_failed?: string[];    // 本轮失败的商品
+  bf_round?: number;       // 第几轮（最多 3 轮）
+  bf_eff_from?: string;    // 实际取到的最早起点（回看窗口不够时会往后挪）
 };
 const ORDERS_BACKFILL_DAYS = 180; // 出单至少覆盖到截止日往前 180 天（页面最长预设「近 180 天」）
 
-/** 只补出单：区间内逐日 orders 写进 api 行（星级保持 0；这段日期 ≤ orders_from，库里原本没有 api 行） */
-async function backfillOrders(shop: Shop, pid: string, from: string, to: string): Promise<number> {
+/**
+ * 只补出单：区间内逐日 orders 写进 api 行（星级保持 0；这段日期 ≤ orders_from，库里原本没有 api 行）。
+ * 接口回看窗口各店不同（2026-11-26 实测 MX / US 店从截止日前 179 天起报 28001022）：
+ * 第一段遇到 28001022 时起点依次往后挪 1/2/3/5/7/14/30 天重试。返回调用次数与实际起点。
+ */
+async function backfillOrders(shop: Shop, pid: string, from: string, to: string): Promise<{ calls: number; effFrom: string }> {
   let calls = 0;
   const rows: Record<string, unknown>[] = [];
   const now = new Date().toISOString();
+  let start = from;
   for (let a = from; a <= to; a = addDays(a, MAX_SPAN_DAYS)) {
     const b = [addDays(a, MAX_SPAN_DAYS - 1), to].sort()[0];
-    const r = await detail(shop, pid, a, b, true);
-    calls++;
+    let r: Detail | null = null;
+    const shifts = a === from ? [0, 1, 2, 3, 5, 7, 14, 30] : [0];
+    for (const sh of shifts) {
+      const aa = addDays(a, sh);
+      if (aa > b) break;
+      try { r = await detail(shop, pid, aa, b, true); calls++; start = a === from ? aa : start; break; } catch (e) {
+        calls++;
+        if (!/28001022/.test((e as Error).message) || sh === shifts[shifts.length - 1]) throw e;
+      }
+    }
+    if (!r) continue;
     for (const [d, o] of r.orders) if (o > 0) rows.push({ shop_key: shop.key, product_id: pid, d, source: "api", s1: 0, s2: 0, s3: 0, s4: 0, s5: 0, orders: o, updated_at: now });
   }
   if (rows.length) await upsertOrThrow("review_daily", rows, "shop_key,product_id,d,source");
-  return calls;
+  return { calls, effFrom: start };
 }
 async function pickProducts(shop: Shop, end: string): Promise<string[]> {
   const ids = new Set<string>();
@@ -226,6 +244,7 @@ async function stepShop(shop: Shop, started: number): Promise<StepResult> {
       st = {
         run_date: runDate, from: from < addDays(end, -120) ? addDays(end, -120) : from, end, products, idx: 0, done: false, calls: 0, errors: [],
         bf_from: bfTarget, bf_to: addDays(ordersFrom, -1), bf_idx: prevBf?.bf_idx ?? 0, bf_done: ordersFrom <= bfTarget,
+        bf_list: prevBf?.bf_list, bf_failed: prevBf?.bf_failed ?? [], bf_round: prevBf?.bf_round ?? 1, bf_eff_from: prevBf?.bf_eff_from,
       };
       for (let i = 0; i < products.length; i += 500) {
         await db.from("review_products").upsert(products.slice(i, i + 500).map((product_id) => ({ shop_key: shop.key, product_id })), { onConflict: "shop_key,product_id", ignoreDuplicates: true });
@@ -236,7 +255,7 @@ async function stepShop(shop: Shop, started: number): Promise<StepResult> {
       // 上线前已跑完的当晚状态没有回补字段：按当晚截止日补上
       const bfTarget = addDays(st.end, -(ORDERS_BACKFILL_DAYS - 1));
       const ordersFrom = row?.orders_from ?? st.from!;
-      Object.assign(st, { bf_from: bfTarget, bf_to: addDays(ordersFrom, -1), bf_idx: 0, bf_done: ordersFrom <= bfTarget });
+      Object.assign(st, { bf_from: bfTarget, bf_to: addDays(ordersFrom, -1), bf_idx: 0, bf_done: ordersFrom <= bfTarget, bf_list: undefined, bf_failed: [], bf_round: 1, bf_eff_from: undefined });
     }
     const list = st.products ?? [];
     // ① 每晚快照 + 近 7 天出单
@@ -252,14 +271,25 @@ async function stepShop(shop: Shop, started: number): Promise<StepResult> {
       await db.rpc("review_products_fill_sku");
     }
     // ② 出单回补（每晚快照完成后、有剩余时间时）
-    while (st.done && !st.bf_done && (st.bf_idx ?? 0) < list.length && Date.now() - started < PRODUCT_START_LIMIT_MS) {
-      const pid = list[st.bf_idx!];
-      try { st.calls = (st.calls ?? 0) + await backfillOrders(shop, pid, st.bf_from!, st.bf_to!); } catch (e) { note(pid, e); }
+    //    失败的商品下一轮重试（最多 3 轮）；orders_from 只在全部成功后才前移，且取各商品实际起点中最晚的
+    const bfList = st.bf_list ?? list;
+    while (st.done && !st.bf_done && (st.bf_idx ?? 0) < bfList.length && Date.now() - started < PRODUCT_START_LIMIT_MS) {
+      const pid = bfList[st.bf_idx!];
+      try {
+        const r = await backfillOrders(shop, pid, st.bf_from!, st.bf_to!);
+        st.calls = (st.calls ?? 0) + r.calls;
+        if (!st.bf_eff_from || r.effFrom > st.bf_eff_from) st.bf_eff_from = r.effFrom;
+      } catch (e) { note(pid, e); st.bf_failed = [...(st.bf_failed ?? []), pid]; }
       st.bf_idx = (st.bf_idx ?? 0) + 1;
     }
-    if (st.done && !st.bf_done && (st.bf_idx ?? 0) >= list.length) {
-      st.bf_done = true;
-      await db.from("review_shops").upsert({ shop_key: shop.key, orders_from: st.bf_from }, { onConflict: "shop_key" });
+    if (st.done && !st.bf_done && (st.bf_idx ?? 0) >= bfList.length) {
+      const failed = st.bf_failed ?? [];
+      if (failed.length && (st.bf_round ?? 1) < 3) {
+        Object.assign(st, { bf_list: failed, bf_failed: [], bf_idx: 0, bf_round: (st.bf_round ?? 1) + 1 });
+      } else {
+        st.bf_done = true;
+        if (!failed.length) await db.from("review_shops").upsert({ shop_key: shop.key, orders_from: st.bf_eff_from ?? st.bf_from }, { onConflict: "shop_key" });
+      }
     }
     const errs = st.errors ?? [];
     await db.from("review_shops").upsert({

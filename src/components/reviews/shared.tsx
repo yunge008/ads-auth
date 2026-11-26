@@ -53,3 +53,40 @@ export function StarBar({ s }: { s: number[] }) {
     </Tooltip>
   );
 }
+
+/**
+ * 表格分页：每页行数按视口剩余高度算，保证整页不用上下滚动。
+ * ref 指向表格外层；rowH = 单行高度（两行文字约 52px）；reserve = 表头 + 分页条 + 底部留白。
+ */
+export function useFitRows(ref: React.RefObject<HTMLElement | null>, rowH = 52, reserve = 110) {
+  const [n, setN] = React.useState(10);
+  React.useLayoutEffect(() => {
+    const calc = () => {
+      const el = ref.current;
+      if (!el || !el.offsetParent) return; // 隐藏中的 TAB 不算
+      const top = el.getBoundingClientRect().top;
+      setN(Math.max(5, Math.floor((window.innerHeight - top - reserve) / rowH)));
+    };
+    calc();
+    window.addEventListener("resize", calc);
+    const ro = new ResizeObserver(calc);
+    if (ref.current?.parentElement) ro.observe(ref.current.parentElement);
+    return () => { window.removeEventListener("resize", calc); ro.disconnect(); };
+  }, [ref, rowH, reserve]);
+  return n;
+}
+
+export function Pager({ page, pages, total, onPage }: { page: number; pages: number; total: number; onPage: (p: number) => void }) {
+  if (pages <= 1) return <div className="text-xs text-muted-foreground tabular-nums px-1">共 {total.toLocaleString()} 条</div>;
+  const btn = "h-7 min-w-7 rounded-md border px-2 text-xs disabled:opacity-40 hover:bg-muted";
+  return (
+    <nav className="flex items-center gap-1 text-xs tabular-nums" aria-label="分页">
+      <span className="text-muted-foreground mr-2">共 {total.toLocaleString()} 条</span>
+      <button type="button" className={btn} disabled={page <= 0} onClick={() => onPage(0)} aria-label="第一页">«</button>
+      <button type="button" className={btn} disabled={page <= 0} onClick={() => onPage(page - 1)} aria-label="上一页">‹</button>
+      <span className="px-2">{page + 1} / {pages}</span>
+      <button type="button" className={btn} disabled={page >= pages - 1} onClick={() => onPage(page + 1)} aria-label="下一页">›</button>
+      <button type="button" className={btn} disabled={page >= pages - 1} onClick={() => onPage(pages - 1)} aria-label="最后一页">»</button>
+    </nav>
+  );
+}

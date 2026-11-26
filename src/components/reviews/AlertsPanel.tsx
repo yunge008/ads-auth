@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { reviewsApi, type AlertItem, type Meta } from "@/lib/reviewsApi";
-import { f2, Help } from "./shared";
+import { f2, Help, Pager, useFitRows } from "./shared";
 
 /** 差评提示：门槛设置 + 当前低于门槛的链接（每晚同步后，新跌破的合并发一条飞书） */
 export function AlertsPanel({ meta, onSaved, onPick }: { meta: Meta | null; onSaved: () => void; onPick: (pid: string) => void }) {
@@ -13,6 +13,11 @@ export function AlertsPanel({ meta, onSaved, onPick }: { meta: Meta | null; onSa
   const [thr, setThr] = React.useState("4.0");
   const [items, setItems] = React.useState<AlertItem[] | null>(null);
   const [saving, setSaving] = React.useState(false);
+  const boxRef = React.useRef<HTMLDivElement>(null);
+  const per = useFitRows(boxRef);
+  const [page, setPage] = React.useState(0);
+  React.useEffect(() => setPage(0), [items, per]);
+  const pages = Math.max(1, Math.ceil((items?.length ?? 0) / per));
   React.useEffect(() => {
     if (meta?.settings) { setMin(String(meta.settings.min_reviews)); setThr(Number(meta.settings.threshold).toFixed(1)); }
   }, [meta?.settings]);
@@ -48,6 +53,7 @@ export function AlertsPanel({ meta, onSaved, onPick }: { meta: Meta | null; onSa
         {meta?.settings?.updated_by && <span className="text-xs text-muted-foreground ml-auto">{meta.settings.updated_by} · {meta.settings.updated_at?.slice(0, 16).replace("T", " ")}</span>}
       </CardContent></Card>
 
+      <div ref={boxRef} className="grid gap-2">
       <div className="rounded-md border overflow-x-auto">
         <Table className="tabular-nums text-sm">
           <TableHeader><TableRow>
@@ -59,10 +65,10 @@ export function AlertsPanel({ meta, onSaved, onPick }: { meta: Meta | null; onSa
           <TableBody>
             {items === null && <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">加载中…</TableCell></TableRow>}
             {items?.length === 0 && <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">没有低于门槛的链接</TableCell></TableRow>}
-            {items?.map((x) => (
+            {items?.slice(page * per, page * per + per).map((x) => (
               <TableRow key={`${x.site}|${x.pid}`} className="cursor-pointer" tabIndex={0} onClick={() => onPick(x.pid)} onKeyDown={(e) => { if (e.key === "Enter") onPick(x.pid); }}>
                 <TableCell>{x.site}</TableCell>
-                <TableCell><div className="truncate max-w-[260px]">{x.sku ?? "—"}</div><div className="font-mono text-[11px] text-muted-foreground">{x.pid}</div></TableCell>
+                <TableCell className="min-w-[280px] max-w-[480px]"><div className="truncate" title={x.sku ?? ""}>{x.sku ?? "—"}</div><div className="font-mono text-[11px] text-muted-foreground">{x.pid}</div></TableCell>
                 <TableCell className="text-right text-red-600">{f2(x.avg)}</TableCell>
                 <TableCell className="text-right">{x.n.toLocaleString()}</TableCell>
                 <TableCell className="text-right">{x.n30}</TableCell>
@@ -72,6 +78,8 @@ export function AlertsPanel({ meta, onSaved, onPick }: { meta: Meta | null; onSa
             ))}
           </TableBody>
         </Table>
+      </div>
+      <Pager page={page} pages={pages} total={items?.length ?? 0} onPage={setPage} />
       </div>
     </div>
   );

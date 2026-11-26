@@ -43,3 +43,4 @@ git show <提交号>:supabase/migrations/<文件名>
 | 2026-11-25 | `20261126100000_listing_reviews.sql` | `3109325` | 评论查看：review_daily/texts/products/shops/settings/uploads + RPC + pg_cron reviews-nightly（负责人执行，ai_reader_refresh_grants 返回 errors=[]） |
 | 2026-11-25 | `20261126120000_listing_reviews_snapshot.sql` | `1f25889` | 评论查看接口口径更正：review_snapshot、api_init、重建 review_series/table/alert_scan（Lovable 部署时确认 review_snapshot 已存在） |
 | 2026-11-25 | `20261126140000_review_sku.sql` | `a542f53` | 评论查看 SKU 维度：review_sku_daily、review_skus、review_sku_table（负责人执行，refresh_grants errors=[]） |
+| 2026-11-26 | `20261126160000_review_orders_cov.sql` | `d8205d5` | 评论查看：review_shops.orders_from + review_table 覆盖口径（负责人执行，refresh_grants errors=[]） |
