@@ -7,7 +7,7 @@
 > 标记：✅ 已核验 ｜ ⚠️ 未核验（代码写了但没实测或无权限确认）｜ 🙋 需负责人决策/提供 ｜ 🔧 需负责人手动操作（跑 SQL / 让 Lovable 部署）
 > 优先级：P0 本轮必须做 ｜ P1 本轮争取 ｜ P2 之后
 
-最后更新：2026-11-26（1126.316）
+最后更新：2026-11-26（1126.317）
 
 ---
 
@@ -25,7 +25,7 @@ Lovable 积分已充值 → Edge Function 改动可以部署（B 类：给 Lovab
 | G7 | 部署 `bc-list-advertisers`（设置→授权 账户名显示成 ID 的修复，1125.282） | 🔧 Lovable | ⚠️ 待部署；部署后刷新设置页核对账户名 |
 | G5 | 导出防公式注入：素材成效已修（Lovable 1124.257）；「TikTok授权结果」CSV 与其他 Excel 导出待 Lovable 修/检查 | Lovable 免费修 | 进行中 |
 | G8 | 评论查看：重新上传抓取表（SKU 数据）| 🔧 负责人 | migration 100000/120000/140000 ✅、reviews 1125.311 已部署 ✅、PH 接口核对全 0 ✅；待重传抓取表 |
-| G9 | 数据库容量治理（1126.314）：✅①`20261126150000_db_index_cleanup.sql` 已执行（4.14→3.88GB）。待做：②SQL 跑 `20261126170000_ad_upload_agg_zero_split.sql` → `select month, public.attribution_agg_move_zero(month) from (select distinct month from public.ad_uploads order by 1) m;` → `VACUUM FULL public.ad_upload_agg_nz;`（约省 1GB）③Lovable 部署 `tts-export` + Publish → SQL 跑 `20261126160000_tts_orders_slim.sql` → `VACUUM FULL public.tts_orders;`（约省 0.4–0.5GB）④可选 `20261126150200_attribution_run_keys_cleanup.sql` + `VACUUM FULL public.attribution_run_keys;`（约省 270MB） | 🔧 SQL + Lovable | 部分完成；做完复查库大小 |
+| G9 | 数据库容量治理（1126.317）：✅①索引清理（4.14→3.88GB）✅②归并层全 0 行拆表：15 个月已搬 + VACUUM FULL，库 **2.96GB**（归并层 1,506MB → nz 243MB + zero 340MB）；⚠️ 漏 2026-01（15.6 万行仍在 nz）：跑 `select public.attribution_agg_move_zero('2026-01');` 后再 `VACUUM FULL public.ad_upload_agg_nz;`。待做：③Lovable 部署 `tts-export` + Publish → SQL 跑 `20261126160000_tts_orders_slim.sql` → `VACUUM FULL public.tts_orders;`（约省 0.4–0.5GB）④可选 `20261126150200_attribution_run_keys_cleanup.sql` + `VACUUM FULL public.attribution_run_keys;`（约省 270MB） | 🔧 SQL + Lovable | 部分完成 |
 | G7 | 部署 `tts-export`（1125.288：店铺数据导出页财务列取数修正，PH 物流服务费等两列恒空、TH 缺进口关税等列） | 🔧 Lovable | 待部署 |
 
 ---
