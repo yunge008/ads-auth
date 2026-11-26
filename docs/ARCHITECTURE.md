@@ -234,3 +234,7 @@ GMV Max 导入记录，逐商品一行：batch_id / kind(excel|single|copy) / so
 - 表：`review_daily`（站点×商品×日×来源 crawl/api 的 1–5 星条数 + api 出单量；d ≤ `review_shops.crawl_until` 用 crawl，之后用 api）、`review_texts`（只存有留言/回复的评价）、`review_products`（卖家 SKU、提示状态 below_4）、`review_shops`（抓取覆盖 + 同步游标）、`review_settings`（评价数门槛、提示分数）、`review_uploads`。RPC：`review_series` / `review_table` / `review_alert_scan` / `review_texts_upsert` / `review_products_fill_sku`。
 - 每晚：pg_cron `reviews-nightly`（`35 16,17,18 * * *` = 北京 00:35/01:35/02:35）→ `/api/public/hooks/reviews-cron` → 循环 `reviews` step（每次 ≤ 约 100s，游标续跑）→ 全部完成后 `alert_scan`（新跌破门槛的合并发飞书 FEISHU_BOT_WEBHOOK）。
 - 接口：Analytics 商品表现列表（选近 90 天有出单的商品）+ 商品表现详情（星级合计 + 逐日出单，整段比对后二分到天）；每周日补 Search Products 全部在售。
+
+### 归因每晚快照驱动（1126.320 起）
+- `attribution-cron` 自己算出「有 READY 批次的最近 3 个月」，**逐月**调 `attribution-upload` refresh（建分片）→ judge 循环 → finish；不再一次请求给多个月建分片（11-25 晚 08/09/10 因此超时卡死）。
+- `attribution_runs_prune` 在快照完成时清掉该月已结束（READY/FAILED）快照的判定键与候选分片（migration 20261126150200 / 20261126180000）；这两张表只在计算过程中有数据。

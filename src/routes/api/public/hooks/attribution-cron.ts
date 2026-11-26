@@ -90,52 +90,69 @@ export const Route = createFileRoute("/api/public/hooks/attribution-cron")({
           return JSON.parse(text) as Record<string, unknown>;
         };
 
-        let payload: RefreshResult;
-        const results: Array<{ month: string; ok: boolean; error?: string }> = [];
-        try {
-          payload = (await call({
-            action: "refresh",
-            source: "CRON",
-            ...(months ? { months } : { lookback_months: lookback }),
-          })) as RefreshResult;
+        // 2026-11-26：改为逐月「建分片 → 判 → 收尾」。原来第一步一次请求同时给近 3 个月建分片，
+        // 11-25 晚 08/09/10 三个月数据量变大后这一步超过 Edge Function 单次请求时限，响应没回来，
+        // 三条快照停在 RUNNING、判定与收尾都没被调用（11-24 的 06/07/08 恰好没超）。
+        let monthList: string[] = months ?? [];
+        if (!monthList.length) {
+          const { data: ups, error: upErr } = await admin
+            .from("ad_uploads")
+            .select("month")
+            .eq("status", "READY")
+            .order("month", { ascending: false })
+            .limit(2000);
+          if (upErr) {
+            return new Response(JSON.stringify({ error: upErr.message }), {
+              status: 500,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          for (const r of (ups ?? []) as { month: string }[]) {
+            if (r.month && !monthList.includes(r.month)) monthList.push(r.month);
+          }
+          monthList = monthList.slice(0, lookback);
+        }
 
-          for (const plan of payload.plans ?? []) {
+        const payload: RefreshResult = { months: monthList, plans: [] };
+        const results: Array<{ month: string; ok: boolean; error?: string }> = [];
+        for (const month of monthList) {
+          try {
+            const started = (await call({ action: "refresh", source: "CRON", months: [month] })) as RefreshResult;
+            const plan = (started.plans ?? [])[0];
+            if (!plan) {
+              results.push({ month, ok: false, error: "refresh 未返回计划" });
+              continue;
+            }
+            payload.plans?.push(plan);
             if (plan.error) {
-              results.push({ month: plan.month, ok: false, error: plan.error });
+              results.push({ month, ok: false, error: plan.error });
               continue;
             }
             if (plan.skipped || !plan.run_id) {
-              results.push({ month: plan.month, ok: true });
+              results.push({ month, ok: true });
               continue;
             }
-            try {
-              for (let i = 0; i < 500; i++) {
-                const r = (await call({
-                  action: "refresh",
-                  source: "CRON",
-                  stage: "judge",
-                  run_id: plan.run_id,
-                  months: [plan.month],
-                })) as { done?: boolean; remaining?: number };
-                if (r.done || Number(r.remaining ?? 0) === 0) break;
-              }
-              await call({
+            for (let i = 0; i < 500; i++) {
+              const r = (await call({
                 action: "refresh",
                 source: "CRON",
-                stage: "finish",
+                stage: "judge",
                 run_id: plan.run_id,
-                months: [plan.month],
-              });
-              results.push({ month: plan.month, ok: true });
-            } catch (e) {
-              results.push({ month: plan.month, ok: false, error: (e as Error).message });
+                months: [month],
+              })) as { done?: boolean; remaining?: number };
+              if (r.done || Number(r.remaining ?? 0) === 0) break;
             }
+            await call({
+              action: "refresh",
+              source: "CRON",
+              stage: "finish",
+              run_id: plan.run_id,
+              months: [month],
+            });
+            results.push({ month, ok: true });
+          } catch (e) {
+            results.push({ month, ok: false, error: (e as Error).message });
           }
-        } catch (e) {
-          return new Response(JSON.stringify({ error: (e as Error).message }), {
-            status: 500,
-            headers: { "Content-Type": "application/json" },
-          });
         }
         payload.results = results;
 
