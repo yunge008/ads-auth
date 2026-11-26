@@ -112,7 +112,7 @@ export function DataPanel({ meta, onChanged }: { meta: Meta | null; onChanged: (
           <TableHeader><TableRow>
             <TableHead>站点</TableHead>
             <TableHead><span className="inline-flex items-center gap-1">抓取表覆盖<Help label="抓取表覆盖说明" text="这段日期的星级用抓取表；之后的日期用接口逐日数据。" /></span></TableHead>
-            <TableHead>接口同步到</TableHead><TableHead>最近同步</TableHead><TableHead>今晚进度</TableHead><TableHead>错误</TableHead>
+            <TableHead>接口同步到</TableHead><TableHead><span className="inline-flex items-center gap-1">出单从<Help label="出单覆盖说明" text="接口出单数据最早的日期。每晚快照跑完后会自动往前补到截止日前 180 天（一次性），补完前链接表的留评率只按已有出单的日子算。" /></span></TableHead><TableHead>最近同步</TableHead><TableHead>今晚进度</TableHead><TableHead>错误</TableHead>
             {meta?.is_admin && <TableHead />}
           </TableRow></TableHeader>
           <TableBody>
@@ -121,8 +121,9 @@ export function DataPanel({ meta, onChanged }: { meta: Meta | null; onChanged: (
                 <TableCell>{key}</TableCell>
                 <TableCell className="whitespace-nowrap">{s?.crawl_from ? `${s.crawl_from} – ${s.crawl_until}` : "—"}</TableCell>
                 <TableCell>{api ? s?.api_until ?? "—" : <span className="text-muted-foreground">无授权店铺</span>}</TableCell>
+                <TableCell>{s?.orders_from ?? "—"}</TableCell>
                 <TableCell className="text-xs">{s?.last_run_at?.slice(0, 16).replace("T", " ") ?? "—"}</TableCell>
-                <TableCell className="text-xs">{s?.run_date ? `${s.run_date} ${s.run_done ? "完成" : `${s.run_idx}/${s.run_total}`}` : "—"}</TableCell>
+                <TableCell className="text-xs">{s?.run_date ? `${s.run_date} ${!s.run_done ? `${s.run_idx}/${s.run_total}` : s.bf_done ? "完成" : `补出单 ${s.bf_idx}/${s.run_total}`}` : "—"}</TableCell>
                 <TableCell className="text-xs text-red-600 max-w-[280px] truncate" title={s?.last_error ?? ""}>{s?.last_error ?? ""}</TableCell>
                 {meta?.is_admin && <TableCell>{api && <SyncButton shop={key} onDone={onChanged} />}</TableCell>}
               </TableRow>
@@ -170,9 +171,9 @@ function SyncButton({ shop, onDone }: { shop: string; onDone: () => void }) {
         if (!x) { toast.success(`${shop}：今晚已同步完`); break; }
         if (x.error) { toast.error(`${shop}：${x.error}`); break; }
         calls = x.calls;
-        setBusy(`同步中 ${x.idx}/${x.total}`);
+        setBusy(x.done ? `补出单 ${x.bf_idx}/${x.total}` : `同步中 ${x.idx}/${x.total}`);
         onDone(); // 刷新「今晚进度」列
-        if (x.done) { toast.success(`${shop}：完成 ${x.total} 个商品，接口调用 ${calls} 次`); break; }
+        if (x.done && x.bf_done) { toast.success(`${shop}：完成 ${x.total} 个商品，接口调用 ${calls} 次`); break; }
       }
       onDone();
     } catch (e) { toast.error((e as Error).message); } finally { setBusy(null); }

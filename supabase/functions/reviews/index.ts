@@ -147,7 +147,27 @@ async function readAll<T>(page: (from: number, to: number) => PromiseLike<{ data
 }
 
 // ── 每晚同步：选商品 → 逐个 syncProduct（游标存 review_shops.state）────────
-type ShopState = { run_date?: string; from?: string; end?: string; products?: string[]; idx?: number; done?: boolean; calls?: number };
+type ShopState = {
+  run_date?: string; from?: string; end?: string; products?: string[]; idx?: number; done?: boolean; calls?: number;
+  errors?: string[];                        // 单个商品失败不阻塞整店，记前 20 条
+  bf_from?: string; bf_to?: string; bf_idx?: number; bf_done?: boolean; // 出单回补（一次性，到 end − 179 天）
+};
+const ORDERS_BACKFILL_DAYS = 180; // 出单至少覆盖到截止日往前 180 天（页面最长预设「近 180 天」）
+
+/** 只补出单：区间内逐日 orders 写进 api 行（星级保持 0；这段日期 ≤ orders_from，库里原本没有 api 行） */
+async function backfillOrders(shop: Shop, pid: string, from: string, to: string): Promise<number> {
+  let calls = 0;
+  const rows: Record<string, unknown>[] = [];
+  const now = new Date().toISOString();
+  for (let a = from; a <= to; a = addDays(a, MAX_SPAN_DAYS)) {
+    const b = [addDays(a, MAX_SPAN_DAYS - 1), to].sort()[0];
+    const r = await detail(shop, pid, a, b, true);
+    calls++;
+    for (const [d, o] of r.orders) if (o > 0) rows.push({ shop_key: shop.key, product_id: pid, d, source: "api", s1: 0, s2: 0, s3: 0, s4: 0, s5: 0, orders: o, updated_at: now });
+  }
+  if (rows.length) await upsertOrThrow("review_daily", rows, "shop_key,product_id,d,source");
+  return calls;
+}
 async function pickProducts(shop: Shop, end: string): Promise<string[]> {
   const ids = new Set<string>();
   // ① 近 90 天有出单的商品（Analytics 商品表现列表，每页 100）
@@ -186,11 +206,13 @@ async function pickProducts(shop: Shop, end: string): Promise<string[]> {
   return [...ids];
 }
 
-async function stepShop(shop: Shop, started: number): Promise<{ shop: string; done: boolean; idx: number; total: number; calls: number; error?: string }> {
+type StepResult = { shop: string; done: boolean; idx: number; total: number; calls: number; bf_done: boolean; bf_idx: number; error?: string };
+async function stepShop(shop: Shop, started: number): Promise<StepResult> {
   const db = admin();
   const { data: row } = await db.from("review_shops").select("*").eq("shop_key", shop.key).maybeSingle();
   const runDate = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
   let st = (row?.state ?? {}) as ShopState;
+  const note = (pid: string, e: unknown) => { st.errors = [...(st.errors ?? []), `${pid}：${(e as Error).message}`].slice(0, 20); };
   try {
     if (st.run_date !== runDate) {
       // 新的一晚：截止日 = 店铺当地昨天；出单起点 = 上次同步之后往前 7 天（出单会因取消/退款回改），首次 = 抓取表覆盖之后，最多回补 120 天
@@ -198,51 +220,92 @@ async function stepShop(shop: Shop, started: number): Promise<{ shop: string; do
       const since = row?.api_until ?? row?.crawl_until ?? addDays(end, -90);
       const from = [addDays(end, -7), addDays(since, 1)].sort()[0];
       const products = await pickProducts(shop, end);
-      st = { run_date: runDate, from: from < addDays(end, -120) ? addDays(end, -120) : from, end, products, idx: 0, done: false, calls: 0 };
+      const bfTarget = addDays(end, -(ORDERS_BACKFILL_DAYS - 1));
+      const ordersFrom = row?.orders_from ?? (from < addDays(end, -120) ? addDays(end, -120) : from);
+      const prevBf = st.bf_done === false && st.bf_from === bfTarget ? st : null; // 上一晚没补完的接着补
+      st = {
+        run_date: runDate, from: from < addDays(end, -120) ? addDays(end, -120) : from, end, products, idx: 0, done: false, calls: 0, errors: [],
+        bf_from: bfTarget, bf_to: addDays(ordersFrom, -1), bf_idx: prevBf?.bf_idx ?? 0, bf_done: ordersFrom <= bfTarget,
+      };
       for (let i = 0; i < products.length; i += 500) {
         await db.from("review_products").upsert(products.slice(i, i + 500).map((product_id) => ({ shop_key: shop.key, product_id })), { onConflict: "shop_key,product_id", ignoreDuplicates: true });
       }
+      if (!row?.orders_from) await db.from("review_shops").upsert({ shop_key: shop.key, orders_from: ordersFrom }, { onConflict: "shop_key" });
+    }
+    if (st.end && !st.bf_from) {
+      // 上线前已跑完的当晚状态没有回补字段：按当晚截止日补上
+      const bfTarget = addDays(st.end, -(ORDERS_BACKFILL_DAYS - 1));
+      const ordersFrom = row?.orders_from ?? st.from!;
+      Object.assign(st, { bf_from: bfTarget, bf_to: addDays(ordersFrom, -1), bf_idx: 0, bf_done: ordersFrom <= bfTarget });
     }
     const list = st.products ?? [];
+    // ① 每晚快照 + 近 7 天出单
     while (!st.done && (st.idx ?? 0) < list.length && Date.now() - started < PRODUCT_START_LIMIT_MS) {
-      st.calls = (st.calls ?? 0) + await syncProduct(shop, list[st.idx!], st.from!, st.end!, row?.crawl_until ?? null);
+      const pid = list[st.idx!];
+      try { st.calls = (st.calls ?? 0) + await syncProduct(shop, pid, st.from!, st.end!, row?.crawl_until ?? null); } catch (e) { note(pid, e); }
       st.idx = (st.idx ?? 0) + 1;
     }
     const finished = (st.idx ?? 0) >= list.length;
-    if (finished) st.done = true;
+    if (finished && !st.done) {
+      st.done = true;
+      await db.from("review_shops").upsert({ shop_key: shop.key, api_until: st.end, latest_available_date: st.end }, { onConflict: "shop_key" });
+      await db.rpc("review_products_fill_sku");
+    }
+    // ② 出单回补（每晚快照完成后、有剩余时间时）
+    while (st.done && !st.bf_done && (st.bf_idx ?? 0) < list.length && Date.now() - started < PRODUCT_START_LIMIT_MS) {
+      const pid = list[st.bf_idx!];
+      try { st.calls = (st.calls ?? 0) + await backfillOrders(shop, pid, st.bf_from!, st.bf_to!); } catch (e) { note(pid, e); }
+      st.bf_idx = (st.bf_idx ?? 0) + 1;
+    }
+    if (st.done && !st.bf_done && (st.bf_idx ?? 0) >= list.length) {
+      st.bf_done = true;
+      await db.from("review_shops").upsert({ shop_key: shop.key, orders_from: st.bf_from }, { onConflict: "shop_key" });
+    }
+    const errs = st.errors ?? [];
     await db.from("review_shops").upsert({
-      shop_key: shop.key, state: st, last_run_at: new Date().toISOString(), last_error: null,
-      ...(finished ? { api_until: st.end, latest_available_date: st.end } : {}),
+      shop_key: shop.key, state: st, last_run_at: new Date().toISOString(),
+      last_error: errs.length ? `${errs.length} 个商品失败，例：${errs[0]}` : null,
     }, { onConflict: "shop_key" });
-    if (finished) await db.rpc("review_products_fill_sku");
-    return { shop: shop.key, done: finished, idx: st.idx ?? 0, total: list.length, calls: st.calls ?? 0 };
+    return { shop: shop.key, done: !!st.done, idx: st.idx ?? 0, total: list.length, calls: st.calls ?? 0, bf_done: !!st.bf_done, bf_idx: st.bf_idx ?? 0,
+      ...(finished && errs.length ? { error: `${errs.length} 个商品失败，例：${errs[0]}` } : {}) };
   } catch (e) {
     const msg = (e as Error).message;
     await db.from("review_shops").upsert({ shop_key: shop.key, state: st, last_run_at: new Date().toISOString(), last_error: msg }, { onConflict: "shop_key" });
-    return { shop: shop.key, done: false, idx: st.idx ?? 0, total: st.products?.length ?? 0, calls: st.calls ?? 0, error: msg };
+    return { shop: shop.key, done: false, idx: st.idx ?? 0, total: st.products?.length ?? 0, calls: st.calls ?? 0, bf_done: !!st.bf_done, bf_idx: st.bf_idx ?? 0, error: msg };
   }
 }
 
+/**
+ * 依次处理各站点，时间用完就返回（下一次调用从游标续跑）。
+ * finished = 所有站点今晚的快照都完成（可以发差评提示）；backfill_pending = 还有站点出单没补完。
+ */
 async function step(b: Record<string, unknown>, started: number) {
   const only = b.shop_key ? String(b.shop_key) : null;
   const shops = (await loadShops()).filter((s) => !only || s.key === only);
-  const results = [];
-  for (const s of shops) {
-    if (Date.now() - started > PRODUCT_START_LIMIT_MS) break;
-    const runDate = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
-    const { data: row } = await admin().from("review_shops").select("state").eq("shop_key", s.key).maybeSingle();
-    const st = (row?.state ?? {}) as ShopState;
-    if (st.run_date === runDate && st.done) continue;
-    results.push(await stepShop(s, started));
-    if (!results[results.length - 1].done && !results[results.length - 1].error) break; // 时间用完，下一轮续跑
-  }
   const runDate = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
-  const { data: all } = await admin().from("review_shops").select("shop_key,state");
-  const pending = shops.filter((s) => {
-    const st = ((all ?? []).find((r) => r.shop_key === s.key)?.state ?? {}) as ShopState;
-    return !(st.run_date === runDate && st.done);
-  }).map((s) => s.key);
-  return { finished: pending.length === 0, pending, results };
+  const stateOf = async () => {
+    const { data } = await admin().from("review_shops").select("shop_key,state");
+    return new Map((data ?? []).map((r) => [r.shop_key as string, (r.state ?? {}) as ShopState]));
+  };
+  const results: StepResult[] = [];
+  // 先把所有站点的每晚快照跑完，再补出单
+  for (const phase of ["nightly", "backfill"] as const) {
+    const states = await stateOf();
+    for (const s of shops) {
+      if (Date.now() - started > PRODUCT_START_LIMIT_MS) break;
+      const st = states.get(s.key) ?? {};
+      const today = st.run_date === runDate;
+      if (phase === "nightly" && today && st.done) continue;
+      if (phase === "backfill" && (!today || !st.done || st.bf_done)) continue;
+      const r = await stepShop(s, started);
+      const i = results.findIndex((x) => x.shop === r.shop);
+      if (i >= 0) results[i] = r; else results.push(r);
+    }
+  }
+  const states = await stateOf();
+  const pending = shops.filter((s) => { const st = states.get(s.key) ?? {}; return !(st.run_date === runDate && st.done); }).map((s) => s.key);
+  const backfill_pending = shops.filter((s) => { const st = states.get(s.key) ?? {}; return st.run_date === runDate && st.done && !st.bf_done; }).map((s) => s.key);
+  return { finished: pending.length === 0, pending, backfill_pending, results };
 }
 
 // ── 核对：接口累计快照（当前）vs 本系统累计（抓取表 + 接口新增 + 初始差额）────────
@@ -386,7 +449,7 @@ Deno.serve(async (req) => {
     switch (action) {
       case "meta": {
         const [shops, settings, uploads, tts] = await Promise.all([
-          db.from("review_shops").select("shop_key,crawl_from,crawl_until,api_until,latest_available_date,last_run_at,last_error,state"),
+          db.from("review_shops").select("shop_key,crawl_from,crawl_until,api_until,orders_from,latest_available_date,last_run_at,last_error,state"),
           db.from("review_settings").select("min_reviews,threshold,updated_at,updated_by").eq("id", 1).maybeSingle(),
           db.from("review_uploads").select("shop_key,file_name,range_from,range_to,rows_total,rows_in_range,rows_text,products,status,uploaded_by,created_at").order("created_at", { ascending: false }).limit(50),
           loadShops(),
@@ -394,7 +457,7 @@ Deno.serve(async (req) => {
         return json({
           shops: (shops.data ?? []).map((s) => {
             const st = (s.state ?? {}) as ShopState;
-            return { ...s, state: undefined, run_date: st.run_date ?? null, run_done: !!st.done, run_idx: st.idx ?? 0, run_total: st.products?.length ?? 0 };
+            return { ...s, state: undefined, run_date: st.run_date ?? null, run_done: !!st.done, run_idx: st.idx ?? 0, run_total: st.products?.length ?? 0, bf_done: st.bf_done !== false, bf_idx: st.bf_idx ?? 0 };
           }),
           api_sites: [...new Set(tts.map((s) => s.key))].sort(),
           settings: settings.data, uploads: uploads.data ?? [], is_admin: acc.isAdmin,

@@ -5,13 +5,15 @@ export type Stars = [number, number, number, number, number];
 /** s1..s5 当天新增；i1..i5 当天记入的初始差额（只进累计，不算当天新增）*/
 export type SeriesDay = { d: string; s1: number; s2: number; s3: number; s4: number; s5: number; i1: number; i2: number; i3: number; i4: number; i5: number; orders: number };
 export type Series = { base: Stars; days: SeriesDay[]; products: number };
-export type TableRow = { site: string; pid: string; sku: string | null; below: boolean; base: Stars; range: Stars; rinit: Stars; orders: number };
+/** cov_*：评价和出单都已知的日子里的评价数 / 差评数 / 出单（留评率、订单差评率用）*/
+export type TableRow = { site: string; pid: string; sku: string | null; below: boolean; base: Stars; range: Stars; rinit: Stars; orders: number; cov_n: number; cov_bad: number; cov_ord: number };
 export type ReviewText = {
   review_id: string; star: number; review_at: string | null; order_id: string | null; seller_sku: string | null;
   content: string | null; content_zh: string | null; reply: string | null; reply_zh: string | null; img_count: number;
 };
 export type ShopStatus = {
-  shop_key: string; crawl_from: string | null; crawl_until: string | null; api_until: string | null; latest_available_date: string | null;
+  shop_key: string; crawl_from: string | null; crawl_until: string | null; api_until: string | null; orders_from: string | null; latest_available_date: string | null;
+  bf_done: boolean; bf_idx: number;
   last_run_at: string | null; last_error: string | null; run_date: string | null; run_done: boolean; run_idx: number; run_total: number;
 };
 export type Upload = { shop_key: string; file_name: string; range_from: string; range_to: string; rows_total: number; rows_in_range: number; rows_text: number; products: number; status: string; uploaded_by: string | null; created_at: string };
@@ -39,7 +41,7 @@ export const reviewsApi = {
   uploadTexts: (shop_key: string, rows: unknown[]) => call<{ rows: number }>({ action: "upload_texts", shop_key, rows }, 120_000),
   uploadEnd: (shop_key: string, upload_id: string) => call<{ crawl_from: string; crawl_until: string }>({ action: "upload_end", shop_key, upload_id }),
   reconcile: (shop_key: string, product_ids: string[]) => call<Reconcile>({ action: "reconcile", shop_key, product_ids }, 150_000),
-  step: (shop_key: string) => call<{ finished: boolean; results: { shop: string; done: boolean; idx: number; total: number; calls: number; error?: string }[] }>({ action: "step", shop_key }, 150_000),
+  step: (shop_key: string) => call<{ finished: boolean; results: { shop: string; done: boolean; idx: number; total: number; calls: number; bf_done: boolean; bf_idx: number; error?: string }[] }>({ action: "step", shop_key }, 150_000),
 };
 
 export const sumS = (s: Stars) => s[0] + s[1] + s[2] + s[3] + s[4];

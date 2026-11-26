@@ -15,8 +15,8 @@ const COLS: { k: K; label: string; help?: string; left?: boolean }[] = [
   { k: "bad", label: "差评数", help: "1–2 星条数。" },
   { k: "badr", label: "差评率", help: "差评数 / 评价数。" },
   { k: "ord", label: "出单量", help: "区间内订单数（接口 sales.orders，按下单日）。" },
-  { k: "revr", label: "留评率", help: "区间评价数 / 区间出单量。评价比下单晚，最近几天会偏低。" },
-  { k: "obadr", label: "订单差评率", help: "区间差评数 / 区间出单量。" },
+  { k: "revr", label: "留评率", help: "评价数 / 出单量，只算区间内评价和出单都有数据的日子（出单从 orders 覆盖起点开始；首次同步前那几天评价是合计，不计）。评价比下单晚，最近几天会偏低。" },
+  { k: "obadr", label: "订单差评率", help: "差评数 / 出单量，统计日子同留评率。" },
 ];
 
 export function LinksTable({ rows, onPick, picked, from, to }: { rows: Row[] | null; onPick: (pid: string) => void; picked: string | null; from: string; to: string }) {
@@ -31,7 +31,7 @@ export function LinksTable({ rows, onPick, picked, from, to }: { rows: Row[] | n
     return {
       r, site: r.site, sku: r.sku ?? "", cum, delta: cum != null && start != null ? cum - start : null,
       cnt, avg: avgS(r.range), bad, badr: cnt ? bad / cnt : null, ord: r.orders,
-      revr: r.orders ? cnt / r.orders : null, obadr: r.orders ? bad / r.orders : null,
+      revr: r.cov_ord ? r.cov_n / r.cov_ord : null, obadr: r.cov_ord ? r.cov_bad / r.cov_ord : null,
     };
   }).sort((a, b) => {
     const A = a[sort.k], B = b[sort.k];
