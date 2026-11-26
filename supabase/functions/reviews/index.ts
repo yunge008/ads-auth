@@ -428,6 +428,8 @@ async function uploadTexts(b: Record<string, unknown>) {
     review_id: String(r.review_id), shop_key: key, product_id: String(r.product_id), sku_id: t(r.sku_id, 40), seller_sku: t(r.seller_sku, 200),
     star: Number(r.star) | 0, review_at: t(r.review_at, 19), order_id: t(r.order_id, 40),
     content: t(r.content), content_zh: t(r.content_zh), reply: t(r.reply), reply_zh: t(r.reply_zh), img_count: Number(r.img_count) | 0,
+    // 评价图 [[缩略图, 原图]]：只收 https 链接，最多 9 张
+    imgs: Array.isArray(r.imgs) ? (r.imgs as unknown[]).filter((x): x is [string, string] => Array.isArray(x) && x.every((u) => typeof u === "string" && /^https:\/\//.test(u) && u.length < 1000)).slice(0, 9) : null,
   })).filter((r) => r.review_id && r.product_id && r.star >= 1 && r.star <= 5);
   const { data, error } = await admin().rpc("review_texts_upsert", { p_rows: clean });
   if (error) throw error;
@@ -498,7 +500,7 @@ Deno.serve(async (req) => {
       case "texts": {
         const pid = String(b.product_id ?? "");
         if (!pid) bad("product_id 必填");
-        let qq = db.from("review_texts").select("review_id,star,review_at,order_id,seller_sku,content,content_zh,reply,reply_zh,img_count")
+        let qq = db.from("review_texts").select("review_id,star,review_at,order_id,seller_sku,content,content_zh,reply,reply_zh,img_count,imgs")
           .eq("product_id", pid).gte("review_at", `${from()} 00:00:00`).lte("review_at", `${to()} 23:59:59`)
           .order("review_at", { ascending: false }).limit(300);
         const st = Array.isArray(b.stars) ? b.stars.map(Number).filter((n) => n >= 1 && n <= 5) : [];
@@ -506,6 +508,12 @@ Deno.serve(async (req) => {
         const { data, error } = await qq;
         if (error) throw error;
         return json({ rows: data ?? [] });
+      }
+      case "list": {
+        const limit = Math.min(100, Math.max(1, Number(b.limit) | 0 || 20));
+        const offset = Math.max(0, Number(b.offset) | 0);
+        const stars = Array.isArray(b.stars) ? b.stars.map(Number).filter((n) => n >= 1 && n <= 5) : [];
+        return json(await rpc("review_list", { p_shops: shopsArg(b.sites), p_from: from(), p_to: to(), p_stars: stars, p_q: q(), p_limit: limit, p_offset: offset }));
       }
       case "alerts": return json(await rpc("review_alert_scan", { p_commit: false }));
       case "save_settings": {

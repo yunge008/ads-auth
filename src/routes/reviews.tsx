@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AlertsPanel } from "@/components/reviews/AlertsPanel";
 import { DataPanel } from "@/components/reviews/DataPanel";
+import { CommentsView } from "@/components/reviews/CommentsView";
 import { LinksTable } from "@/components/reviews/LinksTable";
 import { TrendView } from "@/components/reviews/TrendView";
 import { addDays, daysBetween, yesterday } from "@/components/reviews/shared";
@@ -75,11 +76,12 @@ function ReviewsPage() {
         <TabsList className="w-fit">
           <TabsTrigger value="trend">趋势</TabsTrigger>
           <TabsTrigger value="links">链接</TabsTrigger>
+          <TabsTrigger value="comments">评论内容</TabsTrigger>
           <TabsTrigger value="alerts">差评提示</TabsTrigger>
           <TabsTrigger value="data">数据</TabsTrigger>
         </TabsList>
 
-        {(tab === "trend" || tab === "links") && (
+        {(tab === "trend" || tab === "links" || tab === "comments") && (
           <div className="grid gap-2" role="group" aria-label="筛选">
             <div className="flex flex-wrap items-center gap-2">
               <span className="w-8 shrink-0 text-xs text-muted-foreground" id="rv-lab-site">站点</span>
@@ -120,6 +122,9 @@ function ReviewsPage() {
         </TabsContent>
         <TabsContent value="links" className="mt-0">
           <LinksTable rows={rows} onPick={pickListing} picked={single?.pid ?? null} from={from} to={to} />
+        </TabsContent>
+        <TabsContent value="comments" className="mt-0">
+          <CommentsView sites={siteList} from={from} to={to} q={qDeb} onPick={pickListing} />
         </TabsContent>
         <TabsContent value="alerts" className="mt-0">
           <AlertsPanel meta={meta} onSaved={loadMeta} onPick={pickListing} />

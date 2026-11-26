@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { addS, avgS, sumS, ZERO, type ReviewText, type Series, type Stars } from "@/lib/reviewsApi";
 import { addDays, f2, Help, pct, STAR_COLORS } from "./shared";
+import { ReviewItem } from "./ReviewItem";
 
 type Props = { series: Series | null; from: string; to: string; texts: ReviewText[] | null; onStars: (s: number[]) => void; stars: number[] };
 
@@ -139,15 +140,7 @@ export function TrendView({ series, from, to, texts, onStars, stars }: Props) {
           <div className="max-h-[420px] overflow-auto divide-y">
             {texts.length === 0 && <div className="py-6 text-center text-sm text-muted-foreground">区间内没有留言</div>}
             {texts.map((t) => (
-              <div key={t.review_id} className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 py-2 text-sm">
-                <span className="font-semibold tabular-nums" style={{ color: STAR_COLORS[t.star - 1] }}>{t.star}★</span>
-                <div className="grid gap-0.5 min-w-0">
-                  {t.content && <div className="break-words">{t.content}</div>}
-                  {t.content_zh && <div className="text-muted-foreground break-words">{t.content_zh}</div>}
-                  {t.reply && <div className="border-l-2 pl-2 text-muted-foreground break-words">回复：{t.reply}{t.reply_zh ? ` / ${t.reply_zh}` : ""}</div>}
-                  <div className="text-xs text-muted-foreground tabular-nums">{t.review_at?.slice(0, 16)} · {t.seller_sku ?? ""} · 订单 {t.order_id ?? "—"}{t.img_count ? ` · ${t.img_count} 图` : ""}</div>
-                </div>
-              </div>
+              <ReviewItem key={t.review_id} r={t} meta={<>{t.review_at?.slice(0, 16).replace("T", " ")} · {t.seller_sku ?? ""} · 订单 {t.order_id ?? "—"}</>} />
             ))}
           </div>
         </CardContent></Card>

@@ -7,6 +7,7 @@ import type { Stars } from "@/lib/reviewsApi";
 export type CrawlText = {
   review_id: string; product_id: string; sku_id: string | null; seller_sku: string | null; star: number; review_at: string;
   order_id: string | null; content: string | null; content_zh: string | null; reply: string | null; reply_zh: string | null; img_count: number;
+  imgs: [string, string][] | null; // [缩略图, 原图]
 };
 export type CrawlParsed = {
   file: string; shop_key: string; range_from: string; range_to: string;
@@ -53,6 +54,27 @@ export async function parseCrawlFile(file: File): Promise<CrawlParsed> {
     pid: col("商品 ID"), sku: col("SKU ID"), skuSpec: col("SKU 规格"), time: col("评论时间"), img: col("评价图数量"),
   };
   const at = (r: unknown[], i: number) => (i < 0 ? "" : str(r[i]));
+  // 评价图：优先「评价图」sheet（有缩略图），否则「评价图链接」列（按换行/逗号分，缩略图 = 原图）
+  const imgMap = new Map<string, [string, string][]>();
+  const imgWs = wb.Sheets["评价图"];
+  if (imgWs) {
+    const ir = XLSX.utils.sheet_to_json<unknown[]>(imgWs, { header: 1, raw: true, defval: null });
+    const ih = (ir[0] ?? []).map(str);
+    const iId = ih.indexOf("评论 ID"), iSeq = ih.indexOf("图片序号"), iUrl = ih.indexOf("图片链接"), iThumb = ih.indexOf("缩略图链接");
+    if (iId >= 0 && iUrl >= 0) {
+      const tmp = new Map<string, { seq: number; pair: [string, string] }[]>();
+      for (const r of ir.slice(1)) {
+        const id = str(r?.[iId]), url = str(r?.[iUrl]);
+        if (!id || !/^https:\/\//.test(url)) continue;
+        const thumb = iThumb >= 0 && /^https:\/\//.test(str(r[iThumb])) ? str(r[iThumb]) : url;
+        const l = tmp.get(id) ?? [];
+        l.push({ seq: Number(r[iSeq]) || l.length + 1, pair: [thumb, url] });
+        tmp.set(id, l);
+      }
+      for (const [id, l] of tmp) imgMap.set(id, l.sort((a, b) => a.seq - b.seq).map((x) => x.pair));
+    }
+  }
+  const C_IMGURL = head.indexOf("评价图链接");
   const seen = new Set<string>();
   const daily = new Map<string, Stars>();
   const skuDaily = new Map<string, Stars>();
@@ -93,6 +115,10 @@ export async function parseCrawlFile(file: File): Promise<CrawlParsed> {
         order_id: at(r, C.order) || null, content, reply,
         content_zh: contentZh ? at(r, contentZh[1]) || null : null, reply_zh: replyZh ? at(r, replyZh[1]) || null : null,
         img_count: Number(at(r, C.img)) || 0,
+        imgs: imgMap.get(id) ?? (() => {
+          const urls = at(r, C_IMGURL).split(/[\s,]+/).filter((u) => /^https:\/\//.test(u));
+          return urls.length ? urls.map((u) => [u, u] as [string, string]) : null;
+        })(),
       });
     }
   }
