@@ -4,7 +4,7 @@
 > 核对脚本：`bash tools/check-api-limits.sh`。代码里出现、本文「登记表」没有的接口路径会被列出并返回非 0；把新路径补进对应表格（含频率、峰值估算）后再提交。
 > 标记：✅ 已核验 ｜ ⚠️ 未核验/估算 ｜ 🔴 已知超速风险
 
-最后更新：2026-11-27（1127.354）
+最后更新：2026-11-27（1127.356）
 
 ---
 
@@ -17,13 +17,22 @@
 - 被限流信号：HTTP **429** 或业务码 **36009002**；应读 `Retry-After`，指数退避加抖动（文档示例：基数 1s、上限 60s、最多 5 次）。503 是服务端问题，不是限流。
 - 店铺停用：401 + 36009043 / 36009044（不是限流，重试无用）。沙箱 1000 次/小时（36009037）。
 
-### 1.2 TikTok Business API（⚠️ 官方页面是 JS 渲染，未能直接读到，以下为检索结果）
+### 1.2 TikTok Business API（✅ 2026-11-27 负责人贴来官方「Rate limits v1.3」全文）
 
-- **按开发者应用 × 接口计数**（所有广告户、所有授权连接共用同一个桶）；限额有 QPS / QPM / QPD 三档。
-- 默认 Basic 等级：一般接口 10 QPS / 600 QPM；**`/gmv_max/report/get/`：8 QPS / 240 QPM**。
-- **超出 QPM 后要等 5 分钟才恢复**（期间全部报 40100「Too many requests」）。
-- 等级可在应用的 Authorization 页逐级申请提升。
-- 来源：[Rate limits Overview](https://business-api.tiktok.com/portal/docs/rate-limits/v1.3)、[Run a GMV Max Campaign report](https://business-api.tiktok.com/portal/docs/run-a-gmv-max-campaign-report/v1.3)、[bruin ingestion-index](https://github.com/bruin-data/ingestion-index/blob/main/results/tiktok_ads.md)。🙋 负责人可在 TikTok for Business 开发者后台 → 应用 → Rate limit 截图确认本应用实际等级，确认后把 ⚠️ 改 ✅。
+- **按开发者应用 × 接口计数**：所有广告户、所有授权连接共用一个桶；不同接口互相独立（`/campaign/get/` 打满不影响 `/ad/get/`）。
+- 三种限额同时生效：QPS / QPM / QPD。超限返回 **40100**。**超 QPM → 停 5 分钟；超 QPD → 停到次日 UTC 0 点（新加坡 08:00）**；QPS 超限的停顿时间文档没写。
+- 应用等级（默认 Basic，只能逐级申请：My Apps → App Detail → Authorization）：
+
+| 等级 | 一般接口 QPS / QPM / QPD | `/gmv_max/report/get/` QPS / QPM / QPD |
+|---|---|---|
+| **Basic（默认）** | 10 / 600 / 864,000 | **8 / 240 / 80,000** |
+| Advanced | 20 / 1,200 / 1,728,000 | 12 / 360 / 120,000 |
+| Premium | 30 / 1,800 / 2,592,000 | 20 / 600 / 200,000 |
+| Ultimate | 50 / 3,000 / 4,320,000 | 20 / 600 / 200,000 |
+
+- 其他单列接口（本项目用到的）：无。`/campaign/gmv_max/*`、`/gmv_max/campaign/get/`、`/tt_video/authorize/` 等按一般接口算。
+- 官方建议：批量请求；客户端令牌桶或消息队列控制并发。
+- ⚠️ 本应用实际等级未确认：没申请过即为 Basic（以下按 Basic 核对）。
 
 ---
 
@@ -36,7 +45,7 @@
 | `ttsCall`（Shop） | `supabase/functions/_shared/tts.ts` | 同一 isolate 内 ≥350ms（≈2.8 QPS） | 429、36009002；5xx 也重试 | min(8s, 1s·2ⁿ)+0–400ms，共 5 次 | 否 |
 | `ttsGet`（Shop，Node） | `src/lib/creator-orders.server.ts` | **无间隔** | 429、36009002；5xx、网络错也重试 | 1/2/4s，共 4 次 | 否 |
 
-**结论**：BC 的 240 QPM 罚等 5 分钟，现有退避最多等约 45 秒 → 一旦触发，本轮剩余请求全部失败。是否「静默」取决于调用方怎么记错（见 §4）。
+**结论**：BC 报表 240 QPM 超限罚停 5 分钟，现有退避最多等约 45 秒 → 一旦触发，本轮剩余请求全部失败。是否「静默」取决于调用方怎么记错（见 §4）。
 
 ---
 
@@ -228,3 +237,12 @@
 | Shop | 订单/财务入库 | 06:40/06:52、13:40/13:52、19:40/19:52 | 约 100 | 2% | 4% |
 | Shop | 店铺授权刷新 | 05:17 | 约 10 | 0.2% | 0.4% |
 | 合计 | | | 约 5,600（原约 11,100） | | BC 约 3,260（原 8,580）；Shop 约 2,340 |
+
+## 9. 按官方限额核对（Basic，1127.356）
+
+| 维度 | 上限 | 现状 | 占比 | 判断 |
+|---|---|---|---|---|
+| `/gmv_max/report/get/` 每天 | 80,000 | 约 2,900（达人出单）+ 手动约 200 ⚠️ | 约 4%（降频前约 10%） | 安全 |
+| `/gmv_max/report/get/` 每分钟 | 240 | 单路同步跑时约 60–180 ⚠️ | 25–75% | 单路安全；手动刷新 + 定时 + 素材对账三路叠加可超 → 停 5 分钟（R2） |
+| `/gmv_max/report/get/` 每秒 | 8 | 单路约 1–3 | 13–38% | 三路叠加可达约 9 > 8 |
+| 其他 BC 接口 | 10 / 600 / 864,000 | 均远低于 | <1% | 安全；首页素材授权 24 并发可能瞬时 >10 QPS（R7） |
