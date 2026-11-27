@@ -74,10 +74,11 @@ export function CommentsView({ ver, active, sites, from, to, q, onPick }: Props)
       <div className="overflow-x-auto rounded-md border">
         <Table className="table-fixed text-sm">
           <colgroup>
-            <col style={{ width: 112 }} /><col style={{ width: 220 }} /><col style={{ width: 60 }} /><col /><col /><col style={{ width: 148 }} />
+            <col style={{ width: 64 }} /><col style={{ width: 96 }} /><col style={{ width: 220 }} /><col style={{ width: 60 }} /><col /><col /><col style={{ width: 148 }} />
           </colgroup>
           <TableHeader>
             <TableRow>
+              <TableHead>站点</TableHead>
               {th("ts", "评论时间")}
               {th("sku", "SKU")}
               {th("star", "星级")}
@@ -87,13 +88,14 @@ export function CommentsView({ ver, active, sites, from, to, q, onPick }: Props)
             </TableRow>
           </TableHeader>
           <TableBody>
-            {!data && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">加载中…</TableCell></TableRow>}
-            {data?.rows.length === 0 && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">没有评价</TableCell></TableRow>}
+            {!data && <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">加载中…</TableCell></TableRow>}
+            {data?.rows.length === 0 && <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">没有评价</TableCell></TableRow>}
             {data?.rows.map((r, i) => (
               <TableRow key={r.review_id ?? `g${i}`} className={`align-top ${r.kind === "gap" ? "text-muted-foreground" : ""}`}>
+                <TableCell className="whitespace-nowrap text-xs">{r.shop_key}</TableCell>
                 <TableCell className="tabular-nums text-xs">
                   <div>{r.kind === "gap" && r.init ? "首次同步前" : r.ts?.slice(0, 10)}</div>
-                  <div className="text-muted-foreground">{r.kind === "gap" ? "" : `${r.ts?.slice(11, 16)} · `}{r.shop_key}</div>
+                  {r.kind !== "gap" && <div className="text-muted-foreground">{r.ts?.slice(11, 16)}</div>}
                 </TableCell>
                 <TableCell className="overflow-hidden" title={r.spec ? `规格：${r.spec}` : undefined}>
                   <button type="button" className="w-full min-w-0 text-left hover:underline" onClick={() => onPick(r.product_id)}>
