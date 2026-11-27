@@ -1055,7 +1055,7 @@ function CreatorOrdersPage() {
                       } = await api({ action: "refresh_step", cursor });
                       errs += r.report.filter((x) => x.error).length;
                       cursor = r.next;
-                      setProgress(`同步广告户 ${cursor ?? r.total} / ${r.total}`);
+                      setProgress(`同步 ${cursor ?? r.total} / ${r.total}（广告户 × 天）`);
                     }
                     cursor = 0;
                     while (cursor != null) {

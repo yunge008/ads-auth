@@ -4,7 +4,8 @@
 alter table public.co_settings
   add column if not exists sync_cursor integer,          -- 下一个要同步的广告户序号；null = 本轮同步已完成
   add column if not exists names_cursor integer,         -- 下一个要补名的站点序号；null = 已完成
-  add column if not exists cycle_started_at timestamptz; -- 本轮开始时间（每小时最多开一轮）
+  add column if not exists cycle_started_at timestamptz, -- 本轮开始时间（每小时最多开一轮）
+  add column if not exists sync_tries integer not null default 0; -- 同一步已尝试次数（≥2 次未完成则跳过这一步）
 
 do $$
 declare

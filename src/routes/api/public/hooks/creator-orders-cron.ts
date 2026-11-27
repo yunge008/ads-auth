@@ -20,7 +20,7 @@ export const Route = createFileRoute("/api/public/hooks/creator-orders-cron")({
         try {
           const { data: st, error } = await db
             .from("co_settings")
-            .select("sync_cursor,names_cursor,cycle_started_at")
+            .select("sync_cursor,names_cursor,cycle_started_at,sync_tries")
             .eq("id", 1)
             .maybeSingle();
           if (error) throw new Error(error.message);
@@ -35,7 +35,17 @@ export const Route = createFileRoute("/api/public/hooks/creator-orders-cron")({
           let step: unknown = "本小时已完成";
           const deadline = started + 25_000;
           if (syncCursor != null) {
-            const r = await syncAll(db, { deadline, start: syncCursor });
+            // 先记一次尝试：若本次请求被中途掐断，下次同一步再失败就跳过（避免卡死在一个大户上）
+            const tries = (st?.sync_tries as number | null) ?? 0;
+            await db
+              .from("co_settings")
+              .update({ sync_cursor: syncCursor, cycle_started_at: cycle, sync_tries: tries + 1 })
+              .eq("id", 1);
+            const r = await syncAll(db, {
+              deadline,
+              start: syncCursor,
+              skipAt: tries >= 2 ? syncCursor : undefined,
+            });
             step = r;
             syncCursor = r.next;
             if (syncCursor == null) namesCursor = 0;
@@ -46,7 +56,12 @@ export const Route = createFileRoute("/api/public/hooks/creator-orders-cron")({
           }
           await db
             .from("co_settings")
-            .update({ sync_cursor: syncCursor, names_cursor: namesCursor, cycle_started_at: cycle })
+            .update({
+              sync_cursor: syncCursor,
+              names_cursor: namesCursor,
+              cycle_started_at: cycle,
+              sync_tries: 0,
+            })
             .eq("id", 1);
           return jsonRes({
             ok: true,

@@ -103,21 +103,39 @@ async function tokensFor(db: SupabaseClient, advId: string): Promise<string[]> {
   return ((data ?? []) as { access_token: string }[]).map((c) => c.access_token).filter(Boolean);
 }
 
+/** TikTok 报「timed out」时把 ID 列表对半拆开重试（大户一次查太多商品会超时，11-27 ECO9B-PH 实测）。 */
+async function splitting<T>(items: string[], run: (part: string[]) => Promise<T[]>): Promise<T[]> {
+  try {
+    return await run(items);
+  } catch (e) {
+    if (items.length > 1 && /timed out|timeout/i.test((e as Error).message)) {
+      const h = Math.ceil(items.length / 2);
+      return [
+        ...(await splitting(items.slice(0, h), run)),
+        ...(await splitting(items.slice(h), run)),
+      ];
+    }
+    throw e;
+  }
+}
+
 /** 拉一个广告户一天的 素材 × 商品 数据（不带 stat_time_day 维度：区间=当天，返回含 0 花费的素材，口径与导出表一致）。 */
 async function fetchAdvDay(token: string, adv: Adv, day: string, campaignIds: string[]) {
   // ① 商品级：该日有数据的 系列 × 商品
   const pairs: { cid: string; spu: string }[] = [];
-  for (const cb of chunk(campaignIds, 100)) {
-    const rows = await fetchReport(
-      token,
-      adv.advertiser_id,
-      adv.shop_id,
-      day,
-      day,
-      ["campaign_id", "item_group_id"],
-      { campaign_ids: cb },
-      ["cost", "orders", "gross_revenue"],
-      ttGet,
+  for (const cb of chunk(campaignIds, 50)) {
+    const rows = await splitting(cb, (part) =>
+      fetchReport(
+        token,
+        adv.advertiser_id,
+        adv.shop_id,
+        day,
+        day,
+        ["campaign_id", "item_group_id"],
+        { campaign_ids: part },
+        ["cost", "orders", "gross_revenue"],
+        ttGet,
+      ),
     );
     for (const r of rows) {
       const d = (r.dimensions ?? {}) as Record<string, unknown>;
@@ -142,20 +160,27 @@ async function fetchAdvDay(token: string, adv: Adv, day: string, campaignIds: st
   let currency = "";
   const bySpu = new Map<string, Set<string>>();
   for (const p of pairs) (bySpu.get(p.spu) ?? bySpu.set(p.spu, new Set()).get(p.spu)!).add(p.cid);
-  for (const spus of chunk([...bySpu.keys()], 100)) {
-    const cids = [...new Set(spus.flatMap((s) => [...bySpu.get(s)!]))];
-    for (const cb of chunk(cids, 100)) {
-      const rows = await fetchReport(
-        token,
-        adv.advertiser_id,
-        adv.shop_id,
-        day,
-        day,
-        ["campaign_id", "item_group_id", "item_id"],
-        { campaign_ids: cb, item_group_ids: spus },
-        MONEY,
-        ttGet,
-      );
+  for (const spus of chunk([...bySpu.keys()], 20)) {
+    {
+      const rows = await splitting(spus, async (part) => {
+        const cids = [...new Set(part.flatMap((x) => [...bySpu.get(x)!]))];
+        const acc = [];
+        for (const cb of chunk(cids, 100))
+          acc.push(
+            ...(await fetchReport(
+              token,
+              adv.advertiser_id,
+              adv.shop_id,
+              day,
+              day,
+              ["campaign_id", "item_group_id", "item_id"],
+              { campaign_ids: cb, item_group_ids: part },
+              MONEY,
+              ttGet,
+            )),
+          );
+        return acc;
+      });
       for (const r of rows) {
         const d = (r.dimensions ?? {}) as Record<string, unknown>;
         const m = (r.metrics ?? {}) as Record<string, unknown>;
@@ -180,8 +205,9 @@ async function fetchAdvDay(token: string, adv: Adv, day: string, campaignIds: st
 /** 按 advertiser_id 顺序逐户同步；到 deadline 返回 next（下一户的序号），调用方从 next 续跑；全部完成 next=null。 */
 export async function syncAll(
   db: SupabaseClient,
-  opts: { days?: string[]; deadline: number; only?: string[]; start?: number },
+  opts: { days?: string[]; deadline: number; only?: string[]; start?: number; skipAt?: number },
 ) {
+  // 最小步 = 广告户 × 天（大户单日数据量大，整户跑可能超过单次请求时长）；cursor = 步序号
   const days = opts.days ?? [sgDate(-2), sgDate(-1), sgDate(0)];
   const { data: advRows, error } = await db
     .from("advertiser_countries")
@@ -190,82 +216,83 @@ export async function syncAll(
   const advs = ((advRows ?? []) as Adv[])
     .filter((a) => a.shop_id && (!opts.only || opts.only.includes(a.advertiser_id)))
     .sort((a, b) => a.advertiser_id.localeCompare(b.advertiser_id));
-  const report: { advertiser: string; rows?: number; error?: string }[] = [];
-  for (let i = opts.start ?? 0; i < advs.length; i++) {
-    const adv = advs[i];
-    if (Date.now() > opts.deadline) return { report, next: i, total: advs.length };
+  const units = advs.flatMap((adv) => days.map((day) => ({ adv, day })));
+  const report: { advertiser: string; day: string; rows?: number; error?: string }[] = [];
+  const campCache = new Map<string, { token: string; campaigns: string[] }>();
+  for (let i = opts.start ?? 0; i < units.length; i++) {
+    const { adv, day } = units[i];
+    if (Date.now() > opts.deadline) return { report, next: i, total: units.length };
     const state: Record<string, unknown> = {
       advertiser_id: adv.advertiser_id,
       country: adv.country,
       advertiser_name: adv.advertiser_name,
       last_run_at: new Date().toISOString(),
     };
+    const name = adv.advertiser_name ?? adv.advertiser_id;
     try {
-      const tokens = await tokensFor(db, adv.advertiser_id);
-      if (!tokens.length) throw new Error("没有授权连接包含此广告户");
-      let lastErr = "";
-      let done = false;
-      for (const token of tokens) {
-        try {
-          const campaigns = (await fetchCampaigns(token, adv.advertiser_id, ttGet)).map(
-            (c) => c.id,
-          );
-          let total = 0;
-          for (const day of days) {
-            const { rows, currency } = campaigns.length
-              ? await fetchAdvDay(token, adv, day, campaigns)
-              : { rows: [], currency: "" };
-            if (currency) state.currency = currency;
-            const { error: de } = await db
-              .from("co_daily")
-              .delete()
-              .eq("stat_date", day)
-              .eq("advertiser_id", adv.advertiser_id);
-            if (de) throw new Error(de.message);
-            for (const part of chunk(rows, 1000)) {
-              const { error: ie } = await db.from("co_daily").insert(
-                part.map((x) => ({
-                  stat_date: day,
-                  advertiser_id: adv.advertiser_id,
-                  vid: x.vid,
-                  spu: x.spu,
-                  country: adv.country,
-                  cost_c: x.cost,
-                  gmv_c: x.gmv,
-                  orders: x.orders,
-                  imps: x.imps,
-                  clicks: x.clicks,
-                })),
-              );
-              if (ie) throw new Error(ie.message);
-            }
-            total += rows.length;
+      if (opts.skipAt === i)
+        throw new Error(`${day} 连续两次未跑完（单次请求超时），已跳过，下一轮重试`);
+      let ctx = campCache.get(adv.advertiser_id);
+      if (!ctx) {
+        const tokens = await tokensFor(db, adv.advertiser_id);
+        if (!tokens.length) throw new Error("没有授权连接包含此广告户");
+        let lastErr = "";
+        for (const token of tokens) {
+          try {
+            ctx = {
+              token,
+              campaigns: (await fetchCampaigns(token, adv.advertiser_id, ttGet)).map((c) => c.id),
+            };
+            break;
+          } catch (e) {
+            lastErr = (e as Error).message;
+            if (!/40001|permission/i.test(lastErr)) break;
           }
-          state.last_ok_at = new Date().toISOString();
-          state.last_rows = total;
-          state.last_error =
-            state.currency && state.currency !== "USD"
-              ? `币种 ${state.currency}：页面按 USD 显示，金额未换算`
-              : null;
-          report.push({ advertiser: adv.advertiser_name ?? adv.advertiser_id, rows: total });
-          done = true;
-          break;
-        } catch (e) {
-          lastErr = (e as Error).message;
-          if (!/40001|permission/i.test(lastErr)) break;
         }
+        if (!ctx) throw new Error(lastErr || "全部授权连接均无权限");
+        campCache.set(adv.advertiser_id, ctx);
       }
-      if (!done) throw new Error(lastErr || "全部授权连接均无权限");
+      const { rows, currency } = ctx.campaigns.length
+        ? await fetchAdvDay(ctx.token, adv, day, ctx.campaigns)
+        : { rows: [], currency: "" };
+      if (currency) state.currency = currency;
+      const { error: de } = await db
+        .from("co_daily")
+        .delete()
+        .eq("stat_date", day)
+        .eq("advertiser_id", adv.advertiser_id);
+      if (de) throw new Error(de.message);
+      for (const part of chunk(rows, 1000)) {
+        const { error: ie } = await db.from("co_daily").insert(
+          part.map((x) => ({
+            stat_date: day,
+            advertiser_id: adv.advertiser_id,
+            vid: x.vid,
+            spu: x.spu,
+            country: adv.country,
+            cost_c: x.cost,
+            gmv_c: x.gmv,
+            orders: x.orders,
+            imps: x.imps,
+            clicks: x.clicks,
+          })),
+        );
+        if (ie) throw new Error(ie.message);
+      }
+      state.last_ok_at = new Date().toISOString();
+      state.last_rows = rows.length;
+      state.last_error =
+        state.currency && state.currency !== "USD"
+          ? `币种 ${state.currency}：页面按 USD 显示，金额未换算`
+          : null;
+      report.push({ advertiser: name, day, rows: rows.length });
     } catch (e) {
-      state.last_error = (e as Error).message.slice(0, 500);
-      report.push({
-        advertiser: adv.advertiser_name ?? adv.advertiser_id,
-        error: state.last_error as string,
-      });
+      state.last_error = `${day}：${(e as Error).message}`.slice(0, 500);
+      report.push({ advertiser: name, day, error: state.last_error as string });
     }
     await db.from("co_state").upsert(state, { onConflict: "advertiser_id" });
   }
-  return { report, next: null as number | null, total: advs.length };
+  return { report, next: null as number | null, total: units.length };
 }
 
 // ───────────────────────── TikTok Shop（只读 GET） ─────────────────────────
