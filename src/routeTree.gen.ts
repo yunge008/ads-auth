@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiTestRouteImport } from './routes/api-test'
 import { Route as CommentsRouteImport } from './routes/comments'
 import { Route as ConnectionStatsRouteImport } from './routes/connection-stats'
+import { Route as CreatorOrdersRouteImport } from './routes/creator-orders'
 import { Route as FeishuDataRouteImport } from './routes/feishu-data'
 import { Route as GmvAttributionRouteImport } from './routes/gmv-attribution'
 import { Route as GmvAttributionAdminRouteImport } from './routes/gmv-attribution-admin'
@@ -28,6 +29,8 @@ import { Route as OauthTtsCallbackRouteImport } from './routes/oauth.tts.callbac
 import { Route as ApiPublicHooksAttributionCronRouteImport } from './routes/api/public/hooks/attribution-cron'
 import { Route as ApiPublicHooksAuthorizeCronRouteImport } from './routes/api/public/hooks/authorize-cron'
 import { Route as ApiPublicHooksBalanceAlertCronRouteImport } from './routes/api/public/hooks/balance-alert-cron'
+import { Route as ApiPublicHooksCreatorOrdersRouteImport } from './routes/api/public/hooks/creator-orders'
+import { Route as ApiPublicHooksCreatorOrdersCronRouteImport } from './routes/api/public/hooks/creator-orders-cron'
 import { Route as ApiPublicHooksEcoRouteImport } from './routes/api/public/hooks/eco'
 import { Route as ApiPublicHooksEcoPingRouteImport } from './routes/api/public/hooks/eco-ping'
 import { Route as ApiPublicHooksFeishuSyncCronRouteImport } from './routes/api/public/hooks/feishu-sync-cron'
@@ -58,6 +61,11 @@ const CommentsRoute = CommentsRouteImport.update({
 const ConnectionStatsRoute = ConnectionStatsRouteImport.update({
   id: '/connection-stats',
   path: '/connection-stats',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CreatorOrdersRoute = CreatorOrdersRouteImport.update({
+  id: '/creator-orders',
+  path: '/creator-orders',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FeishuDataRoute = FeishuDataRouteImport.update({
@@ -138,6 +146,18 @@ const ApiPublicHooksBalanceAlertCronRoute =
     path: '/api/public/hooks/balance-alert-cron',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicHooksCreatorOrdersRoute =
+  ApiPublicHooksCreatorOrdersRouteImport.update({
+    id: '/api/public/hooks/creator-orders',
+    path: '/api/public/hooks/creator-orders',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicHooksCreatorOrdersCronRoute =
+  ApiPublicHooksCreatorOrdersCronRouteImport.update({
+    id: '/api/public/hooks/creator-orders-cron',
+    path: '/api/public/hooks/creator-orders-cron',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicHooksEcoRoute = ApiPublicHooksEcoRouteImport.update({
   id: '/api/public/hooks/eco',
   path: '/api/public/hooks/eco',
@@ -207,6 +227,7 @@ export interface FileRoutesByFullPath {
   '/api-test': typeof ApiTestRoute
   '/comments': typeof CommentsRoute
   '/connection-stats': typeof ConnectionStatsRoute
+  '/creator-orders': typeof CreatorOrdersRoute
   '/feishu-data': typeof FeishuDataRoute
   '/gmv-attribution': typeof GmvAttributionRoute
   '/gmv-attribution-admin': typeof GmvAttributionAdminRoute
@@ -222,6 +243,8 @@ export interface FileRoutesByFullPath {
   '/api/public/hooks/attribution-cron': typeof ApiPublicHooksAttributionCronRoute
   '/api/public/hooks/authorize-cron': typeof ApiPublicHooksAuthorizeCronRoute
   '/api/public/hooks/balance-alert-cron': typeof ApiPublicHooksBalanceAlertCronRoute
+  '/api/public/hooks/creator-orders': typeof ApiPublicHooksCreatorOrdersRoute
+  '/api/public/hooks/creator-orders-cron': typeof ApiPublicHooksCreatorOrdersCronRoute
   '/api/public/hooks/eco': typeof ApiPublicHooksEcoRoute
   '/api/public/hooks/eco-ping': typeof ApiPublicHooksEcoPingRoute
   '/api/public/hooks/feishu-sync-cron': typeof ApiPublicHooksFeishuSyncCronRoute
@@ -239,6 +262,7 @@ export interface FileRoutesByTo {
   '/api-test': typeof ApiTestRoute
   '/comments': typeof CommentsRoute
   '/connection-stats': typeof ConnectionStatsRoute
+  '/creator-orders': typeof CreatorOrdersRoute
   '/feishu-data': typeof FeishuDataRoute
   '/gmv-attribution': typeof GmvAttributionRoute
   '/gmv-attribution-admin': typeof GmvAttributionAdminRoute
@@ -254,6 +278,8 @@ export interface FileRoutesByTo {
   '/api/public/hooks/attribution-cron': typeof ApiPublicHooksAttributionCronRoute
   '/api/public/hooks/authorize-cron': typeof ApiPublicHooksAuthorizeCronRoute
   '/api/public/hooks/balance-alert-cron': typeof ApiPublicHooksBalanceAlertCronRoute
+  '/api/public/hooks/creator-orders': typeof ApiPublicHooksCreatorOrdersRoute
+  '/api/public/hooks/creator-orders-cron': typeof ApiPublicHooksCreatorOrdersCronRoute
   '/api/public/hooks/eco': typeof ApiPublicHooksEcoRoute
   '/api/public/hooks/eco-ping': typeof ApiPublicHooksEcoPingRoute
   '/api/public/hooks/feishu-sync-cron': typeof ApiPublicHooksFeishuSyncCronRoute
@@ -272,6 +298,7 @@ export interface FileRoutesById {
   '/api-test': typeof ApiTestRoute
   '/comments': typeof CommentsRoute
   '/connection-stats': typeof ConnectionStatsRoute
+  '/creator-orders': typeof CreatorOrdersRoute
   '/feishu-data': typeof FeishuDataRoute
   '/gmv-attribution': typeof GmvAttributionRoute
   '/gmv-attribution-admin': typeof GmvAttributionAdminRoute
@@ -287,6 +314,8 @@ export interface FileRoutesById {
   '/api/public/hooks/attribution-cron': typeof ApiPublicHooksAttributionCronRoute
   '/api/public/hooks/authorize-cron': typeof ApiPublicHooksAuthorizeCronRoute
   '/api/public/hooks/balance-alert-cron': typeof ApiPublicHooksBalanceAlertCronRoute
+  '/api/public/hooks/creator-orders': typeof ApiPublicHooksCreatorOrdersRoute
+  '/api/public/hooks/creator-orders-cron': typeof ApiPublicHooksCreatorOrdersCronRoute
   '/api/public/hooks/eco': typeof ApiPublicHooksEcoRoute
   '/api/public/hooks/eco-ping': typeof ApiPublicHooksEcoPingRoute
   '/api/public/hooks/feishu-sync-cron': typeof ApiPublicHooksFeishuSyncCronRoute
@@ -306,6 +335,7 @@ export interface FileRouteTypes {
     | '/api-test'
     | '/comments'
     | '/connection-stats'
+    | '/creator-orders'
     | '/feishu-data'
     | '/gmv-attribution'
     | '/gmv-attribution-admin'
@@ -321,6 +351,8 @@ export interface FileRouteTypes {
     | '/api/public/hooks/attribution-cron'
     | '/api/public/hooks/authorize-cron'
     | '/api/public/hooks/balance-alert-cron'
+    | '/api/public/hooks/creator-orders'
+    | '/api/public/hooks/creator-orders-cron'
     | '/api/public/hooks/eco'
     | '/api/public/hooks/eco-ping'
     | '/api/public/hooks/feishu-sync-cron'
@@ -338,6 +370,7 @@ export interface FileRouteTypes {
     | '/api-test'
     | '/comments'
     | '/connection-stats'
+    | '/creator-orders'
     | '/feishu-data'
     | '/gmv-attribution'
     | '/gmv-attribution-admin'
@@ -353,6 +386,8 @@ export interface FileRouteTypes {
     | '/api/public/hooks/attribution-cron'
     | '/api/public/hooks/authorize-cron'
     | '/api/public/hooks/balance-alert-cron'
+    | '/api/public/hooks/creator-orders'
+    | '/api/public/hooks/creator-orders-cron'
     | '/api/public/hooks/eco'
     | '/api/public/hooks/eco-ping'
     | '/api/public/hooks/feishu-sync-cron'
@@ -370,6 +405,7 @@ export interface FileRouteTypes {
     | '/api-test'
     | '/comments'
     | '/connection-stats'
+    | '/creator-orders'
     | '/feishu-data'
     | '/gmv-attribution'
     | '/gmv-attribution-admin'
@@ -385,6 +421,8 @@ export interface FileRouteTypes {
     | '/api/public/hooks/attribution-cron'
     | '/api/public/hooks/authorize-cron'
     | '/api/public/hooks/balance-alert-cron'
+    | '/api/public/hooks/creator-orders'
+    | '/api/public/hooks/creator-orders-cron'
     | '/api/public/hooks/eco'
     | '/api/public/hooks/eco-ping'
     | '/api/public/hooks/feishu-sync-cron'
@@ -403,6 +441,7 @@ export interface RootRouteChildren {
   ApiTestRoute: typeof ApiTestRoute
   CommentsRoute: typeof CommentsRoute
   ConnectionStatsRoute: typeof ConnectionStatsRoute
+  CreatorOrdersRoute: typeof CreatorOrdersRoute
   FeishuDataRoute: typeof FeishuDataRoute
   GmvAttributionRoute: typeof GmvAttributionRoute
   GmvAttributionAdminRoute: typeof GmvAttributionAdminRoute
@@ -418,6 +457,8 @@ export interface RootRouteChildren {
   ApiPublicHooksAttributionCronRoute: typeof ApiPublicHooksAttributionCronRoute
   ApiPublicHooksAuthorizeCronRoute: typeof ApiPublicHooksAuthorizeCronRoute
   ApiPublicHooksBalanceAlertCronRoute: typeof ApiPublicHooksBalanceAlertCronRoute
+  ApiPublicHooksCreatorOrdersRoute: typeof ApiPublicHooksCreatorOrdersRoute
+  ApiPublicHooksCreatorOrdersCronRoute: typeof ApiPublicHooksCreatorOrdersCronRoute
   ApiPublicHooksEcoRoute: typeof ApiPublicHooksEcoRoute
   ApiPublicHooksEcoPingRoute: typeof ApiPublicHooksEcoPingRoute
   ApiPublicHooksFeishuSyncCronRoute: typeof ApiPublicHooksFeishuSyncCronRoute
@@ -459,6 +500,13 @@ declare module '@tanstack/react-router' {
       path: '/connection-stats'
       fullPath: '/connection-stats'
       preLoaderRoute: typeof ConnectionStatsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/creator-orders': {
+      id: '/creator-orders'
+      path: '/creator-orders'
+      fullPath: '/creator-orders'
+      preLoaderRoute: typeof CreatorOrdersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/feishu-data': {
@@ -566,6 +614,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicHooksBalanceAlertCronRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/hooks/creator-orders': {
+      id: '/api/public/hooks/creator-orders'
+      path: '/api/public/hooks/creator-orders'
+      fullPath: '/api/public/hooks/creator-orders'
+      preLoaderRoute: typeof ApiPublicHooksCreatorOrdersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/hooks/creator-orders-cron': {
+      id: '/api/public/hooks/creator-orders-cron'
+      path: '/api/public/hooks/creator-orders-cron'
+      fullPath: '/api/public/hooks/creator-orders-cron'
+      preLoaderRoute: typeof ApiPublicHooksCreatorOrdersCronRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/hooks/eco': {
       id: '/api/public/hooks/eco'
       path: '/api/public/hooks/eco'
@@ -651,6 +713,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiTestRoute: ApiTestRoute,
   CommentsRoute: CommentsRoute,
   ConnectionStatsRoute: ConnectionStatsRoute,
+  CreatorOrdersRoute: CreatorOrdersRoute,
   FeishuDataRoute: FeishuDataRoute,
   GmvAttributionRoute: GmvAttributionRoute,
   GmvAttributionAdminRoute: GmvAttributionAdminRoute,
@@ -666,6 +729,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicHooksAttributionCronRoute: ApiPublicHooksAttributionCronRoute,
   ApiPublicHooksAuthorizeCronRoute: ApiPublicHooksAuthorizeCronRoute,
   ApiPublicHooksBalanceAlertCronRoute: ApiPublicHooksBalanceAlertCronRoute,
+  ApiPublicHooksCreatorOrdersRoute: ApiPublicHooksCreatorOrdersRoute,
+  ApiPublicHooksCreatorOrdersCronRoute: ApiPublicHooksCreatorOrdersCronRoute,
   ApiPublicHooksEcoRoute: ApiPublicHooksEcoRoute,
   ApiPublicHooksEcoPingRoute: ApiPublicHooksEcoPingRoute,
   ApiPublicHooksFeishuSyncCronRoute: ApiPublicHooksFeishuSyncCronRoute,
