@@ -6,7 +6,7 @@
 // inside its sidebar group.
 import { Boxes, Database, FileDown, Flame, Handshake, Megaphone, MessageSquareText, PlusCircle, Settings, Store, Target, TerminalSquare, TrendingUp, Users, Zap, type LucideIcon } from "lucide-react";
 
-export type NavGroupKey = "material" | "gmv-max" | "attribution" | "shop";
+export type NavGroupKey = "material" | "gmv-max" | "attribution" | "creator" | "shop";
 
 export type NavGroup = { key: NavGroupKey; label: string; icon: LucideIcon };
 
@@ -14,6 +14,7 @@ export const NAV_GROUPS: NavGroup[] = [
   { key: "material", label: "素材授权", icon: Zap },
   { key: "gmv-max", label: "GMV Max", icon: Megaphone },
   { key: "attribution", label: "GMV 归因", icon: Target },
+  { key: "creator", label: "达人管理", icon: Handshake },
   { key: "shop", label: "店铺", icon: Store },
 ];
 
@@ -37,8 +38,8 @@ export const TABS: TabDef[] = [
   { key: "feishu-data", label: "已获取数据查阅", navLabel: "数据查阅", to: "/feishu-data", icon: Database, group: "gmv-max" },
   { key: "gmv-attribution", label: "GMV 归因", navLabel: "归因结果", to: "/gmv-attribution", icon: Target, group: "attribution" },
   { key: "gmv-attribution-admin", label: "GMV 归因·管理", navLabel: "归因管理", to: "/gmv-attribution-admin", icon: Target, group: "attribution" },
-  { key: "creator-orders", label: "达人出单日报", navLabel: "达人出单", to: "/creator-orders", icon: Flame, group: "attribution" },
-  { key: "outreach", label: "达人建联", to: "/outreach", icon: Handshake },
+  { key: "outreach", label: "达人建联", to: "/outreach", icon: Handshake, group: "creator" },
+  { key: "creator-orders", label: "达人出单日报", navLabel: "达人出单", to: "/creator-orders", icon: Flame, group: "creator" },
   { key: "reviews", label: "评论查看", to: "/reviews", icon: MessageSquareText },
   { key: "tts-export", label: "店铺数据导出", navLabel: "数据导出", to: "/tts-export", icon: FileDown, group: "shop" },
   { key: "sea-inventory", label: "SEA库存监控", navLabel: "SEA 库存", to: "/sea-inventory", icon: Boxes, group: "shop" },

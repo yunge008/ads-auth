@@ -241,7 +241,7 @@ GMV Max 导入记录，逐商品一行：batch_id / kind(excel|single|copy) / so
 
 
 ### 达人出单日报（2026-11-27，migration 20261127200000_creator_orders.sql，1127.338）
-- 页面 `/creator-orders`（tab key `creator-orders`，GMV 归因组「达人出单」）；接口 `/api/public/hooks/creator-orders`（query / refresh / settings，口令 + 本页权限，校验逻辑在 `src/lib/creator-orders.server.ts` checkCoPasscode，与 verifyPasscode 数据库路径一致）。
+- 页面 `/creator-orders`（tab key `creator-orders`，「达人管理」组，与达人建联同组）；接口 `/api/public/hooks/creator-orders`（query / refresh / settings，口令 + 本页权限，校验逻辑在 `src/lib/creator-orders.server.ts` checkCoPasscode，与 verifyPasscode 数据库路径一致）。
 - 定时：pg_cron `creator-orders-hourly`（每小时第 23 分）→ `/api/public/hooks/creator-orders-cron`（x-cron-key）：各广告户今天及前两天 GMV Max 素材 × 商品（维度 `[campaign_id,item_group_id,item_id]`、无 stat_time_day、区间=当天，含 0 花费素材，口径同导出表）→ 覆盖写；再给近 3 天新 VID 调 TikTok Shop 视频列表（202605，昵称/类型）与 batch_performance（用户名）。Shop 调用只读 GET，签名在 server.ts 内（_shared/tts.ts 依赖 Deno 不能 import）。
 - 表：`co_daily`（日期 × 广告户 × VID × SPU，ID bigint、金额整数分，只存非 0 行）、`co_vid`（VID → 用户名/昵称/账号类型/发布时间）、`co_state`（各户同步状态）、`co_settings`（爆单门槛、官号关键词）；RPC `co_query(start,end,countries)` 仅 service_role。RLS 开、无策略。
 - 日期 = 广告户时区自然日（素材级无小时维度）；主 SKU = 商品在飞书 SKU 表里出现最多的基础货号（AR/NE + 3–4 位数字）。
