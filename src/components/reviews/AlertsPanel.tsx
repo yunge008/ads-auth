@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { reviewsApi, type AlertItem, type Meta } from "@/lib/reviewsApi";
-import { f2, Help, Pager, useFitRows } from "./shared";
+import { f2, Help, ListingLabel, Pager, useFitRows } from "./shared";
 
 /** 差评提示：门槛设置 + 当前低于门槛的链接（每晚同步后，新跌破的合并发一条飞书） */
 export function AlertsPanel({ meta, onSaved, onPick }: { meta: Meta | null; onSaved: () => void; onPick: (pid: string) => void }) {
@@ -57,7 +57,7 @@ export function AlertsPanel({ meta, onSaved, onPick }: { meta: Meta | null; onSa
       <div className="rounded-md border overflow-x-auto">
         <Table className="tabular-nums text-sm">
           <TableHeader><TableRow>
-            <TableHead>站点</TableHead><TableHead>SKU / 商品 ID</TableHead>
+            <TableHead>站点</TableHead><TableHead>SKU / 名称 / 商品 ID</TableHead>
             <TableHead className="text-right">累计平均分</TableHead><TableHead className="text-right">累计评价</TableHead>
             <TableHead className="text-right">近 30 天评论</TableHead><TableHead className="text-right">近 30 天差评</TableHead>
             <TableHead className="text-right">已提示</TableHead>
@@ -68,7 +68,7 @@ export function AlertsPanel({ meta, onSaved, onPick }: { meta: Meta | null; onSa
             {items?.slice(page * per, page * per + per).map((x) => (
               <TableRow key={`${x.site}|${x.pid}`} className="cursor-pointer" tabIndex={0} onClick={() => onPick(x.pid)} onKeyDown={(e) => { if (e.key === "Enter") onPick(x.pid); }}>
                 <TableCell>{x.site}</TableCell>
-                <TableCell className="min-w-[280px] max-w-[480px]"><div className="truncate" title={x.sku ?? ""}>{x.sku ?? "—"}</div><div className="font-mono text-[11px] text-muted-foreground">{x.pid}</div></TableCell>
+                <TableCell className="min-w-[280px] max-w-[480px]"><ListingLabel sku={x.sku} title={x.title} pid={x.pid} /></TableCell>
                 <TableCell className="text-right text-red-600">{f2(x.avg)}</TableCell>
                 <TableCell className="text-right">{x.n.toLocaleString()}</TableCell>
                 <TableCell className="text-right">{x.n30}</TableCell>

@@ -44,6 +44,7 @@ export function DataPanel({ meta, onChanged }: { meta: Meta | null; onChanged: (
           setBusy(`${p.file}：逐日星级 ${Math.min(i + DAILY_CHUNK, p.daily.length)}/${p.daily.length}`);
           await reviewsApi.uploadDaily(p.shop_key, p.daily.slice(i, i + DAILY_CHUNK));
         }
+        for (let i = 0; i < p.titles.length; i += DAILY_CHUNK) await reviewsApi.uploadTitles(p.shop_key, p.titles.slice(i, i + DAILY_CHUNK));
         for (let i = 0; i < Math.max(p.skuDaily.length, p.skuSpecs.length); i += DAILY_CHUNK) {
           setBusy(`${p.file}：SKU 星级 ${Math.min(i + DAILY_CHUNK, p.skuDaily.length)}/${p.skuDaily.length}`);
           await reviewsApi.uploadSku(p.shop_key, p.skuDaily.slice(i, i + DAILY_CHUNK), p.skuSpecs.slice(i, i + DAILY_CHUNK));

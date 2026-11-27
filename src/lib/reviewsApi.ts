@@ -6,7 +6,7 @@ export type Stars = [number, number, number, number, number];
 export type SeriesDay = { d: string; s1: number; s2: number; s3: number; s4: number; s5: number; i1: number; i2: number; i3: number; i4: number; i5: number; orders: number };
 export type Series = { base: Stars; days: SeriesDay[]; products: number };
 /** cov_*：评价和出单都已知的日子里的评价数 / 差评数 / 出单（留评率、订单差评率用）*/
-export type TableRow = { site: string; pid: string; sku: string | null; below: boolean; base: Stars; range: Stars; rinit: Stars; orders: number; cov_n: number; cov_bad: number; cov_ord: number };
+export type TableRow = { site: string; pid: string; sku: string | null; title: string | null; below: boolean; base: Stars; range: Stars; rinit: Stars; orders: number; cov_n: number; cov_bad: number; cov_ord: number };
 export type ReviewText = {
   review_id: string; star: number; review_at: string | null; order_id: string | null; seller_sku: string | null;
   content: string | null; content_zh: string | null; reply: string | null; reply_zh: string | null; img_count: number;
@@ -14,7 +14,7 @@ export type ReviewText = {
 };
 /** 评论内容 TAB 的一行：text = 有留言/回复的评价；gap = 抓取截止日之后接口新增、还没有内容的评价（counts = 1–5 星条数）*/
 export type ListItem = {
-  kind: "text" | "gap"; ts: string; shop_key: string; product_id: string; sku: string | null; star: number | null;
+  kind: "text" | "gap"; ts: string; shop_key: string; product_id: string; sku: string | null; title: string | null; star: number | null;
   content: string | null; content_zh: string | null; reply: string | null; reply_zh: string | null; order_id: string | null;
   img_count: number; imgs: [string, string][] | null; counts: Stars | null; init: boolean;
 };
@@ -25,7 +25,7 @@ export type ShopStatus = {
 };
 export type Upload = { shop_key: string; file_name: string; range_from: string; range_to: string; rows_total: number; rows_in_range: number; rows_text: number; products: number; status: string; uploaded_by: string | null; created_at: string };
 export type Meta = { shops: ShopStatus[]; api_sites: string[]; settings: { min_reviews: number; threshold: number; updated_at: string; updated_by: string | null } | null; uploads: Upload[]; is_admin: boolean };
-export type AlertItem = { site: string; pid: string; sku: string | null; avg: number; n: number; n30: number; bad30: number; alerted_at: string | null; new: boolean };
+export type AlertItem = { site: string; pid: string; sku: string | null; title: string | null; avg: number; n: number; n30: number; bad30: number; alerted_at: string | null; new: boolean };
 export type Reconcile = {
   shop_key: string; crawl_until: string | null;
   products: { pid: string; api: Stars; ours: Stars; diff: Stars; api_avg: number | null; our_avg: number | null }[];
@@ -44,6 +44,7 @@ export const reviewsApi = {
   saveSettings: (min_reviews: number, threshold: number) => call<{ ok: true }>({ action: "save_settings", min_reviews, threshold }),
   uploadBegin: (b: Record<string, unknown>) => call<{ upload_id: string }>({ action: "upload_begin", ...b }),
   uploadDaily: (shop_key: string, rows: unknown[]) => call<{ rows: number }>({ action: "upload_daily", shop_key, rows }, 120_000),
+  uploadTitles: (shop_key: string, rows: unknown[]) => call<{ rows: number }>({ action: "upload_titles", shop_key, rows }),
   uploadSku: (shop_key: string, rows: unknown[], specs: unknown[]) => call<{ rows: number }>({ action: "upload_sku", shop_key, rows, specs }, 120_000),
   skuTable: (site: string, pid: string, from: string, to: string) => call<SkuTable>({ action: "sku_table", site, product_id: pid, from, to }),
   uploadTexts: (shop_key: string, rows: unknown[]) => call<{ rows: number }>({ action: "upload_texts", shop_key, rows }, 120_000),

@@ -2,12 +2,12 @@ import * as React from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ChevronRight } from "lucide-react";
 import { addS, avgS, reviewsApi, sumS, type SkuTable, type TableRow as Row } from "@/lib/reviewsApi";
-import { f2, Help, Pager, pct, StarBar, useFitRows } from "./shared";
+import { f2, Help, ListingLabel, Pager, pct, StarBar, useFitRows } from "./shared";
 
 type K = "site" | "sku" | "cum" | "delta" | "cnt" | "avg" | "bad" | "badr" | "ord" | "revr" | "obadr";
 const COLS: { k: K; label: string; help?: string; left?: boolean }[] = [
   { k: "site", label: "站点", left: true },
-  { k: "sku", label: "SKU / 商品 ID", left: true },
+  { k: "sku", label: "SKU / 名称 / 商品 ID", left: true },
   { k: "cum", label: "累计平均分", help: "截至结束日全部历史评价的加权平均（listing 显示分）。" },
   { k: "delta", label: "区间变化", help: "累计平均分在所选区间内的变化。" },
   { k: "cnt", label: "评价数" },
@@ -83,8 +83,7 @@ export function LinksTable({ rows, onPick, picked, from, to }: { rows: Row[] | n
                 {x.site}
               </TableCell>
               <TableCell className="min-w-[280px] max-w-[480px]">
-                <div className="truncate" title={x.sku}>{x.sku || "—"}</div>
-                <div className="font-mono text-[11px] text-muted-foreground">{x.r.pid}</div>
+                <ListingLabel sku={x.r.sku} title={x.r.title} pid={x.r.pid} />
               </TableCell>
               <TableCell className="text-right">
                 {f2(x.cum)}

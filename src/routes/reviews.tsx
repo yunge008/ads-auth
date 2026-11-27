@@ -9,7 +9,7 @@ import { DataPanel } from "@/components/reviews/DataPanel";
 import { CommentsView } from "@/components/reviews/CommentsView";
 import { LinksTable } from "@/components/reviews/LinksTable";
 import { TrendView } from "@/components/reviews/TrendView";
-import { addDays, daysBetween, yesterday } from "@/components/reviews/shared";
+import { addDays, daysBetween, ListingLabel, yesterday } from "@/components/reviews/shared";
 import { reviewsApi, type Meta, type ReviewText, type Series, type TableRow } from "@/lib/reviewsApi";
 
 export const Route = createFileRoute("/reviews")({
@@ -26,7 +26,7 @@ const chip = (on: boolean) =>
 function ReviewsPage() {
   const [tab, setTab] = React.useState("trend");
   const [meta, setMeta] = React.useState<Meta | null>(null);
-  const [sites, setSites] = React.useState<Set<string>>(new Set());
+  const [sites, setSites] = React.useState<Set<string>>(() => new Set(SITES));
   const [to, setTo] = React.useState(yesterday());
   const [from, setFrom] = React.useState(addDays(yesterday(), -29));
   const [q, setQ] = React.useState("");
@@ -42,20 +42,32 @@ function ReviewsPage() {
   React.useEffect(loadMeta, [loadMeta]);
   React.useEffect(() => { const t = setTimeout(() => setQDeb(q.trim()), 300); return () => clearTimeout(t); }, [q]);
 
-  const siteList = React.useMemo(() => [...sites], [sites]);
+  // 全选时传空数组（= 全部站点，查询更快）；一个都没选时不查
+  const allOn = sites.size === SITES.length;
+  const siteList = React.useMemo(() => (sites.size === SITES.length ? [] : sites.size === 0 ? ["-"] : SITES.filter((s) => sites.has(s))), [sites]);
+  const noSite = sites.size === 0;
+  // 查询结果按条件缓存：切回之前看过的站点/日期/筛选直接显示，不重新请求（数据每晚才更新；刷新页面即清空）
+  const cache = React.useRef(new Map<string, { series: Series; rows: TableRow[] }>());
+  const [loading, setLoading] = React.useState(false);
   React.useEffect(() => {
     if (from > to) return;
+    if (noSite) { setSeries({ base: [0, 0, 0, 0, 0], days: [], products: 0 }); setRows([]); setLoading(false); return; }
+    const key = JSON.stringify([siteList, from, to, qDeb]);
+    const hit = cache.current.get(key);
+    if (hit) { setSeries(hit.series); setRows(hit.rows); setLoading(false); return; }
     let stale = false;
     const span = daysBetween(from, to) + 1;
-    setSeries(null);
-    setRows(null);
-    // 趋势多取一个同长度的上期，用于「较上期」
-    reviewsApi.series({ sites: siteList, from: addDays(from, -span), to, q: qDeb })
-      .then((r) => { if (!stale) setSeries(r); }).catch((e) => toast.error((e as Error).message));
-    reviewsApi.table({ sites: siteList, from, to, q: qDeb })
-      .then((r) => { if (!stale) setRows(r.rows); }).catch((e) => toast.error((e as Error).message));
+    setLoading(true); // 新数据回来前保留旧数据，不清空页面
+    Promise.all([
+      // 趋势多取一个同长度的上期，用于「较上期」
+      reviewsApi.series({ sites: siteList, from: addDays(from, -span), to, q: qDeb }),
+      reviewsApi.table({ sites: siteList, from, to, q: qDeb }),
+    ]).then(([se, tb]) => {
+      cache.current.set(key, { series: se, rows: tb.rows });
+      if (!stale) { setSeries(se); setRows(tb.rows); }
+    }).catch((e) => toast.error((e as Error).message)).finally(() => { if (!stale) setLoading(false); });
     return () => { stale = true; };
-  }, [siteList, from, to, qDeb]);
+  }, [siteList, from, to, qDeb, noSite]);
 
   // 筛选框只匹配到一个 listing 时显示它的评价内容
   const single = rows && qDeb && rows.length === 1 ? rows[0] : null;
@@ -68,7 +80,7 @@ function ReviewsPage() {
 
   const pickListing = (pid: string) => { setQ(pid); setQDeb(pid); setTab("trend"); window.scrollTo({ top: 0 }); };
   const preset = PRESETS.find((p) => to === yesterday() && daysBetween(from, to) + 1 === p);
-  const skus = rows && qDeb ? rows.slice(0, 6) : [];
+  const skus = rows && qDeb ? rows.slice(0, 3) : [];
 
   return (
     <TooltipProvider delayDuration={150}>
@@ -86,7 +98,7 @@ function ReviewsPage() {
             <div className="flex flex-wrap items-center gap-2">
               <span className="w-8 shrink-0 text-xs text-muted-foreground" id="rv-lab-site">站点</span>
               <div className="flex flex-wrap gap-1" role="group" aria-labelledby="rv-lab-site">
-                <button type="button" className={chip(sites.size === 0)} aria-pressed={sites.size === 0} onClick={() => setSites(new Set())}>全部</button>
+                <button type="button" className={chip(allOn)} aria-pressed={allOn} onClick={() => setSites(allOn ? new Set() : new Set(SITES))}>全部</button>
                 {SITES.map((s) => (
                   <button key={s} type="button" className={chip(sites.has(s))} aria-pressed={sites.has(s)}
                     onClick={() => setSites((old) => { const n = new Set(old); if (n.has(s)) n.delete(s); else n.add(s); return n; })}>{s}</button>
@@ -107,29 +119,35 @@ function ReviewsPage() {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <label htmlFor="rv-q" className="w-8 shrink-0 text-xs text-muted-foreground">筛选</label>
-              <Input id="rv-q" type="search" placeholder="商品 ID" value={q} onChange={(e) => setQ(e.target.value)} className="h-8 w-56 font-mono" autoComplete="off" />
-              <div className="flex flex-wrap gap-1 text-xs text-muted-foreground min-w-0" aria-live="polite">
-                {qDeb && rows?.length === 0 && <span>无匹配</span>}
-                {skus.map((r) => <span key={r.pid} className="rounded bg-muted px-1.5 py-0.5 font-mono text-foreground" title={`${r.site} · ${r.pid}`}>{r.sku ?? r.pid}</span>)}
-                {qDeb && (rows?.length ?? 0) > 6 && <span>等 {rows!.length} 个</span>}
+              <Input id="rv-q" type="search" placeholder="商品 ID / SKU / 名称" value={q} onChange={(e) => setQ(e.target.value)} className="h-8 w-64" autoComplete="off" />
+              <div className="flex min-w-0 flex-wrap items-center gap-1 text-xs text-muted-foreground" aria-live="polite">
+                {noSite && <span>未选站点</span>}
+                {loading && <span>更新中…</span>}
+                {qDeb && !noSite && rows?.length === 0 && <span>无匹配</span>}
+                {skus.map((r) => (
+                  <span key={r.pid} className="max-w-[260px] rounded bg-muted px-1.5 py-0.5 text-foreground">
+                    <ListingLabel sku={r.sku} title={r.title} pid={r.pid} showPid={false} />
+                  </span>
+                ))}
+                {qDeb && (rows?.length ?? 0) > skus.length && <span>等 {rows!.length} 个</span>}
               </div>
             </div>
           </div>
         )}
 
-        <TabsContent value="trend" className="mt-0">
+        <TabsContent value="trend" forceMount className="mt-0 data-[state=inactive]:hidden">
           <TrendView series={series} from={from} to={to} texts={single ? texts : null} stars={stars} onStars={setStars} />
         </TabsContent>
-        <TabsContent value="links" className="mt-0">
+        <TabsContent value="links" forceMount className="mt-0 data-[state=inactive]:hidden">
           <LinksTable rows={rows} onPick={pickListing} picked={single?.pid ?? null} from={from} to={to} />
         </TabsContent>
-        <TabsContent value="comments" className="mt-0">
-          <CommentsView sites={siteList} from={from} to={to} q={qDeb} onPick={pickListing} />
+        <TabsContent value="comments" forceMount className="mt-0 data-[state=inactive]:hidden">
+          <CommentsView active={tab === "comments"} sites={siteList} from={from} to={to} q={qDeb} onPick={pickListing} />
         </TabsContent>
-        <TabsContent value="alerts" className="mt-0">
+        <TabsContent value="alerts" forceMount className="mt-0 data-[state=inactive]:hidden">
           <AlertsPanel meta={meta} onSaved={loadMeta} onPick={pickListing} />
         </TabsContent>
-        <TabsContent value="data" className="mt-0">
+        <TabsContent value="data" forceMount className="mt-0 data-[state=inactive]:hidden">
           <DataPanel meta={meta} onChanged={loadMeta} />
         </TabsContent>
       </Tabs>

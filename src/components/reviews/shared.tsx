@@ -90,3 +90,34 @@ export function Pager({ page, pages, total, onPage }: { page: number; pages: num
     </nav>
   );
 }
+
+/** 第一个 SKU 只保留字母前缀 + 3–4 位数字（AR333-A-K → AR333，NE103-C+205-C → NE103）；认不出就用第一个 SKU 原样 */
+export function shortSku(sku: string | null | undefined): string {
+  const first = String(sku ?? "").split(/\s*\/\s*/)[0]?.trim() ?? "";
+  const m = first.match(/^([A-Za-z]{1,4})(\d{3,4})/);
+  return m ? `${m[1].toUpperCase()}${m[2]}` : first;
+}
+/** listing 名称以 . ' ’ ‘ | ~ 结尾时，前面加【符号-链接】提示 */
+export function titleMark(title: string | null | undefined): string | null {
+  const t = String(title ?? "").trim();
+  const ch = t.slice(-1);
+  return ch && ".'’‘|~".includes(ch) ? `【${ch}-链接】` : null;
+}
+
+/** 链接标识：简写 SKU（悬停看全部 SKU）+ listing 名称（放不下省略，悬停看全名）+ 商品 ID */
+export function ListingLabel({ sku, title, pid, showPid = true, className = "" }: { sku: string | null; title?: string | null; pid: string; showPid?: boolean; className?: string }) {
+  const mark = titleMark(title);
+  return (
+    <div className={`min-w-0 ${className}`}>
+      <div className="flex min-w-0 items-baseline gap-1.5">
+        <span className="shrink-0 font-medium" title={sku ?? ""}>{shortSku(sku) || "—"}</span>
+        {title && (
+          <span className="truncate text-muted-foreground" title={title}>
+            {mark && <span className="text-amber-600">{mark}</span>}{title}
+          </span>
+        )}
+      </div>
+      {showPid && <div className="font-mono text-[11px] text-muted-foreground">{pid}</div>}
+    </div>
+  );
+}

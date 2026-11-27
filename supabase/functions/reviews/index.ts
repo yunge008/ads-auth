@@ -270,7 +270,11 @@ async function stepShop(shop: Shop, started: number): Promise<StepResult> {
       await db.from("review_shops").upsert({ shop_key: shop.key, api_until: st.end, latest_available_date: st.end }, { onConflict: "shop_key" });
       await db.rpc("review_products_fill_sku");
     }
-    // ② 出单回补（每晚快照完成后、有剩余时间时）
+    // ② listing 名称补全（每晚快照完成后、有剩余时间时）
+    if (st.done && Date.now() - started < PRODUCT_START_LIMIT_MS) {
+      try { st.calls = (st.calls ?? 0) + await fillTitles(shop, started); } catch (e) { note("title", e); }
+    }
+    // ③ 出单回补（每晚快照完成后、有剩余时间时）
     //    失败的商品下一轮重试（最多 3 轮）；orders_from 只在全部成功后才前移，且取各商品实际起点中最晚的
     const bfList = st.bf_list ?? list;
     while (st.done && !st.bf_done && (st.bf_idx ?? 0) < bfList.length && Date.now() - started < PRODUCT_START_LIMIT_MS) {
@@ -393,6 +397,30 @@ async function uploadBegin(b: Record<string, unknown>, who: string) {
   }).select("id").single();
   if (e2) throw e2;
   return { upload_id: data.id };
+}
+/** listing 名称（抓取表「商品名称」）：覆盖写入 */
+async function uploadTitles(b: Record<string, unknown>) {
+  const key = String(b.shop_key ?? "").toUpperCase();
+  const rows = (Array.isArray(b.rows) ? b.rows : []) as { p: string; title: string }[];
+  if (rows.length > 5000) bad("每片最多 5000 行");
+  const up = rows.filter((r) => r.p && r.title).map((r) => ({ shop_key: key, product_id: String(r.p), title: String(r.title).slice(0, 500), updated_at: new Date().toISOString() }));
+  if (up.length) await upsertOrThrow("review_products", up, "shop_key,product_id");
+  return { ok: true, rows: up.length };
+}
+/** 没有名称的 listing 调 Get Product 补（每个商品只补一次；时间用完就停，下次接着补）*/
+async function fillTitles(shop: Shop, started: number): Promise<number> {
+  const db = admin();
+  const { data } = await db.from("review_products").select("product_id").eq("shop_key", shop.key).is("title", null).limit(300);
+  let calls = 0;
+  for (const r of data ?? []) {
+    if (Date.now() - started > PRODUCT_START_LIMIT_MS) break;
+    const res = await ttsCall<{ title?: string }>({ method: "GET", path: `/product/202309/products/${r.product_id}`, accessToken: shop.access_token, shopCipher: shop.shop_cipher });
+    calls++;
+    // 查不到的商品（已删除等）记为空串，避免每晚重复查
+    const title = res.code === 0 ? String(res.data?.title ?? "").slice(0, 500) : (res.http_status === 200 ? "" : null);
+    if (title !== null) await db.from("review_products").update({ title, updated_at: new Date().toISOString() }).eq("shop_key", shop.key).eq("product_id", r.product_id);
+  }
+  return calls;
 }
 /** SKU 维度逐日星级（来自抓取表全部行）+ SKU 规格 */
 async function uploadSku(b: Record<string, unknown>) {
@@ -528,6 +556,7 @@ Deno.serve(async (req) => {
       case "upload_begin": return json(await uploadBegin(b, acc.name));
       case "upload_daily": return json(await uploadDaily(b));
       case "upload_sku": return json(await uploadSku(b));
+      case "upload_titles": return json(await uploadTitles(b));
       case "sku_table": {
         const site = String(b.site ?? ""), pid = String(b.product_id ?? "");
         if (!site || !pid) bad("site、product_id 必填");

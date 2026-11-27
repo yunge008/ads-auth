@@ -14,6 +14,7 @@ export type CrawlParsed = {
   rows_total: number; rows_in_range: number; out_of_range: number; dup: number; bad: number;
   daily: { p: string; d: string; s: Stars }[]; texts: CrawlText[]; products: number;
   skuDaily: { p: string; k: string; d: string; s: Stars }[]; skuSpecs: { p: string; k: string; spec: string }[];
+  titles: { p: string; title: string }[];
   zh_col: string | null; reply_zh_col: string | null;
 };
 
@@ -78,6 +79,8 @@ export async function parseCrawlFile(file: File): Promise<CrawlParsed> {
   const seen = new Set<string>();
   const daily = new Map<string, Stars>();
   const skuDaily = new Map<string, Stars>();
+  const titles = new Map<string, string>();
+  const C_TITLE = head.indexOf("商品名称");
   const specCount = new Map<string, Map<string, number>>(); // p|sku → 规格写法 → 次数
   const texts: CrawlText[] = [];
   let inRange = 0, out = 0, dup = 0, bad = 0;
@@ -95,6 +98,8 @@ export async function parseCrawlFile(file: File): Promise<CrawlParsed> {
     const s = daily.get(k) ?? [0, 0, 0, 0, 0];
     s[star - 1]++;
     daily.set(k, s as Stars);
+    const tt = at(r, C_TITLE);
+    if (tt) titles.set(pid, tt);
     const sku = at(r, C.sku);
     if (sku) {
       const kk = `${pid}|${sku}|${d}`;
@@ -128,6 +133,7 @@ export async function parseCrawlFile(file: File): Promise<CrawlParsed> {
     rows_total: inRange + out + dup + bad, rows_in_range: inRange, out_of_range: out, dup, bad,
     daily: dailyRows, texts, products: new Set(dailyRows.map((x) => x.p)).size,
     zh_col: contentZh?.[0] ?? null, reply_zh_col: replyZh?.[0] ?? null,
+    titles: [...titles.entries()].map(([p, title]) => ({ p, title })),
     skuDaily: [...skuDaily.entries()].map(([k, s]) => { const [p, kk, d] = k.split("|"); return { p, k: kk, d, s }; }),
     skuSpecs: [...specCount.entries()].map(([k, m]) => { const [p, kk] = k.split("|"); return { p, k: kk, spec: [...m.entries()].sort((a, b) => b[1] - a[1])[0][0] }; }),
   };

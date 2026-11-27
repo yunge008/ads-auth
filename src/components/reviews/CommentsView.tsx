@@ -3,26 +3,31 @@ import { toast } from "sonner";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { reviewsApi, type ListItem } from "@/lib/reviewsApi";
 import { ReviewItem } from "./ReviewItem";
-import { Help, Pager, STAR_COLORS, useFitRows } from "./shared";
+import { Help, Pager, shortSku, STAR_COLORS, titleMark, useFitRows } from "./shared";
 
-type Props = { sites: string[]; from: string; to: string; q: string; onPick: (pid: string) => void };
+type Props = { active: boolean; sites: string[]; from: string; to: string; q: string; onPick: (pid: string) => void };
 const STAR_OPTS: Record<string, number[]> = { bad: [1, 2], s3: [3], good: [4, 5], all: [] };
 
 /** 评论内容：按时间倒序；默认只看差评（1–2★）；抓取截止日之后接口新增但没有内容的评价显示为占位 */
-export function CommentsView({ sites, from, to, q, onPick }: Props) {
+export function CommentsView({ active, sites, from, to, q, onPick }: Props) {
   const [opt, setOpt] = React.useState("bad");
   const [page, setPage] = React.useState(0);
   const [data, setData] = React.useState<{ total: number; rows: ListItem[] } | null>(null);
   const boxRef = React.useRef<HTMLDivElement>(null);
   const per = useFitRows(boxRef, 92, 70);
   React.useEffect(() => setPage(0), [sites, from, to, q, opt, per]);
+  // 只在本 TAB 可见时取数；同一条件的结果缓存，切回来直接显示；取新数据时保留旧内容
+  const cache = React.useRef(new Map<string, { total: number; rows: ListItem[] }>());
   React.useEffect(() => {
+    if (!active) return;
+    const key = JSON.stringify([sites, from, to, q, opt, per, page]);
+    const hit = cache.current.get(key);
+    if (hit) { setData(hit); return; }
     let stale = false;
-    setData(null);
     reviewsApi.list({ sites, from, to, q }, STAR_OPTS[opt], per, page * per)
-      .then((r) => { if (!stale) setData(r); }).catch((e) => toast.error((e as Error).message));
+      .then((r) => { cache.current.set(key, r); if (!stale) setData(r); }).catch((e) => toast.error((e as Error).message));
     return () => { stale = true; };
-  }, [sites, from, to, q, opt, per, page]);
+  }, [active, sites, from, to, q, opt, per, page]);
   const pages = Math.max(1, Math.ceil((data?.total ?? 0) / per));
 
   return (
@@ -45,7 +50,8 @@ export function CommentsView({ sites, from, to, q, onPick }: Props) {
             <>
               {r.ts?.slice(0, 16).replace("T", " ")} · {r.shop_key} ·{" "}
               <button type="button" className="font-mono underline-offset-2 hover:underline" onClick={() => onPick(r.product_id)}>{r.product_id}</button>
-              {r.sku && <span title={r.sku}> · {r.sku.length > 40 ? `${r.sku.slice(0, 40)}…` : r.sku}</span>}
+              {" · "}<span title={r.sku ?? ""}>{shortSku(r.sku)}</span>
+              {r.title && <span title={r.title}> · {titleMark(r.title)}{r.title.length > 40 ? `${r.title.slice(0, 40)}…` : r.title}</span>}
               {r.order_id && <> · 订单 {r.order_id}</>}
             </>
           );
