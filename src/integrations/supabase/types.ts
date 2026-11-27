@@ -1119,6 +1119,132 @@ export type Database = {
         }
         Relationships: []
       }
+      co_daily: {
+        Row: {
+          advertiser_id: number
+          clicks: number
+          cost_c: number
+          country: string
+          gmv_c: number
+          imps: number
+          orders: number
+          spu: number
+          stat_date: string
+          vid: number
+        }
+        Insert: {
+          advertiser_id: number
+          clicks?: number
+          cost_c?: number
+          country: string
+          gmv_c?: number
+          imps?: number
+          orders?: number
+          spu: number
+          stat_date: string
+          vid: number
+        }
+        Update: {
+          advertiser_id?: number
+          clicks?: number
+          cost_c?: number
+          country?: string
+          gmv_c?: number
+          imps?: number
+          orders?: number
+          spu?: number
+          stat_date?: string
+          vid?: number
+        }
+        Relationships: []
+      }
+      co_settings: {
+        Row: {
+          id: number
+          own_kw: string
+          t_cr: number
+          t_vid: number
+          updated_at: string | null
+        }
+        Insert: {
+          id?: number
+          own_kw?: string
+          t_cr?: number
+          t_vid?: number
+          updated_at?: string | null
+        }
+        Update: {
+          id?: number
+          own_kw?: string
+          t_cr?: number
+          t_vid?: number
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      co_state: {
+        Row: {
+          advertiser_id: number
+          advertiser_name: string | null
+          country: string | null
+          currency: string | null
+          last_error: string | null
+          last_ok_at: string | null
+          last_rows: number | null
+          last_run_at: string | null
+        }
+        Insert: {
+          advertiser_id: number
+          advertiser_name?: string | null
+          country?: string | null
+          currency?: string | null
+          last_error?: string | null
+          last_ok_at?: string | null
+          last_rows?: number | null
+          last_run_at?: string | null
+        }
+        Update: {
+          advertiser_id?: number
+          advertiser_name?: string | null
+          country?: string | null
+          currency?: string | null
+          last_error?: string | null
+          last_ok_at?: string | null
+          last_rows?: number | null
+          last_run_at?: string | null
+        }
+        Relationships: []
+      }
+      co_vid: {
+        Row: {
+          author_type: string | null
+          checked_at: string | null
+          country: string | null
+          handle: string | null
+          nickname: string | null
+          posted_local: string | null
+          vid: number
+        }
+        Insert: {
+          author_type?: string | null
+          checked_at?: string | null
+          country?: string | null
+          handle?: string | null
+          nickname?: string | null
+          posted_local?: string | null
+          vid: number
+        }
+        Update: {
+          author_type?: string | null
+          checked_at?: string | null
+          country?: string | null
+          handle?: string | null
+          nickname?: string | null
+          posted_local?: string | null
+          vid?: number
+        }
+        Relationships: []
+      }
       connection_material_registry: {
         Row: {
           auth_code: string | null
@@ -2352,6 +2478,7 @@ export type Database = {
           product_id: string
           seller_sku: string | null
           shop_key: string
+          title: string | null
           updated_at: string
         }
         Insert: {
@@ -2360,6 +2487,7 @@ export type Database = {
           product_id: string
           seller_sku?: string | null
           shop_key: string
+          title?: string | null
           updated_at?: string
         }
         Update: {
@@ -2368,6 +2496,7 @@ export type Database = {
           product_id?: string
           seller_sku?: string | null
           shop_key?: string
+          title?: string | null
           updated_at?: string
         }
         Relationships: []
@@ -4054,6 +4183,20 @@ export type Database = {
       attribution_write_run_keys: {
         Args: { _rows: Json; _run_id: string }
         Returns: number
+      }
+      co_query: {
+        Args: { p_countries: string[]; p_end: string; p_start: string }
+        Returns: {
+          clicks: number
+          cost_c: number
+          country: string
+          days: Json
+          gmv_c: number
+          imps: number
+          orders: number
+          spu: string
+          vid: string
+        }[]
       }
       db_size_bytes: { Args: never; Returns: number }
       get_gmv_cron_secret: { Args: never; Returns: string }
