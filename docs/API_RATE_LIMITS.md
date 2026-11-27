@@ -87,6 +87,10 @@
 | `/analytics/202609/shop_videos/batch_performance` | 达人出单补名、`gmv-max-material` | 同上 | 每 100 个 VID 1 次 | 同上 ⚠️ |
 | `/analytics/202409/shop_videos/performance` | `gmv-max-material` | 手动 | 少量 | 低 |
 | `/analytics/202509/shop_videos/{x}/performance` | `gmv-max-material` | 手动 | 每 VID 1 次 | 2.8/s 上限（ttsCall 不适用，Node 版） |
+| `/customer_service/202309/conversations` | `tts-p0-probe` cs_probe（客服只读实测） | 手动 | 每店 ≤20 页×20 | 低 |
+| `/customer_service/202309/conversations/{x}/messages` | `tts-p0-probe` cs_probe | 手动 | 每店 ≤10 次 | 低 |
+| `/customer_service/202309/agents/settings` | `tts-p0-probe` cs_probe（路径未核验） | 手动 | 每店 1 次 | 低 |
+| `/customer_service/202407/performance` | `tts-p0-probe` cs_probe（路径未核验） | 手动 | 每店 1 次 | 低 |
 | `/order/202309/orders/search` | `tts-export`（每日入库）、`sea-inventory`、`tts-p0-probe` | `tts-daily-sync` 每天 3 次，新加坡 07:00/14:00/20:00 前完成（PH、TH）；SEA 库存每日 2 次 | 每页 100 单 | ≈2.8/s |
 | `/order/202309/orders` | `tts-export` | 同上 | 每 50 单 1 次 | ≈2.8/s |
 | `/finance/202309/statements` | `tts-export` | 同上 | 每店每天数页 | ≈2.8/s |

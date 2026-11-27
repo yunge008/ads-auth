@@ -21,7 +21,10 @@
 //   recon    {shop_id, kind:"orders", date:"YYYY-MM-DD"} 按店铺本地日拉全部订单（自动翻页，紧凑行）
 //            {shop_id, kind:"statement", statement_id}   按结算单拉逐单结算交易（自动翻页，紧凑行）
 //   raw      {shop_id, method, path, query?, body?}  单接口调用（补测用），path 限 /affiliate_seller/ /authorization/
-//            /product/ /analytics/ /order/ /finance/ /promotion/
+//            /product/ /analytics/ /order/ /finance/ /promotion/ /return_refund/ /logistics/ /fulfillment/ /customer_service/
+//   cs_probe {regions?=["PH","TH"], shop_ids?, max_pages?=5, conv_limit?=3, msg_limit?=20}
+//            只读：买家客服会话 + 来回消息（全部 GET，不发消息、不标已读）。返回店铺客服相关权限、会话分页深度
+//            （最早/最新会话时间）、前 conv_limit 个会话的消息、首个对象的字段名，用于确认能否做客服分析。
 //
 // 读写闸门（_shared/tts.ts ttsAccessCheck，2026-11-16 负责人规定）：所有 TTS 调用默认只读；
 // 写接口目前只放行「定向计划新建 / 修改」。生成邀请链接、建会话、发私信、标记已读、冲突处理等写接口
@@ -276,6 +279,102 @@ async function resolveHandle(shop: Shop, handle: string) {
     })),
     api: step("search_creator", r, null),
   };
+}
+
+// ── 客服只读探测（2026-11-27，路径按 Partner Center Customer Service 202309 记忆填写，⚠️ 以实测返回为准）──
+const CS_CONV = "/customer_service/202309/conversations";
+const csText = (v: unknown) => {
+  const s = typeof v === "string" ? v : JSON.stringify(v ?? "");
+  return s.length > 300 ? s.slice(0, 300) + "…" : s;
+};
+const csTs = (v: unknown) => {
+  const n = Number(v);
+  if (!n) return null;
+  return new Date((n > 1e12 ? n : n * 1000)).toISOString();
+};
+const keysOf = (o: unknown) => (o && typeof o === "object" ? Object.keys(o as object) : null);
+
+async function actionCsProbe(b: Record<string, unknown>) {
+  const shopIds = Array.isArray(b.shop_ids) ? (b.shop_ids as unknown[]).map(String) : [];
+  const regions = Array.isArray(b.regions) ? (b.regions as unknown[]).map((r) => String(r).toUpperCase()) : ["PH", "TH"];
+  const maxPages = Math.min(Math.max(Number(b.max_pages ?? 5) || 5, 1), 20);
+  const convLimit = Math.min(Math.max(Number(b.conv_limit ?? 3) || 3, 0), 10);
+  const msgLimit = Math.min(Math.max(Number(b.msg_limit ?? 20) || 20, 1), 50);
+  let q = admin().from("tts_shops").select("*");
+  q = shopIds.length ? q.in("shop_id", shopIds) : q.in("region", regions);
+  const { data, error } = await q;
+  if (error) throw error;
+  const shops = (data ?? []) as Shop[];
+  if (!shops.length) bad(`没有匹配的已授权店铺（regions=${regions.join(",")} shop_ids=${shopIds.join(",")}）`);
+  const out = [];
+  for (const shop of shops) {
+    const T = { accessToken: shop.access_token, shopCipher: shop.shop_cipher };
+    const res: Record<string, unknown> = {
+      shop_id: shop.shop_id, shop_name: shop.shop_name, region: shop.region, app_code: shop.app_code ?? null,
+      cs_scopes: (shop.scopes ?? []).filter((s) => /custom|service|\bim\b|message|chat/i.test(s)),
+      all_scopes: shop.scopes ?? [],
+    };
+    // 1) 会话分页：最多 maxPages 页 × 20
+    const convs: Record<string, unknown>[] = [];
+    const pages: unknown[] = [];
+    let token = "";
+    for (let i = 0; i < maxPages; i++) {
+      const query: Record<string, string> = { page_size: "20", locale: "en" };
+      if (token) query.page_token = token;
+      const r = await ttsCall<{ conversations?: Record<string, unknown>[]; next_page_token?: string }>({ ...T, method: "GET", path: CS_CONV, query });
+      const d = (r.data ?? {}) as { conversations?: Record<string, unknown>[]; next_page_token?: string };
+      pages.push({ page: i + 1, ...step("conversations", r, { n: d.conversations?.length ?? 0, next_page_token: d.next_page_token ?? null, data_keys: keysOf(r.data) }) });
+      if (r.code !== 0) break;
+      convs.push(...(d.conversations ?? []));
+      token = d.next_page_token ?? "";
+      if (!token) break;
+    }
+    const times = convs.map((c) => Number(c.create_time ?? (c.latest_message as Record<string, unknown> | undefined)?.create_time ?? 0)).filter(Boolean);
+    res.conversations = {
+      pages,
+      fetched: convs.length,
+      more_pages: !!token,
+      create_time_min: times.length ? csTs(Math.min(...times)) : null,
+      create_time_max: times.length ? csTs(Math.max(...times)) : null,
+      first_conversation_keys: keysOf(convs[0]),
+      first_conversation_raw: convs[0] ?? null,
+      list: convs.map((c) => ({
+        id: c.id, create_time: csTs(c.create_time), unread_count: c.unread_count, can_send_message: c.can_send_message,
+        participants: (c.participants as Record<string, unknown>[] | undefined)?.map((p) => ({ role: p.role, nickname: p.nickname, user_id: p.user_id, im_user_id: p.im_user_id, buyer_platform: p.buyer_platform })),
+        latest: c.latest_message ? { type: (c.latest_message as Record<string, unknown>).type, time: csTs((c.latest_message as Record<string, unknown>).create_time), sender_role: ((c.latest_message as Record<string, unknown>).sender as Record<string, unknown> | undefined)?.role } : null,
+      })),
+    };
+    // 2) 前 convLimit 个会话的消息
+    const msgs = [];
+    for (const c of convs.slice(0, convLimit)) {
+      const r = await ttsCall<{ messages?: Record<string, unknown>[]; next_page_token?: string }>({
+        ...T, method: "GET", path: `${CS_CONV}/${encodeURIComponent(String(c.id))}/messages`,
+        query: { page_size: String(msgLimit), locale: "en" },
+      });
+      const d = (r.data ?? {}) as { messages?: Record<string, unknown>[]; next_page_token?: string };
+      msgs.push(step("messages", r, {
+        conversation_id: c.id,
+        n: d.messages?.length ?? 0,
+        next_page_token: d.next_page_token ?? null,
+        first_message_keys: keysOf(d.messages?.[0]),
+        first_message_raw: d.messages?.[0] ?? null,
+        rows: (d.messages ?? []).map((m) => {
+          const s = (m.sender ?? {}) as Record<string, unknown>;
+          return { time: csTs(m.create_time), type: m.type, sender_role: s.role, sender_nickname: s.nickname, sender_im_user_id: s.im_user_id, content: csText(m.content) };
+        }),
+      }));
+    }
+    res.messages = msgs;
+    // 3) 附加只读探测（路径未核验，失败只记录）
+    const extra = [];
+    for (const path of ["/customer_service/202309/agents/settings", "/customer_service/202407/performance"]) {
+      const r = await ttsCall({ ...T, method: "GET", path, query: {} });
+      extra.push(step("extra", r));
+    }
+    res.extra = extra;
+    out.push(res);
+  }
+  return { shops: out };
 }
 
 async function actionRead(shop: Shop, handles: string[]) {
@@ -984,13 +1083,14 @@ Deno.serve(async (req) => {
       if (kind === "statement") return json(await reconStatement(shop, b));
       bad("recon 的 kind 只能是 orders（按下单日拉订单）或 statement（按结算单 ID 拉逐单结算）");
     }
+    if (action === "cs_probe") return json(await actionCsProbe(b));
     if (action === "raw") {
       const shop = await loadShop(b.shop_id);
       const path = String(b.path ?? "");
       const method = String(b.method ?? "GET").toUpperCase() as "GET" | "POST" | "PUT" | "DELETE";
       if (!["GET", "POST", "PUT", "DELETE"].includes(method)) bad("method 只能是 GET/POST/PUT/DELETE");
-      if (!/^\/(affiliate_seller|authorization|product|analytics|order|finance|promotion|return_refund|logistics|fulfillment)\//.test(path)) {
-        bad("raw 只允许 /affiliate_seller/ /authorization/ /product/ /analytics/ /order/ /finance/ /promotion/ /return_refund/ /logistics/ /fulfillment/ 开头的 path");
+      if (!/^\/(affiliate_seller|authorization|product|analytics|order|finance|promotion|return_refund|logistics|fulfillment|customer_service)\//.test(path)) {
+        bad("raw 只允许 /affiliate_seller/ /authorization/ /product/ /analytics/ /order/ /finance/ /promotion/ /return_refund/ /logistics/ /fulfillment/ /customer_service/ 开头的 path");
       }
       // 读写由 _shared/tts.ts 的只读闸门统一判断：写接口（除定向计划新建/修改）一律拦截
       const r = await ttsCall({
@@ -1004,7 +1104,7 @@ Deno.serve(async (req) => {
       });
       return json(step("raw", r));
     }
-    bad("action 只能是 apps / save_app / refresh_due / auth_url / exchange / shops / refresh / read / write / add_to_tc / name_probe / check2 / recon / raw");
+    bad("action 只能是 apps / save_app / refresh_due / auth_url / exchange / shops / refresh / read / write / add_to_tc / name_probe / check2 / recon / cs_probe / raw");
   } catch (error) {
     const status = (error as Error & { status?: number }).status ?? 400;
     return json({ error: (error as Error).message }, status);
