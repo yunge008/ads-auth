@@ -163,7 +163,8 @@
 2. **上传表 product_id = N/A / NULL 的行**（VN 6～8 月合计 1.20、JP 8 月 0.92，GMV、订单均为 0）：接口只计入 campaign 合计、拆不到商品/VID。1125.289 起报告把「campaign 合计 − 明细合计」补成「无商品ID 残差」行与之对应（残差里也含第 1 条被舍掉的小额）。
 3. **金额差的 8 个键**：GMV 差 0.01（VN 06、08 各 1 个，逐行舍入）；VN 08 商品卡 6 个键花费合计差 0.06（两户同商品合并后的舍入）。
 4. **接口 campaign 合计比上传表多 0.48～0.87**（VN 三个月；JP 为 0）：原因**未核验**（猜测是导出逐行截断到 3 位小数，接口按精确值汇总）。
-5. **字段缺失（阻断切换）**：接口实际只返回 `cost / orders / gross_revenue / product_impressions / product_clicks / currency` 6 个金额字段；`tt_account_name`、`shop_content_type`、`tt_account_authorization_type` 已被接口判为无效（旧同步能取到，现在不能），`title` 与发布时间也没有。→ 金额可以用接口；**达人账号名、发布时间、内容类型必须另找来源**，否则「BD-账号」归因路径和站点交接按发布日期切分都没法用接口数据跑。内容类型 1125.289 起按 `item_id=-1`→商品卡、其余→视频推断（VN 6 月 399/399 商品卡键一致；直播形态未见过）。
+5. **上轮错误更正（1127.331，负责人贴官方文档）**：下述「已被接口判为无效」不是接口不再返回，而是请求写法不对——属性指标需过滤单个 campaign_id + 单个 item_group_id 且只用一个 ID 维度（如 `["item_id","stat_time_day"]`）。见 `docs/CREATOR_ORDERS_PLAN.md` §3.1。
+   **字段缺失（阻断切换）**：接口实际只返回 `cost / orders / gross_revenue / product_impressions / product_clicks / currency` 6 个金额字段；`tt_account_name`、`shop_content_type`、`tt_account_authorization_type` 已被接口判为无效（旧同步能取到，现在不能），`title` 与发布时间也没有。→ 金额可以用接口；**达人账号名、发布时间、内容类型必须另找来源**，否则「BD-账号」归因路径和站点交接按发布日期切分都没法用接口数据跑。内容类型 1125.289 起按 `item_id=-1`→商品卡、其余→视频推断（VN 6 月 399/399 商品卡键一致；直播形态未见过）。
 6. `/gmv_max/video/get/` 文档（负责人提供截图）：返回 `item_id / text / spu_id_list / identity_info.display_name / video_info`，**没有发布时间字段**（只能 `sort_field=POST_TIME` 排序）；`display_name` 可能能补达人名，范围是否覆盖联盟达人视频未核验 → 探测按钮会取一页原样。
 
 7. 负责人 2026-11-25 提供的外部资料称 TikTok Shop `/analytics/202609/shop_videos/batch_performance`（2026-09 新版）返回 `video.video_post_time`（Unix 秒）与 `video.username`，一次 ≤500 个 VID、日期区间 ≤60 天 —— **未核验**，1125.290 已加入 ⏱ 探测（`video_ids` 按 JSON 数组、逗号分隔两种传法各试一次）。资料首推的「VID 反推」不采用为首选：上文实测 VID 时间戳是创建时间，定时发布会晚 1～14 天（按分卷时区日期一致 90.6%～99.4%）；最多作兜底并标来源。第三方 TikAPI（要外部密钥、数据外发）与 Display API（要逐个达人授权）不考虑。

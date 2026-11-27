@@ -52,7 +52,8 @@
 负责人更正：GMV Max 报表的订单是全局的，含自然流量订单（上一版 §3 表里「只有广告带来的那部分」**说错了，以负责人为准**）。
 
 - **SKU：拿不到（文档确认）**。`/gmv_max/report/get/` 的维度只有 `advertiser_id / campaign_id / stat_time_day / stat_time_hour / item_group_id（商品 SPU）/ item_id（素材）/ room_id / duration`，没有 SKU 维度（来源：Go SDK `bububa/tiktok-business` 对官方文档的镜像；官方页是前端渲染，抓不到正文）。
-- **达人名：文档有，实测没取到，原因待验证**。文档指标里有 `tt_account_name`（账号名）、`tt_account_profile_image_url`、`tt_account_authorization_type`、`shop_content_type`、`title`、`identity_id`。2026-11-25 素材抓取用维度 `campaign_id + item_group_id + item_id` 请求时这些都被判为无效；但旧同步第 3 阶段用维度 `item_id` 单独 + 过滤 campaign_ids/item_group_ids 时取到过（2026-10-12 清库，现无存量可查）。→ 1127.331 加一次性探测，对同一系列/商品按 3 种维度组合各请求一次、逐字段单独请求，原文存库。🔧 负责人：归因管理 → 接口对账 → 站点填 `VN, PH`（可多个）→ 点 ⏱。
+- **达人名：能取，原因已查明（官方文档，负责人 2026-11-27 贴原文）**。`tt_account_name`（账号名）、`tt_account_authorization_type`（TTS_TT 官号 / AFFILIATE 联盟 / TT_USER / BC_AUTH_TT / AUTH_CODE）、`shop_content_type`（VIDEO / PRODUCT_CARD）、`title` 属于「属性指标」，只有在 **过滤单个 campaign_id + 单个 item_group_id、维度里只有一个 ID 维度**（如 `["item_id","stat_time_day"]`）时才返回；多 ID 维度或一次过滤多个商品就拿不到。2026-11-25 抓取用了 `[campaign_id,item_group_id,item_id]` + 一次 100 个商品，所以被判无效（**上轮结论「接口已不返回」是错的，是请求写法问题**）。⚠️ 文档注明：token 对该 TikTok 账号无权限时账号名返回 0 或 -1，联盟达人覆盖率需实测。代价：每个「系列 × 商品」单独请求一次。1127.331 探测已按文档写法改（4 种写法对比 + 逐字段），🔧 负责人点 ⏱ 后 Claude 读结果。
+- **GMV Max 订单含自然流量**：文档写明 orders / gross_revenue 为 "paid and organic"（与负责人一致）。
 - **兜底（都已实测可用，不依赖上面的探测）**：
   - 达人名：按 VID 关联联盟订单的 `creator_username`（实时；TAP 行为空）或视频分析 `username`（次日；batch_performance 9 站覆盖 100%）。
   - SKU：按 VID 关联联盟订单（`content_id` = VID，带 `sku_id / seller_sku / quantity / price`），把该 VID 在 GMV Max 的订单/GMV 按联盟订单的 SKU 占比拆分。⚠️ 官号素材不走联盟，只能到商品级。

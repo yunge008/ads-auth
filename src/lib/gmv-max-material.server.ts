@@ -1388,7 +1388,7 @@ export async function probeBatchPerformance(
 }
 
 // ───────────────────────── 一次性：GMV Max 报表素材字段探测（1127.331） ─────────────────────────
-// 背景：素材抓取用维度 [campaign_id, item_group_id, item_id] 时，tt_account_name / shop_content_type /
+// 背景：素材抓取用维度 [campaign_id, item_group_id, item_id]（且一次过滤多个商品）时，tt_account_name / shop_content_type /
 // tt_account_authorization_type / title 被接口判为 Invalid metric；旧同步第 3 阶段用维度 [item_id]
 // + 过滤 campaign_ids & item_group_ids 时能取到。这里对同一个广告户/系列/商品，按 3 种维度组合各请求一次，
 // 并对 [item_id] 逐个字段单独请求，原始返回（前 3 行）与报错原文存库，供 Claude 读取。只读，不写业务表。
@@ -1456,13 +1456,17 @@ export async function probeCreativeFields(db: SupabaseClient, country: string) {
   const { token, adv, shop, cid, igid } = picked;
   out.picked = { advertiser_id: adv, advertiser_name: picked.name, campaign_id: cid, item_group_id: igid };
   const f = { campaign_ids: [cid], item_group_ids: [igid] };
+  // 官方文档（负责人 2026-11-27 贴）：属性指标（tt_account_name 等）只在「过滤单个 campaign_id + 单个 item_group_id、
+  // 维度里只有一个 ID 维度」时返回；多 ID 维度或多 ID 过滤拿不到。素材级支持的维度组合：
+  // [campaign_id,item_group_id,item_id](+stat_time_day)、[item_id,stat_time_day]；旧写法 [item_id] 需 creative_types（将废弃）。
   out.variants = {
-    item_id_only: await call(token, adv, shop, ["item_id"], f, [...BASE, ...EXTRA]),
     item_id_day: await call(token, adv, shop, ["item_id", "stat_time_day"], f, [...BASE, ...EXTRA]),
+    item_id_ads_organic: await call(token, adv, shop, ["item_id"], { ...f, creative_types: ["ADS_AND_ORGANIC"] }, [...BASE, ...EXTRA]),
+    item_id_only: await call(token, adv, shop, ["item_id"], f, [...BASE, ...EXTRA]),
     cid_igid_item: await call(token, adv, shop, ["campaign_id", "item_group_id", "item_id"], f, [...BASE, ...EXTRA]),
   };
   const single: Record<string, unknown> = {};
-  for (const m of EXTRA) single[m] = await call(token, adv, shop, ["item_id"], f, [...BASE, m]);
+  for (const m of EXTRA) single[m] = await call(token, adv, shop, ["item_id", "stat_time_day"], f, [...BASE, m]);
   out.single_item_id = single;
   const { data: b, error: e2 } = await db
     .from("gmv_max_material_batches")
