@@ -46,10 +46,11 @@ export function CommentsView({ ver, active, sites, from, to, q, onPick }: Props)
       </button>
     </TableHead>
   );
-  const two = (a: string | null, b: string | null) => (
-    <div className="min-w-0" title={[a, b].filter(Boolean).join("\n")}>
-      {a ? <div className="line-clamp-2 break-words">{a}</div> : <span className="text-muted-foreground">—</span>}
-      {b && <div className="line-clamp-1 break-words text-xs text-muted-foreground">{b}</div>}
+  // 评论原文 + 译文完整显示，行高随内容撑开（最小高度 40px）；回复在本行高度内能显示多少显示多少
+  const two = (a: string | null, b: string | null, clamp: boolean) => (
+    <div className="min-w-0" title={clamp ? [a, b].filter(Boolean).join("\n") : undefined}>
+      {a ? <div className={`break-words ${clamp ? "line-clamp-2" : "whitespace-pre-wrap"}`}>{a}</div> : <span className="text-muted-foreground">—</span>}
+      {b && <div className={`break-words text-xs text-muted-foreground ${clamp ? "line-clamp-1" : "whitespace-pre-wrap"}`}>{b}</div>}
     </div>
   );
 
@@ -94,15 +95,22 @@ export function CommentsView({ ver, active, sites, from, to, q, onPick }: Props)
                   <div>{r.kind === "gap" && r.init ? "首次同步前" : r.ts?.slice(0, 10)}</div>
                   <div className="text-muted-foreground">{r.kind === "gap" ? "" : `${r.ts?.slice(11, 16)} · `}{r.shop_key}</div>
                 </TableCell>
-                <TableCell>
-                  <button type="button" className="w-full text-left hover:underline" onClick={() => onPick(r.product_id)}>
+                <TableCell className="overflow-hidden" title={r.spec ? `规格：${r.spec}` : undefined}>
+                  <button type="button" className="w-full min-w-0 text-left hover:underline" onClick={() => onPick(r.product_id)}>
                     <ListingLabel sku={r.sku} title={r.title} pid={r.product_id} showPid={false} />
                   </button>
                   {r.order_id && <div className="truncate font-mono text-[11px] text-muted-foreground" title={`订单 ${r.order_id}`}>{r.order_id}</div>}
                 </TableCell>
                 <TableCell className="font-semibold tabular-nums" style={{ color: STAR_COLORS[r.star - 1] }}>{r.star}★{r.kind === "gap" && r.cnt > 1 && <span className="ml-0.5 text-xs font-normal">×{r.cnt}</span>}</TableCell>
-                <TableCell>{r.kind === "gap" ? <span className="text-muted-foreground">待导入评论</span> : two(r.content, r.content_zh)}</TableCell>
-                <TableCell>{two(r.reply, r.reply_zh)}</TableCell>
+                <TableCell><div className="min-h-[40px]">{r.kind === "gap" ? <span className="text-muted-foreground">待导入评论</span> : two(r.content, r.content_zh, false)}</div></TableCell>
+                {/* 回复不撑行高：铺满本行已有高度，超出截断，悬停看全文 */}
+                <TableCell className="relative p-0">
+                  <div className="absolute inset-0 overflow-hidden p-2 [mask-image:linear-gradient(to_bottom,black_80%,transparent)]"
+                    title={[r.reply, r.reply_zh].filter(Boolean).join("\n") || undefined}>
+                    {r.reply ? <div className="break-words">{r.reply}</div> : <span className="text-muted-foreground">—</span>}
+                    {r.reply_zh && <div className="break-words text-xs text-muted-foreground">{r.reply_zh}</div>}
+                  </div>
+                </TableCell>
                 <TableCell><Thumbs imgs={r.imgs} count={r.img_count} max={3} size={36} /></TableCell>
               </TableRow>
             ))}

@@ -47,3 +47,4 @@ git show <提交号>:supabase/migrations/<文件名>
 | 2026-11-27 | `20261126200000_review_bf_reset.sql` | `3386a2a` | 评论查看：重置 TH、VN 出单回补（负责人执行） |
 | 2026-11-27 | `20261126220000_review_list.sql` | `3386a2a` | 评论查看：评论内容 TAB：review_texts.imgs、review_list（负责人执行） |
 | 2026-11-27 | `20261127210000_review_titles.sql` | `08d881f` | 评论查看：review_products.title，查询带名称（负责人执行） |
+| 2026-11-27 | `20261127250000_review_list_only_content.sql` | `069205a` | 评论内容「只看有评价内容」（负责人执行；取代未执行的 20261127240000） |

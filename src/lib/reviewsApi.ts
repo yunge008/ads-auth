@@ -14,7 +14,7 @@ export type ReviewText = {
 };
 /** 评论内容 TAB 的一行：text = 有内容的评价；gap = 抓取截止日之后接口新增、待导入的评价（按 日期 × 链接 × 星级，cnt = 条数）*/
 export type ListItem = {
-  kind: "text" | "gap"; review_id: string | null; ts: string; shop_key: string; product_id: string; sku: string | null; title: string | null;
+  kind: "text" | "gap"; review_id: string | null; ts: string; shop_key: string; product_id: string; sku: string | null; spec?: string | null; title: string | null;
   star: number; cnt: number; init: boolean;
   content: string | null; content_zh: string | null; reply: string | null; reply_zh: string | null; order_id: string | null;
   img_count: number; imgs: [string, string][] | null;
