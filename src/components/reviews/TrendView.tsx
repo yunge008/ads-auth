@@ -1,10 +1,14 @@
 import * as React from "react";
-import { Bar, CartesianGrid, ComposedChart, Legend, Line, LineChart, ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis } from "recharts";
+import { Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis } from "recharts";
 import { Card, CardContent } from "@/components/ui/card";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { addS, avgS, sumS, ZERO, type ReviewText, type Series, type Stars } from "@/lib/reviewsApi";
 import { addDays, f2, Help, pct, STAR_COLORS } from "./shared";
 import { ReviewItem } from "./ReviewItem";
+
+// 两张图共用：边距与左右轴宽一致 → 同一日期上下对齐
+const MARGIN = { top: 4, right: 0, left: 0, bottom: 0 };
+const AXIS_L = 44, AXIS_R = 44;
 
 type Props = { series: Series | null; from: string; to: string; texts: ReviewText[] | null; onStars: (s: number[]) => void; stars: number[] };
 
@@ -45,12 +49,18 @@ export function TrendView({ series, from, to, texts, onStars, stars }: Props) {
     { label: "差评率", help: ["1–2 星条数 ÷ 区间评价数"], v: pct(bad), d: diff(bad, pbad), fmt: (x: number) => `${(x * 100).toFixed(1)}pp`, good: false },
   ];
   const cumVals = calc.rows.map((r) => r.cumAvg).filter((v): v is number => v != null);
-  // 纵轴贴着数据走，小变化也看得出：上下各留 25% 余量，最少 ±0.005
+  // 纵轴贴着数据走：上下各留 25% 余量，上下限差最少 0.1 分，刻度取整到 0.02/0.05/0.1/0.2/0.5/1
   const cMin = cumVals.length ? Math.min(...cumVals) : 4, cMax = cumVals.length ? Math.max(...cumVals) : 5;
-  const pad = Math.max(0.005, (cMax - cMin) * 0.25);
-  const lo = Math.max(1, Math.floor((cMin - pad) * 1000) / 1000);
-  const hi = Math.min(5, Math.ceil((cMax + pad) * 1000) / 1000);
-  const cumDigits = hi - lo < 0.1 ? 3 : 2;
+  const pad = (cMax - cMin) * 0.25;
+  let lo = cMin - pad, hi = cMax + pad;
+  if (hi - lo < 0.1) { const m = (lo + hi) / 2; lo = m - 0.05; hi = m + 0.05; }
+  const step = [0.02, 0.05, 0.1, 0.2, 0.5, 1].find((x) => (hi - lo) / x <= 6) ?? 1;
+  lo = Math.max(1, Math.floor(lo / step + 1e-9) * step);
+  hi = Math.min(5, Math.ceil(hi / step - 1e-9) * step);
+  if (hi - lo < 0.1) { if (lo <= 1) hi = lo + 0.1; else lo = hi - 0.1; }
+  const cumTicks: number[] = [];
+  for (let v = lo; v <= hi + 1e-9; v += step) cumTicks.push(Math.round(v * 1000) / 1000);
+  const cumDigits = step < 0.1 ? 2 : 1;
   // 差评率右轴：默认 3% 封顶，超过时按最大值向上取整
   const badMax = Math.max(3, Math.ceil(Math.max(0, ...calc.rows.map((r) => (r.bad ?? 0) * 100))));
   const maxN = Math.max(1, ...calc.rows.map((r) => r.n));
@@ -79,14 +89,16 @@ export function TrendView({ series, from, to, texts, onStars, stars }: Props) {
         </div>
         <div className="h-60">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={calc.rows} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
+            <ComposedChart data={calc.rows} margin={MARGIN}>
               <CartesianGrid vertical={false} stroke="var(--border)" />
-              <XAxis dataKey="d" tick={tick} tickLine={false} axisLine={false} minTickGap={40} />
+              <XAxis dataKey="d" scale="band" tick={tick} tickLine={false} axisLine={false} minTickGap={40} />
               {mode === "cum" ? (
-                <YAxis domain={[lo, hi]} tick={tick} tickLine={false} axisLine={false} tickFormatter={(v) => Number(v).toFixed(cumDigits)} width={52} />
+                <YAxis domain={[lo, hi]} ticks={cumTicks} allowDataOverflow tick={tick} tickLine={false} axisLine={false} tickFormatter={(v) => Number(v).toFixed(cumDigits)} width={AXIS_L} />
               ) : (
-                <YAxis domain={[1, 5]} ticks={[1, 2, 3, 4, 5]} tick={tick} tickLine={false} axisLine={false} />
+                <YAxis domain={[1, 5]} ticks={[1, 2, 3, 4, 5]} tick={tick} tickLine={false} axisLine={false} width={AXIS_L} />
               )}
+              {/* 占位右轴：与下图差评率轴同宽，保证两图同一日期上下对齐 */}
+              <YAxis yAxisId="pad" orientation="right" width={AXIS_R} tick={false} tickLine={false} axisLine={false} />
               <RTooltip formatter={(v: number, _k, p) => (mode === "cum" ? [Number(v).toFixed(3), "累计平均分"] : [`${f2(v)} · ${(p.payload as { n: number }).n} 条`, "当日平均分"])} labelClassName="text-xs" contentStyle={{ fontSize: 12 }} />
               {mode === "cum" ? (
                 <Line dataKey="cumAvg" stroke="#2563eb" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
@@ -98,7 +110,7 @@ export function TrendView({ series, from, to, texts, onStars, stars }: Props) {
                     return <circle key={p.index} cx={p.cx} cy={p.cy} r={2 + 5 * Math.sqrt(p.payload.n / maxN)} fill={STAR_COLORS[v >= 4.5 ? 4 : v >= 4 ? 3 : v >= 3 ? 2 : 0]} />;
                   }} />
               )}
-            </LineChart>
+            </ComposedChart>
           </ResponsiveContainer>
         </div>
       </CardContent></Card>
@@ -110,11 +122,11 @@ export function TrendView({ series, from, to, texts, onStars, stars }: Props) {
         </div>
         <div className="h-56">
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={calc.rows.map((r) => ({ d: r.d, s5: r.s[4], s4: r.s[3], s3: r.s[2], s2: r.s[1], s1: r.s[0], bad: r.bad == null ? null : r.bad * 100 }))} margin={{ top: 4, right: 0, left: -12, bottom: 0 }}>
+            <ComposedChart data={calc.rows.map((r) => ({ d: r.d, s5: r.s[4], s4: r.s[3], s3: r.s[2], s2: r.s[1], s1: r.s[0], bad: r.bad == null ? null : r.bad * 100 }))} margin={MARGIN}>
               <CartesianGrid vertical={false} stroke="var(--border)" />
-              <XAxis dataKey="d" tick={tick} tickLine={false} axisLine={false} minTickGap={40} />
-              <YAxis yAxisId="n" allowDecimals={false} tick={tick} tickLine={false} axisLine={false} />
-              <YAxis yAxisId="r" orientation="right" domain={[0, badMax]} allowDataOverflow tick={tick} tickLine={false} axisLine={false} tickFormatter={(v) => `${Number(v).toFixed(badMax < 10 ? 1 : 0)}%`} />
+              <XAxis dataKey="d" scale="band" tick={tick} tickLine={false} axisLine={false} minTickGap={40} />
+              <YAxis yAxisId="n" allowDecimals={false} tick={tick} tickLine={false} axisLine={false} width={AXIS_L} />
+              <YAxis yAxisId="r" orientation="right" width={AXIS_R} domain={[0, badMax]} allowDataOverflow tick={tick} tickLine={false} axisLine={false} tickFormatter={(v) => `${Number(v).toFixed(badMax < 10 ? 1 : 0)}%`} />
               <RTooltip contentStyle={{ fontSize: 12 }} formatter={(v: number, k: string) => (k === "差评率" ? [`${Number(v).toFixed(1)}%`, k] : [v, k])} />
               <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
               {[5, 4, 3, 2, 1].map((s) => <Bar key={s} yAxisId="n" dataKey={`s${s}`} name={`${s}★`} stackId="a" fill={STAR_COLORS[s - 1]} isAnimationActive={false} />)}

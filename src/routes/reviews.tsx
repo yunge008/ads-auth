@@ -81,8 +81,14 @@ function ReviewsPage() {
     return () => { stale = true; };
   }, [single?.pid, from, to, stars, ver]);
 
-  const pickListing = (pid: string) => { setQ(pid); setQDeb(pid); setTab("trend"); window.scrollTo({ top: 0 }); };
-  const preset = PRESETS.find((p) => to === yesterday() && daysBetween(from, to) + 1 === p);
+  // 跳转到某个链接时站点重置为全部，避免当前站点筛选把它筛掉
+  const pickListing = (pid: string) => { setSites(new Set(SITES)); setQ(pid); setQDeb(pid); setTab("trend"); window.scrollTo({ top: 0 }); };
+  // 「全部」= 最早有数据的日期（各店抓取起点 / 出单起点的最小值）→ 昨天
+  const allFrom = React.useMemo(() => {
+    const ds = (meta?.shops ?? []).flatMap((s) => [s.crawl_from, s.orders_from]).filter((d): d is string => !!d).sort();
+    return ds[0] ?? "2024-01-01";
+  }, [meta]);
+  const preset = to === yesterday() && from === allFrom ? "all" : PRESETS.find((p) => to === yesterday() && daysBetween(from, to) + 1 === p);
   const skus = rows && qDeb ? rows.slice(0, 3) : [];
 
   return (
@@ -115,6 +121,8 @@ function ReviewsPage() {
                   <button key={p} type="button" className={chip(preset === p)} aria-pressed={preset === p}
                     onClick={() => { const y = yesterday(); setTo(y); setFrom(addDays(y, -(p - 1))); }}>近 {p} 天</button>
                 ))}
+                <button type="button" className={chip(preset === "all")} aria-pressed={preset === "all"}
+                  onClick={() => { setTo(yesterday()); setFrom(allFrom); }}>全部</button>
               </div>
               <Input id="rv-from" type="date" aria-label="开始日期" value={from} max={to} onChange={(e) => e.target.value && setFrom(e.target.value)} className="h-8 w-auto" />
               <span className="text-muted-foreground" aria-hidden>–</span>
