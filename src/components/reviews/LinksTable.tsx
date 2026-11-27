@@ -5,18 +5,18 @@ import { addS, avgS, reviewsApi, sumS, type SkuTable, type TableRow as Row } fro
 import { f2, Help, ListingLabel, Pager, pct, StarBar, useFitRows } from "./shared";
 
 type K = "site" | "sku" | "cum" | "delta" | "cnt" | "avg" | "bad" | "badr" | "ord" | "revr" | "obadr";
-const COLS: { k: K; label: string; help?: string; left?: boolean }[] = [
+const COLS: { k: K; label: string; help?: string[]; left?: boolean }[] = [
   { k: "site", label: "站点", left: true },
   { k: "sku", label: "SKU / 名称 / 商品 ID", left: true },
-  { k: "cum", label: "累计平均分", help: "截至结束日全部历史评价的加权平均（listing 显示分）。" },
-  { k: "delta", label: "区间变化", help: "累计平均分在所选区间内的变化。" },
+  { k: "cum", label: "累计平均分", help: ["截至结束日全部评价的加权平均", "= listing 显示分"] },
+  { k: "delta", label: "区间变化", help: ["累计平均分在区间内的变化"] },
   { k: "cnt", label: "评价数" },
   { k: "avg", label: "区间均分" },
-  { k: "bad", label: "差评数", help: "1–2 星条数。" },
-  { k: "badr", label: "差评率", help: "差评数 / 评价数。" },
-  { k: "ord", label: "出单量", help: "区间内订单数（接口 sales.orders，按下单日）。" },
-  { k: "revr", label: "留评率", help: "评价数 / 出单量，只算区间内评价和出单都有数据的日子（出单从 orders 覆盖起点开始；首次同步前那几天评价是合计，不计）。评价比下单晚，最近几天会偏低。" },
-  { k: "obadr", label: "订单差评率", help: "差评数 / 出单量，统计日子同留评率。" },
+  { k: "bad", label: "差评数", help: ["1–2 星条数"] },
+  { k: "badr", label: "差评率", help: ["差评数 ÷ 评价数"] },
+  { k: "ord", label: "出单量", help: ["区间内订单数，按下单日", "来源：接口 sales.orders"] },
+  { k: "revr", label: "留评率", help: ["评价数 ÷ 出单量", "只算评价和出单都有数据的日子", "评价晚于下单，近几天偏低"] },
+  { k: "obadr", label: "订单差评率", help: ["差评数 ÷ 出单量", "统计日子同留评率"] },
 ];
 
 export function LinksTable({ rows, onPick, picked, from, to }: { rows: Row[] | null; onPick: (pid: string) => void; picked: string | null; from: string; to: string }) {

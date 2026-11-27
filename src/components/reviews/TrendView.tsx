@@ -40,9 +40,9 @@ export function TrendView({ series, from, to, texts, onStars, stars }: Props) {
   const bad = n ? (calc.cur[0] + calc.cur[1]) / n : null, pbad = pn ? (calc.prev[0] + calc.prev[1]) / pn : null;
   const kpis = [
     { label: "评价数", v: n.toLocaleString(), d: n - pn, fmt: (x: number) => Math.round(x).toLocaleString(), good: true },
-    { label: "区间平均分", help: "区间内全部评价按条数加权：Σ(星级×条数) / 总条数，不是每日平均分的再平均。", v: f2(avgS(calc.cur)), d: diff(avgS(calc.cur), avgS(calc.prev)), fmt: (x: number) => x.toFixed(2), good: true },
-    { label: "累计平均分", help: "截至结束日全部历史评价的加权平均，即 listing 当天显示分。抓取表覆盖的日期用抓取表，之后用接口每晚的累计快照。变化 = 区间内的变化。", v: f2(avgS(calc.cumEnd)), d: diff(avgS(calc.cumEnd), avgS(calc.cumAtFrom)), fmt: (x: number) => x.toFixed(3), good: true, inRange: true },
-    { label: "差评率", help: "1–2 星条数 / 区间评价数。", v: pct(bad), d: diff(bad, pbad), fmt: (x: number) => `${(x * 100).toFixed(1)}pp`, good: false },
+    { label: "区间平均分", help: ["区间内评价按条数加权平均", "不是每日平均分再平均"], v: f2(avgS(calc.cur)), d: diff(avgS(calc.cur), avgS(calc.prev)), fmt: (x: number) => x.toFixed(2), good: true },
+    { label: "累计平均分", help: ["截至结束日全部评价的加权平均", "= listing 当天显示分", "变化 = 区间内的变化"], v: f2(avgS(calc.cumEnd)), d: diff(avgS(calc.cumEnd), avgS(calc.cumAtFrom)), fmt: (x: number) => x.toFixed(3), good: true, inRange: true },
+    { label: "差评率", help: ["1–2 星条数 ÷ 区间评价数"], v: pct(bad), d: diff(bad, pbad), fmt: (x: number) => `${(x * 100).toFixed(1)}pp`, good: false },
   ];
   const cumVals = calc.rows.map((r) => r.cumAvg).filter((v): v is number => v != null);
   // 纵轴贴着数据走，小变化也看得出：上下各留 25% 余量，最少 ±0.005
@@ -71,7 +71,7 @@ export function TrendView({ series, from, to, texts, onStars, stars }: Props) {
       <Card><CardContent className="p-3 grid gap-2">
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-semibold">评分走势</h3>
-          <Help label="评分走势口径" text="累计平均分 = 截至当天全部评价的加权平均（当天 listing 显示分）。当日平均分 = 当天新增评价的平均分，当天没有评价则留空，点越大当天条数越多。" />
+          <Help label="评分走势口径" text={["累计平均分：截至当天全部评价 = 当天显示分", "当日平均分：当天新增评价的平均分", "当天无评价留空；点越大条数越多"]} />
           <ToggleGroup type="single" size="sm" variant="outline" value={mode} onValueChange={(v) => v && setMode(v as "cum" | "day")} className="ml-auto" aria-label="走势口径">
             <ToggleGroupItem value="cum">累计平均分</ToggleGroupItem>
             <ToggleGroupItem value="day">当日平均分</ToggleGroupItem>
@@ -106,7 +106,7 @@ export function TrendView({ series, from, to, texts, onStars, stars }: Props) {
       <Card><CardContent className="p-3 grid gap-2">
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-semibold">每日评价数</h3>
-          <Help label="每日评价数说明" text="柱 = 当天新增评价条数，按星级堆叠（左轴）。线 = 当天差评率，1–2 星占当天评价的比例（右轴），当天没有评价则不画点。" />
+          <Help label="每日评价数说明" text={["柱（左轴）：当天新增条数，按星级堆叠", "线（右轴）：当天差评率（1–2 星占比）", "右轴默认 3% 封顶，超出自动放大"]} />
         </div>
         <div className="h-56">
           <ResponsiveContainer width="100%" height="100%">

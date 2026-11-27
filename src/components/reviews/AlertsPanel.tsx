@@ -42,11 +42,11 @@ export function AlertsPanel({ ver, meta, onSaved, onPick }: { ver: number; meta:
     <div className="grid gap-3">
       <Card><CardContent className="p-3 flex flex-wrap items-end gap-3">
         <label className="grid gap-1 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1">评价数门槛<Help label="评价数门槛说明" text="累计评价少于这个数的链接不提示（新链接 1 条 3 星不会触发）。" /></span>
+          <span className="flex items-center gap-1">评价数门槛<Help label="评价数门槛说明" text={["累计评价少于此数不提示", "避免新链接 1 条低分就触发"]} /></span>
           <Input id="rv-min" type="number" min={1} max={1000} value={min} onChange={(e) => setMin(e.target.value)} className="w-24 tabular-nums" />
         </label>
         <label className="grid gap-1 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1">提示分数<Help label="提示分数说明" text="累计平均分低于这个分数时，每晚同步后发一条飞书（站点、SKU、商品 ID、当前分、近 30 天评论数、差评数）。回到该分数及以上后再跌破会再提示一次。" /></span>
+          <span className="flex items-center gap-1">提示分数<Help label="提示分数说明" text={["累计平均分低于此分 → 每晚同步后发飞书", "内容：站点、SKU、商品 ID、当前分、近 30 天评论 / 差评", "回到此分以上后再跌破，会再提示一次"]} /></span>
           <Input id="rv-thr" type="number" min={1} max={5} step={0.1} value={thr} onChange={(e) => setThr(e.target.value)} className="w-24 tabular-nums" />
         </label>
         <Button size="sm" onClick={save} disabled={saving || !dirty}>{saving ? "保存中…" : "保存"}</Button>

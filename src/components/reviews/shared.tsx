@@ -13,7 +13,11 @@ export const daysBetween = (a: string, b: string) => Math.round((Date.parse(`${b
 export const yesterday = () => addDays(new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10), -1);
 
 /** 「?」说明：悬停、键盘聚焦、点按都能显示 */
-export function Help({ text, label }: { text: React.ReactNode; label?: string }) {
+/** 「?」说明：传字符串数组时按分点显示（项目规则：每点一句、只写口径，见 AGENTS.md「前端说明文字」）*/
+export function Help({ text, label }: { text: React.ReactNode | string[]; label?: string }) {
+  const body = Array.isArray(text)
+    ? <ul className="list-disc space-y-0.5 pl-4">{text.map((t, i) => <li key={i}>{t}</li>)}</ul>
+    : text;
   const [open, setOpen] = React.useState(false);
   return (
     <Tooltip open={open} onOpenChange={setOpen}>
@@ -23,7 +27,7 @@ export function Help({ text, label }: { text: React.ReactNode; label?: string })
           <CircleHelp className="h-3.5 w-3.5" />
         </button>
       </TooltipTrigger>
-      <TooltipContent className="max-w-xs text-xs leading-relaxed">{text}</TooltipContent>
+      <TooltipContent className="max-w-xs text-xs leading-relaxed">{body}</TooltipContent>
     </Tooltip>
   );
 }

@@ -66,7 +66,7 @@ export function CommentsView({ ver, active, sites, from, to, q, onPick }: Props)
           <Checkbox id="rv-only" checked={only} onCheckedChange={(v) => setOnly(v === true)} />
           只看有评价内容
         </label>
-        <Help label="评论内容说明" text="正文来自上传的抓取表（只有带留言或回复的评价）；原文下面一行是中文译文。「待导入评论」= 抓取截止日之后接口新增的评价，还没有内容，×N 为条数。勾选「只看有评价内容」= 只留有评论原文或评价图的行（去掉待导入、只有回复的）。悬停看全文，点图片放大，点 SKU 看该链接趋势。" />
+        <Help label="评论内容说明" text={["正文：上传的抓取表（有留言或回复的评价）", "原文下一行：中文译文", "待导入评论：接口新增、还没有内容；×N = 条数", "只看有评价内容：去掉待导入、只有回复的行", "悬停看全文 · 点图放大 · 点 SKU 看趋势"]} />
         <div className="ml-auto"><Pager page={page} pages={pages} total={data?.total ?? 0} onPage={setPage} /></div>
       </div>
 

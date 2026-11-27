@@ -75,16 +75,7 @@ export function DataPanel({ meta, onChanged }: { meta: Meta | null; onChanged: (
         <div className="flex flex-wrap items-center gap-2">
           <input ref={fileRef} id="rv-files" type="file" accept=".xlsx,.xls" multiple className="hidden" onChange={(e) => pick(e.target.files)} />
           <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()} disabled={!!busy}><Upload className="h-4 w-4 mr-1" />选择抓取表</Button>
-          <Help label="抓取表格式" text={
-            <ul className="list-disc space-y-1 pl-4">
-              <li>文件名：<b>站点 YYMMDD-YYMMDD.xlsx</b>（可带 ALL），读「评论」sheet</li>
-              <li>结束日期写抓取当天的前一天，避免最后一天只抓到半天</li>
-              <li>星级：全部行按评论日期统计；文件名日期段外的行不计</li>
-              <li>只存有留言或回复的行：原文、中文、回复、订单号、评价图</li>
-              <li>重复上传：同站点同日期段整段替换，评论 ID 去重，可与旧文件重叠</li>
-              <li>中文列：表头含「翻译」或「中文」</li>
-            </ul>
-          } />
+          <Help label="抓取表格式" text={["文件名：站点 YYMMDD-YYMMDD.xlsx（可带 ALL）", "结束日期写抓取当天的前一天", "星级：按评论日期统计，日期段外不计", "只存有留言或回复的行（原文、中文、回复、订单号、图）", "重复上传：同站点同日期段整段替换，评论 ID 去重", "中文列：表头含「翻译」或「中文」"]} />
           {parsed.length > 0 && <Button size="sm" onClick={upload} disabled={!!busy}>入库 {parsed.length} 个文件</Button>}
           {busy && <span className="text-xs text-muted-foreground">{busy}</span>}
         </div>
@@ -121,8 +112,8 @@ export function DataPanel({ meta, onChanged }: { meta: Meta | null; onChanged: (
         <Table className="tabular-nums text-sm">
           <TableHeader><TableRow>
             <TableHead>站点</TableHead>
-            <TableHead><span className="inline-flex items-center gap-1">抓取表覆盖<Help label="抓取表覆盖说明" text="这段日期的星级用抓取表；之后的日期用接口逐日数据。" /></span></TableHead>
-            <TableHead>接口同步到</TableHead><TableHead><span className="inline-flex items-center gap-1">出单从<Help label="出单覆盖说明" text="接口出单数据最早的日期。每晚快照跑完后会自动往前补到截止日前 180 天（一次性），补完前链接表的留评率只按已有出单的日子算。" /></span></TableHead><TableHead>最近同步</TableHead><TableHead>今晚进度</TableHead><TableHead>错误</TableHead>
+            <TableHead><span className="inline-flex items-center gap-1">抓取表覆盖<Help label="抓取表覆盖说明" text={["这段日期：星级用抓取表", "之后：用接口每晚快照"]} /></span></TableHead>
+            <TableHead>接口同步到</TableHead><TableHead><span className="inline-flex items-center gap-1">出单从<Help label="出单覆盖说明" text={["接口出单最早日期", "每晚快照后自动往前补到 180 天", "补完前留评率只算已有出单的日子"]} /></span></TableHead><TableHead>最近同步</TableHead><TableHead>今晚进度</TableHead><TableHead>错误</TableHead>
             {meta?.is_admin && <TableHead />}
           </TableRow></TableHeader>
           <TableBody>
@@ -212,7 +203,7 @@ function ReconcileCard({ sites }: { sites: string[] }) {
     <Card><CardContent className="p-3 grid gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm font-semibold">接口核对</span>
-        <Help label="接口核对说明" text="接口返回的是每个 listing 当前的全部历史累计星级。本系统累计 = 抓取表（覆盖到的日期）+ 接口每晚新增 + 初始差额。差 = 两边都没覆盖到的评价（如抓取截止日之后、首次同步之前新增的）。首次同步后应全部为 0。不填商品 ID 时取评价最多的 10 个。只读。" />
+        <Help label="接口核对说明" text={["接口：listing 当前全部历史累计星级", "本系统：抓取表 + 每晚新增 + 首次差额", "差 ≠ 0：有评价两边都没覆盖到", "默认取评价最多的 10 个，只读"]} />
         <select id="rv-rc-site" aria-label="站点" value={site} onChange={(e) => setSite(e.target.value)} className="h-8 rounded-md border bg-background px-2 text-sm">
           {sites.map((s) => <option key={s}>{s}</option>)}
         </select>
