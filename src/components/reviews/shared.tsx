@@ -13,12 +13,12 @@ export const daysBetween = (a: string, b: string) => Math.round((Date.parse(`${b
 export const yesterday = () => addDays(new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10), -1);
 
 /** 「?」说明：悬停、键盘聚焦、点按都能显示 */
-export function Help({ text, label }: { text: string; label?: string }) {
+export function Help({ text, label }: { text: React.ReactNode; label?: string }) {
   const [open, setOpen] = React.useState(false);
   return (
     <Tooltip open={open} onOpenChange={setOpen}>
       <TooltipTrigger asChild>
-        <button type="button" aria-label={label ?? text} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+        <button type="button" aria-label={label ?? (typeof text === "string" ? text : "说明")} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
           className="inline-flex text-muted-foreground align-middle hover:text-foreground">
           <CircleHelp className="h-3.5 w-3.5" />
         </button>

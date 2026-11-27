@@ -5,11 +5,11 @@ import { reviewsApi, type ListItem } from "@/lib/reviewsApi";
 import { ReviewItem } from "./ReviewItem";
 import { Help, Pager, shortSku, STAR_COLORS, titleMark, useFitRows } from "./shared";
 
-type Props = { active: boolean; sites: string[]; from: string; to: string; q: string; onPick: (pid: string) => void };
+type Props = { ver: number; active: boolean; sites: string[]; from: string; to: string; q: string; onPick: (pid: string) => void };
 const STAR_OPTS: Record<string, number[]> = { bad: [1, 2], s3: [3], good: [4, 5], all: [] };
 
 /** 评论内容：按时间倒序；默认只看差评（1–2★）；抓取截止日之后接口新增但没有内容的评价显示为占位 */
-export function CommentsView({ active, sites, from, to, q, onPick }: Props) {
+export function CommentsView({ ver, active, sites, from, to, q, onPick }: Props) {
   const [opt, setOpt] = React.useState("bad");
   const [page, setPage] = React.useState(0);
   const [data, setData] = React.useState<{ total: number; rows: ListItem[] } | null>(null);
@@ -20,14 +20,14 @@ export function CommentsView({ active, sites, from, to, q, onPick }: Props) {
   const cache = React.useRef(new Map<string, { total: number; rows: ListItem[] }>());
   React.useEffect(() => {
     if (!active) return;
-    const key = JSON.stringify([sites, from, to, q, opt, per, page]);
+    const key = JSON.stringify([ver, sites, from, to, q, opt, per, page]);
     const hit = cache.current.get(key);
     if (hit) { setData(hit); return; }
     let stale = false;
     reviewsApi.list({ sites, from, to, q }, STAR_OPTS[opt], per, page * per)
       .then((r) => { cache.current.set(key, r); if (!stale) setData(r); }).catch((e) => toast.error((e as Error).message));
     return () => { stale = true; };
-  }, [active, sites, from, to, q, opt, per, page]);
+  }, [ver, active, sites, from, to, q, opt, per, page]);
   const pages = Math.max(1, Math.ceil((data?.total ?? 0) / per));
 
   return (

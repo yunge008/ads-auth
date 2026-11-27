@@ -8,7 +8,7 @@ import { reviewsApi, type AlertItem, type Meta } from "@/lib/reviewsApi";
 import { f2, Help, ListingLabel, Pager, useFitRows } from "./shared";
 
 /** 差评提示：门槛设置 + 当前低于门槛的链接（每晚同步后，新跌破的合并发一条飞书） */
-export function AlertsPanel({ meta, onSaved, onPick }: { meta: Meta | null; onSaved: () => void; onPick: (pid: string) => void }) {
+export function AlertsPanel({ ver, meta, onSaved, onPick }: { ver: number; meta: Meta | null; onSaved: () => void; onPick: (pid: string) => void }) {
   const [min, setMin] = React.useState("10");
   const [thr, setThr] = React.useState("4.0");
   const [items, setItems] = React.useState<AlertItem[] | null>(null);
@@ -25,7 +25,7 @@ export function AlertsPanel({ meta, onSaved, onPick }: { meta: Meta | null; onSa
     setItems(null);
     reviewsApi.alerts().then((r) => setItems(r.items)).catch((e) => { toast.error((e as Error).message); setItems([]); });
   }, []);
-  React.useEffect(load, [load]);
+  React.useEffect(load, [load, ver]);
 
   const save = async () => {
     setSaving(true);

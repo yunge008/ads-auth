@@ -75,7 +75,16 @@ export function DataPanel({ meta, onChanged }: { meta: Meta | null; onChanged: (
         <div className="flex flex-wrap items-center gap-2">
           <input ref={fileRef} id="rv-files" type="file" accept=".xlsx,.xls" multiple className="hidden" onChange={(e) => pick(e.target.files)} />
           <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()} disabled={!!busy}><Upload className="h-4 w-4 mr-1" />选择抓取表</Button>
-          <Help label="抓取表格式" text="文件名「站点 YYMMDD-YYMMDD.xlsx」或「站点 ALL YYMMDD-YYMMDD.xlsx」，读 sheet「评论」。全部行按评论时间逐日统计星级，评论时间不在文件名日期段内的行不计。只存有留言或有回复的行（原文、中文译文、回复、订单号等），不存用户名和图片链接。同站点同日期段重复上传会整段替换（含 SKU 星级），评价内容按评论 ID 去重，所以新文件可以和旧文件重叠（如从 11-09 开始）。文件名结束日期写到抓取当天的前一天，避免最后一天只抓到半天。中文译文列：表头含「翻译」或「中文」。" />
+          <Help label="抓取表格式" text={
+            <ul className="list-disc space-y-1 pl-4">
+              <li>文件名：<b>站点 YYMMDD-YYMMDD.xlsx</b>（可带 ALL），读「评论」sheet</li>
+              <li>结束日期写抓取当天的前一天，避免最后一天只抓到半天</li>
+              <li>星级：全部行按评论日期统计；文件名日期段外的行不计</li>
+              <li>只存有留言或回复的行：原文、中文、回复、订单号、评价图</li>
+              <li>重复上传：同站点同日期段整段替换，评论 ID 去重，可与旧文件重叠</li>
+              <li>中文列：表头含「翻译」或「中文」</li>
+            </ul>
+          } />
           {parsed.length > 0 && <Button size="sm" onClick={upload} disabled={!!busy}>入库 {parsed.length} 个文件</Button>}
           {busy && <span className="text-xs text-muted-foreground">{busy}</span>}
         </div>

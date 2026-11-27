@@ -44,3 +44,6 @@ git show <提交号>:supabase/migrations/<文件名>
 | 2026-11-25 | `20261126120000_listing_reviews_snapshot.sql` | `1f25889` | 评论查看接口口径更正：review_snapshot、api_init、重建 review_series/table/alert_scan（Lovable 部署时确认 review_snapshot 已存在） |
 | 2026-11-25 | `20261126140000_review_sku.sql` | `a542f53` | 评论查看 SKU 维度：review_sku_daily、review_skus、review_sku_table（负责人执行，refresh_grants errors=[]） |
 | 2026-11-26 | `20261126160000_review_orders_cov.sql` | `d8205d5` | 评论查看：review_shops.orders_from + review_table 覆盖口径（负责人执行，refresh_grants errors=[]） |
+| 2026-11-27 | `20261126200000_review_bf_reset.sql` | `3386a2a` | 评论查看：重置 TH、VN 出单回补（负责人执行） |
+| 2026-11-27 | `20261126220000_review_list.sql` | `3386a2a` | 评论查看：评论内容 TAB：review_texts.imgs、review_list（负责人执行） |
+| 2026-11-27 | `20261127210000_review_titles.sql` | `08d881f` | 评论查看：review_products.title，查询带名称（负责人执行） |

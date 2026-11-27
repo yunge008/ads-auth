@@ -1,6 +1,7 @@
 import * as React from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { toast } from "sonner";
+import { RotateCw } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -36,6 +37,8 @@ function ReviewsPage() {
   const [texts, setTexts] = React.useState<ReviewText[] | null>(null);
   const [stars, setStars] = React.useState<number[]>([]);
 
+  // 数据版本：上传 / 同步 / 点刷新后 +1，清掉各处查询缓存
+  const [ver, setVer] = React.useState(0);
   const loadMeta = React.useCallback(() => {
     reviewsApi.meta().then(setMeta).catch((e) => toast.error(`读取失败：${(e as Error).message}`));
   }, []);
@@ -52,7 +55,7 @@ function ReviewsPage() {
   React.useEffect(() => {
     if (from > to) return;
     if (noSite) { setSeries({ base: [0, 0, 0, 0, 0], days: [], products: 0 }); setRows([]); setLoading(false); return; }
-    const key = JSON.stringify([siteList, from, to, qDeb]);
+    const key = JSON.stringify([ver, siteList, from, to, qDeb]);
     const hit = cache.current.get(key);
     if (hit) { setSeries(hit.series); setRows(hit.rows); setLoading(false); return; }
     let stale = false;
@@ -67,7 +70,7 @@ function ReviewsPage() {
       if (!stale) { setSeries(se); setRows(tb.rows); }
     }).catch((e) => toast.error((e as Error).message)).finally(() => { if (!stale) setLoading(false); });
     return () => { stale = true; };
-  }, [siteList, from, to, qDeb, noSite]);
+  }, [siteList, from, to, qDeb, noSite, ver]);
 
   // 筛选框只匹配到一个 listing 时显示它的评价内容
   const single = rows && qDeb && rows.length === 1 ? rows[0] : null;
@@ -76,7 +79,7 @@ function ReviewsPage() {
     let stale = false;
     reviewsApi.texts(single.pid, from, to, stars).then((r) => { if (!stale) setTexts(r.rows); }).catch((e) => toast.error((e as Error).message));
     return () => { stale = true; };
-  }, [single?.pid, from, to, stars]);
+  }, [single?.pid, from, to, stars, ver]);
 
   const pickListing = (pid: string) => { setQ(pid); setQDeb(pid); setTab("trend"); window.scrollTo({ top: 0 }); };
   const preset = PRESETS.find((p) => to === yesterday() && daysBetween(from, to) + 1 === p);
@@ -120,6 +123,10 @@ function ReviewsPage() {
             <div className="flex flex-wrap items-center gap-2">
               <label htmlFor="rv-q" className="w-8 shrink-0 text-xs text-muted-foreground">筛选</label>
               <Input id="rv-q" type="search" placeholder="商品 ID / SKU / 名称" value={q} onChange={(e) => setQ(e.target.value)} className="h-8 w-64" autoComplete="off" />
+              <button type="button" aria-label="刷新数据" title="刷新数据" onClick={() => { setVer((v) => v + 1); loadMeta(); }}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md border text-muted-foreground hover:bg-muted hover:text-foreground">
+                <RotateCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+              </button>
               <div className="flex min-w-0 flex-wrap items-center gap-1 text-xs text-muted-foreground" aria-live="polite">
                 {noSite && <span>未选站点</span>}
                 {loading && <span>更新中…</span>}
@@ -142,13 +149,13 @@ function ReviewsPage() {
           <LinksTable rows={rows} onPick={pickListing} picked={single?.pid ?? null} from={from} to={to} />
         </TabsContent>
         <TabsContent value="comments" forceMount className="mt-0 data-[state=inactive]:hidden">
-          <CommentsView active={tab === "comments"} sites={siteList} from={from} to={to} q={qDeb} onPick={pickListing} />
+          <CommentsView ver={ver} active={tab === "comments"} sites={siteList} from={from} to={to} q={qDeb} onPick={pickListing} />
         </TabsContent>
         <TabsContent value="alerts" forceMount className="mt-0 data-[state=inactive]:hidden">
-          <AlertsPanel meta={meta} onSaved={loadMeta} onPick={pickListing} />
+          <AlertsPanel ver={ver} meta={meta} onSaved={loadMeta} onPick={pickListing} />
         </TabsContent>
         <TabsContent value="data" forceMount className="mt-0 data-[state=inactive]:hidden">
-          <DataPanel meta={meta} onChanged={loadMeta} />
+          <DataPanel meta={meta} onChanged={() => { loadMeta(); setVer((v) => v + 1); }} />
         </TabsContent>
       </Tabs>
     </TooltipProvider>
