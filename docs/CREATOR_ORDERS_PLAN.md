@@ -47,6 +47,18 @@
 结论：只用 GMV Max 拿不到达人和 SKU，也漏掉非广告出单，不会更简单。建议三者拼：订单 / GMV / SKU / 达人用联盟订单，花费 / ROI 用 GMV Max（按 VID），播放 / 官号用视频分析。
 ⚠️ GMV Max 每日落库自 10-12 暂停（ROADMAP §2 P0 待决策）。本页只需当天按 VID 汇总的花费，可以实时查或只存极小的日汇总，不依赖 §2 恢复 VID 级落库。
 
+## 3.1 GMV Max 能否拿到达人名、SKU（负责人 2026-11-27 要求再确认，1127.331）
+
+负责人更正：GMV Max 报表的订单是全局的，含自然流量订单（上一版 §3 表里「只有广告带来的那部分」**说错了，以负责人为准**）。
+
+- **SKU：拿不到（文档确认）**。`/gmv_max/report/get/` 的维度只有 `advertiser_id / campaign_id / stat_time_day / stat_time_hour / item_group_id（商品 SPU）/ item_id（素材）/ room_id / duration`，没有 SKU 维度（来源：Go SDK `bububa/tiktok-business` 对官方文档的镜像；官方页是前端渲染，抓不到正文）。
+- **达人名：文档有，实测没取到，原因待验证**。文档指标里有 `tt_account_name`（账号名）、`tt_account_profile_image_url`、`tt_account_authorization_type`、`shop_content_type`、`title`、`identity_id`。2026-11-25 素材抓取用维度 `campaign_id + item_group_id + item_id` 请求时这些都被判为无效；但旧同步第 3 阶段用维度 `item_id` 单独 + 过滤 campaign_ids/item_group_ids 时取到过（2026-10-12 清库，现无存量可查）。→ 1127.331 加一次性探测，对同一系列/商品按 3 种维度组合各请求一次、逐字段单独请求，原文存库。🔧 负责人：归因管理 → 接口对账 → 站点填 `VN, PH`（可多个）→ 点 ⏱。
+- **兜底（都已实测可用，不依赖上面的探测）**：
+  - 达人名：按 VID 关联联盟订单的 `creator_username`（实时；TAP 行为空）或视频分析 `username`（次日；batch_performance 9 站覆盖 100%）。
+  - SKU：按 VID 关联联盟订单（`content_id` = VID，带 `sku_id / seller_sku / quantity / price`），把该 VID 在 GMV Max 的订单/GMV 按联盟订单的 SKU 占比拆分。⚠️ 官号素材不走联盟，只能到商品级。
+
+ROI 口径（负责人 2026-11-27 定）：**ROI = GMV ÷ 花费**，GMV、花费都取 GMV Max 报表（按素材）。
+
 ## 4. 页面（原型 v3）
 
 - 页内 TAB：数据 / 设置 / 说明（说明默认不展开）。
@@ -55,7 +67,7 @@
   - 素材维度：展开为该素材的 SKU。
   - SKU 维度：按商品聚合，显示**主 SKU**（商品的第一个 SKU）+ 商品名，PID 小字；展开为各 SKU，主 SKU 标「主」。
 - 爆单（负责人 2026-11-27 定）：单素材当天订单 ≥ 10，或单达人当天订单 ≥ 20；两个门槛在「设置」可调。
-- ROI = 广告成交 ÷ 花费（GMV Max 口径）。🙋 是否要改成「联盟订单 GMV ÷ 花费」。
+- ROI = GMV ÷ 花费（负责人定，均取 GMV Max 报表）。
 - 归属：VID 登记人优先，其次达人归属 BD，官号显示「官号」，都没有显示「未归属」。
 
 ## 5. 归属覆盖面（VN 2026-08，接口返回的 2,968 个有消耗 VID，按 GMV Max 花费算）
@@ -72,5 +84,4 @@
 ## 7. 待负责人决定
 
 - 🙋 是否开工、先做哪几个站点。
-- 🙋 ROI 口径（§4）。
 - 🙋 保留天数。

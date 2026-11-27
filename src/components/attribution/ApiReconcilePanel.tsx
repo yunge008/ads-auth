@@ -202,33 +202,25 @@ export function ApiReconcilePanel() {
       await call({ action: "retry", batch_id: batchId });
       await drive(batchId);
     });
-  // 一次性：探测按 VID 取发布时间的候选接口（结果存库，Claude 读取）
+  // 一次性：GMV Max 报表素材字段探测（达人名/内容类型/标题，1127.331；结果存库，Claude 读取）
+  // 原 batch_performance 覆盖面探测已完成（阶段 A），按钮改为本探测。
   const probe = () =>
     run(async () => {
-      // 一次性：逐个 站点 × 月 跑 batch_performance 覆盖面探测；单个失败不中断，结果存库
       const sites = country
         .split(/[,，\s]+/)
         .map((x) => x.trim())
         .filter(Boolean);
-      const months: string[] = [];
-      for (let m = month; m && m <= (monthTo || month); ) {
-        months.push(m);
-        const [y, mm] = m.split("-").map(Number);
-        m = mm === 12 ? `${y + 1}-01` : `${y}-${String(mm + 1).padStart(2, "0")}`;
-      }
       const failed: string[] = [];
       for (const site of sites) {
-        for (const m of months) {
-          setProgress(`${site} ${m} 发布时间/账号覆盖探测中…`);
-          try {
-            await call({ action: "probe_batch", country: site, month: m });
-          } catch (e) {
-            failed.push(`${site} ${m}：${(e as Error).message}`);
-          }
+        setProgress(`${site} 素材字段探测中…`);
+        try {
+          await call({ action: "probe_creative", country: site });
+        } catch (e) {
+          failed.push(`${site}：${(e as Error).message}`);
         }
       }
       setProgress("");
-      if (failed.length) toast.error(`探测失败 ${failed.length} 组：${failed.join("；")}`);
+      if (failed.length) toast.error(`探测失败 ${failed.length} 个站点：${failed.join("；")}`);
       else toast.success("探测完成");
     });
   const download = () =>
@@ -306,8 +298,8 @@ export function ApiReconcilePanel() {
             variant="outline"
             onClick={probe}
             disabled={busy}
-            aria-label="探测发布时间接口（第一个站点）"
-            title="探测发布时间接口（第一个站点）"
+            aria-label="探测素材达人名字段（逐个站点）"
+            title="探测素材达人名字段（逐个站点）"
           >
             <Clock className="h-4 w-4" />
           </Button>

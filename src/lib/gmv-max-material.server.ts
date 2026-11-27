@@ -1386,3 +1386,92 @@ export async function probeBatchPerformance(
   if (e2) throw new Error(e2.message);
   return { probe_batch_id: b.id, ...summary };
 }
+
+// ───────────────────────── 一次性：GMV Max 报表素材字段探测（1127.331） ─────────────────────────
+// 背景：素材抓取用维度 [campaign_id, item_group_id, item_id] 时，tt_account_name / shop_content_type /
+// tt_account_authorization_type / title 被接口判为 Invalid metric；旧同步第 3 阶段用维度 [item_id]
+// + 过滤 campaign_ids & item_group_ids 时能取到。这里对同一个广告户/系列/商品，按 3 种维度组合各请求一次，
+// 并对 [item_id] 逐个字段单独请求，原始返回（前 3 行）与报错原文存库，供 Claude 读取。只读，不写业务表。
+export async function probeCreativeFields(db: SupabaseClient, country: string) {
+  const { data: advs, error } = await db
+    .from("advertiser_countries")
+    .select("advertiser_id, shop_id, advertiser_name")
+    .eq("country", country);
+  if (error) throw new Error(error.message);
+  const end = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+  const start = new Date(Date.parse(`${end}T00:00:00Z`) - 6 * 86400_000).toISOString().slice(0, 10);
+  const EXTRA = [
+    "tt_account_name", "tt_account_profile_image_url", "tt_account_authorization_type",
+    "shop_content_type", "title", "identity_id", "product_name",
+  ];
+  const BASE = ["cost", "orders", "gross_revenue"];
+  const out: Record<string, unknown> = { country, window: [start, end], at: new Date().toISOString() };
+  const call = async (token: string, adv: string, shop: string, dims: string[], filter: Record<string, unknown>, metrics: string[]) => {
+    try {
+      const d = await ttGet(token, "/gmv_max/report/get/", {
+        advertiser_id: adv, store_ids: JSON.stringify([shop]), dimensions: JSON.stringify(dims),
+        metrics: JSON.stringify(metrics), start_date: start, end_date: end, page: "1", page_size: "20",
+        filtering: JSON.stringify(filter),
+      });
+      const list = (d.list ?? []) as Record<string, unknown>[];
+      return { ok: true, rows: list.length, sample: list.slice(0, 3) };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message.slice(0, 500) };
+    }
+  };
+  let picked: Record<string, string> | null = null;
+  const pickErrors: string[] = [];
+  out.pick_errors = pickErrors;
+  for (const a of (advs ?? []) as { advertiser_id: string; shop_id: string | null; advertiser_name: string | null }[]) {
+    const shop = String(a.shop_id ?? "");
+    if (!shop) continue;
+    const { data: conns } = await db
+      .from("tiktok_connections")
+      .select("access_token")
+      .contains("advertiser_ids", [String(a.advertiser_id)]);
+    for (const c of (conns ?? []) as { access_token: string }[]) {
+      try {
+        const d = await ttGet(c.access_token, "/gmv_max/report/get/", {
+          advertiser_id: String(a.advertiser_id), store_ids: JSON.stringify([shop]),
+          dimensions: JSON.stringify(["campaign_id", "item_group_id"]), metrics: JSON.stringify(["cost"]),
+          start_date: start, end_date: end, page: "1", page_size: "50", filtering: "{}",
+          sort_field: "cost", sort_type: "DESC",
+        });
+        const top = ((d.list ?? []) as Record<string, unknown>[])
+          .map((r) => ({ dims: (r.dimensions ?? {}) as Record<string, unknown>, cost: Number(((r.metrics ?? {}) as Record<string, unknown>).cost ?? 0) }))
+          .filter((r) => r.cost > 0 && r.dims.item_group_id && r.dims.campaign_id)
+          .sort((x, y) => y.cost - x.cost)[0];
+        if (top) {
+          picked = { token: c.access_token, adv: String(a.advertiser_id), name: String(a.advertiser_name ?? ""), shop,
+            cid: String(top.dims.campaign_id), igid: String(top.dims.item_group_id) };
+          break;
+        }
+      } catch (e) {
+        pickErrors.push(`${a.advertiser_id}: ${(e as Error).message.slice(0, 300)}`);
+      }
+    }
+    if (picked) break;
+  }
+  if (!picked) throw new Error(`站点 ${country} 近 7 天没找到有花费的广告户/系列/商品`);
+  const { token, adv, shop, cid, igid } = picked;
+  out.picked = { advertiser_id: adv, advertiser_name: picked.name, campaign_id: cid, item_group_id: igid };
+  const f = { campaign_ids: [cid], item_group_ids: [igid] };
+  out.variants = {
+    item_id_only: await call(token, adv, shop, ["item_id"], f, [...BASE, ...EXTRA]),
+    item_id_day: await call(token, adv, shop, ["item_id", "stat_time_day"], f, [...BASE, ...EXTRA]),
+    cid_igid_item: await call(token, adv, shop, ["campaign_id", "item_group_id", "item_id"], f, [...BASE, ...EXTRA]),
+  };
+  const single: Record<string, unknown> = {};
+  for (const m of EXTRA) single[m] = await call(token, adv, shop, ["item_id"], f, [...BASE, m]);
+  out.single_item_id = single;
+  const { data: b, error: e2 } = await db
+    .from("gmv_max_material_batches")
+    .insert({
+      country, month: end.slice(0, 7), status: "READY", triggered_by: "probe:creative",
+      fields: { probe_creative: out }, finished_at: new Date().toISOString(),
+    })
+    .select("id")
+    .single();
+  if (e2) throw new Error(e2.message);
+  return { probe_batch_id: b.id, picked: out.picked };
+}
