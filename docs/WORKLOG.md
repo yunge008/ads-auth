@@ -441,3 +441,4 @@
 2026-11-27 | claude | [1127.346] 新增 `docs/API_RATE_LIMITS.md`（Shop/BC 官方限额、4 个客户端限速实现、62 个接口路径登记表、定时任务时间线与重叠点、8 项静默失败风险）+ `tools/check-api-limits.sh`（代码里未登记的接口路径报错）；CLAUDE.md 加改接口必跑核对。只文档/脚本，不改业务代码。
 2026-11-27 | claude | [1127.347] API_RATE_LIMITS.md 新增 §7 错峰与优化方案：每小时分钟槽、低风险 O1–O4（补名错峰+1s 间隔、BC 报表通道锁、失败 3 小时飞书、ttsCall 读 Retry-After 自适应）与需拍板 D1–D5；只文档，未改代码。
 2026-11-27 | claude | [1127.348] 评论查看：评论内容改表格（时间/SKU/星级/评论原文+译文/回复原文+译文/图片），可按时间/SKU/星级排序、行数填满窗口；未抓取评价按日期×链接×星级一行显示「待导入评论」；评价图弹层放大可左右切换；链接、差评提示表固定列宽；migration 20261127240000。 | supabase/migrations/20261127240000_review_list_v2.sql、supabase/functions/reviews/index.ts、src/components/reviews/{CommentsView,ImageViewer,ReviewItem,LinksTable,AlertsPanel}.tsx、src/lib/reviewsApi.ts、docs/*、src/lib/version.ts |
+2026-11-27 | lovable | [1127.349] 重新部署 reviews（main 3809b29 代码），source_sha256 290c789f…a529a51，401 核验通过；未改代码/未跑 migration。 | src/lib/version.ts、docs/WORKLOG.md |
