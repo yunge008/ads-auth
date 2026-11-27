@@ -546,7 +546,8 @@ Deno.serve(async (req) => {
         const limit = Math.min(100, Math.max(1, Number(b.limit) | 0 || 20));
         const offset = Math.max(0, Number(b.offset) | 0);
         const stars = Array.isArray(b.stars) ? b.stars.map(Number).filter((n) => n >= 1 && n <= 5) : [];
-        return json(await rpc("review_list", { p_shops: shopsArg(b.sites), p_from: from(), p_to: to(), p_stars: stars, p_q: q(), p_limit: limit, p_offset: offset }));
+        const sort = ["ts", "sku", "star"].includes(String(b.sort)) ? String(b.sort) : "ts";
+        return json(await rpc("review_list", { p_shops: shopsArg(b.sites), p_from: from(), p_to: to(), p_stars: stars, p_q: q(), p_limit: limit, p_offset: offset, p_sort: sort, p_desc: b.desc !== false }));
       }
       case "alerts": return json(await rpc("review_alert_scan", { p_commit: false }));
       case "save_settings": {

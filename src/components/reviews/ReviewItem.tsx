@@ -1,3 +1,4 @@
+import { Thumbs } from "./ImageViewer";
 import { STAR_COLORS } from "./shared";
 
 type Text = {
@@ -21,15 +22,7 @@ export function ReviewItem({ r, meta }: { r: Text; meta: React.ReactNode }) {
         )}
         <div className="text-xs text-muted-foreground tabular-nums">{meta}</div>
       </div>
-      <div className="flex flex-wrap justify-end gap-1 max-w-[260px]">
-        {(r.imgs ?? []).slice(0, 4).map(([thumb, url], i) => (
-          <a key={i} href={url} target="_blank" rel="noreferrer noopener" aria-label={`评价图 ${i + 1}，在新窗口打开原图`}>
-            <img src={thumb} referrerPolicy="no-referrer" loading="lazy" alt="" className="h-14 w-14 rounded object-cover border bg-muted" />
-          </a>
-        ))}
-        {(r.imgs?.length ?? 0) > 4 && <span className="self-end text-xs text-muted-foreground">+{r.imgs!.length - 4}</span>}
-        {!r.imgs?.length && r.img_count > 0 && <span className="self-start text-xs text-muted-foreground">{r.img_count} 图</span>}
-      </div>
+      <div className="flex justify-end"><Thumbs imgs={r.imgs} count={r.img_count} max={4} size={56} /></div>
     </div>
   );
 }

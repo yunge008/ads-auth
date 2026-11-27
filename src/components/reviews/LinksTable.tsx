@@ -49,7 +49,9 @@ export function LinksTable({ rows, onPick, picked, from, to }: { rows: Row[] | n
   return (
     <div ref={boxRef} className="grid gap-2">
     <div className="rounded-md border overflow-x-auto">
-      <Table className="tabular-nums text-sm">
+      {/* 固定列宽：翻页、排序时列不跳动 */}
+      <Table className="table-fixed min-w-[1180px] tabular-nums text-sm">
+        <colgroup><col className="w-[84px]" /><col /><col className="w-[104px]" /><col className="w-[92px]" /><col className="w-[72px]" /><col className="w-[84px]" /><col className="w-[80px]" /><col className="w-[84px]" /><col className="w-[84px]" /><col className="w-[84px]" /><col className="w-[104px]" /><col className="w-[120px]" /></colgroup>
         <TableHeader>
           <TableRow>
             {COLS.map((c) => (
@@ -82,7 +84,7 @@ export function LinksTable({ rows, onPick, picked, from, to }: { rows: Row[] | n
                 </button>
                 {x.site}
               </TableCell>
-              <TableCell className="min-w-[280px] max-w-[480px]">
+              <TableCell className="overflow-hidden">
                 <ListingLabel sku={x.r.sku} title={x.r.title} pid={x.r.pid} />
               </TableCell>
               <TableCell className="text-right">

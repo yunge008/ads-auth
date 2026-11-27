@@ -55,7 +55,8 @@ export function AlertsPanel({ ver, meta, onSaved, onPick }: { ver: number; meta:
 
       <div ref={boxRef} className="grid gap-2">
       <div className="rounded-md border overflow-x-auto">
-        <Table className="tabular-nums text-sm">
+        <Table className="table-fixed min-w-[900px] tabular-nums text-sm">
+          <colgroup><col className="w-[84px]" /><col /><col className="w-[110px]" /><col className="w-[100px]" /><col className="w-[120px]" /><col className="w-[120px]" /><col className="w-[110px]" /></colgroup>
           <TableHeader><TableRow>
             <TableHead>站点</TableHead><TableHead>SKU / 名称 / 商品 ID</TableHead>
             <TableHead className="text-right">累计平均分</TableHead><TableHead className="text-right">累计评价</TableHead>
@@ -68,7 +69,7 @@ export function AlertsPanel({ ver, meta, onSaved, onPick }: { ver: number; meta:
             {items?.slice(page * per, page * per + per).map((x) => (
               <TableRow key={`${x.site}|${x.pid}`} className="cursor-pointer" tabIndex={0} onClick={() => onPick(x.pid)} onKeyDown={(e) => { if (e.key === "Enter") onPick(x.pid); }}>
                 <TableCell>{x.site}</TableCell>
-                <TableCell className="min-w-[280px] max-w-[480px]"><ListingLabel sku={x.sku} title={x.title} pid={x.pid} /></TableCell>
+                <TableCell className="overflow-hidden"><ListingLabel sku={x.sku} title={x.title} pid={x.pid} /></TableCell>
                 <TableCell className="text-right text-red-600">{f2(x.avg)}</TableCell>
                 <TableCell className="text-right">{x.n.toLocaleString()}</TableCell>
                 <TableCell className="text-right">{x.n30}</TableCell>

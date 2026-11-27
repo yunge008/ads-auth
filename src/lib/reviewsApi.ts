@@ -12,11 +12,12 @@ export type ReviewText = {
   content: string | null; content_zh: string | null; reply: string | null; reply_zh: string | null; img_count: number;
   imgs: [string, string][] | null;
 };
-/** 评论内容 TAB 的一行：text = 有留言/回复的评价；gap = 抓取截止日之后接口新增、还没有内容的评价（counts = 1–5 星条数）*/
+/** 评论内容 TAB 的一行：text = 有内容的评价；gap = 抓取截止日之后接口新增、待导入的评价（按 日期 × 链接 × 星级，cnt = 条数）*/
 export type ListItem = {
-  kind: "text" | "gap"; ts: string; shop_key: string; product_id: string; sku: string | null; title: string | null; star: number | null;
+  kind: "text" | "gap"; review_id: string | null; ts: string; shop_key: string; product_id: string; sku: string | null; title: string | null;
+  star: number; cnt: number; init: boolean;
   content: string | null; content_zh: string | null; reply: string | null; reply_zh: string | null; order_id: string | null;
-  img_count: number; imgs: [string, string][] | null; counts: Stars | null; init: boolean;
+  img_count: number; imgs: [string, string][] | null;
 };
 export type ShopStatus = {
   shop_key: string; crawl_from: string | null; crawl_until: string | null; api_until: string | null; orders_from: string | null; latest_available_date: string | null;
@@ -39,7 +40,7 @@ export const reviewsApi = {
   series: (f: Filter) => call<Series>({ action: "series", ...f }),
   table: (f: Filter) => call<{ rows: TableRow[] }>({ action: "table", ...f }),
   texts: (pid: string, from: string, to: string, stars: number[]) => call<{ rows: ReviewText[] }>({ action: "texts", product_id: pid, from, to, stars }),
-  list: (f: Filter, stars: number[], limit: number, offset: number) => call<{ total: number; rows: ListItem[] }>({ action: "list", ...f, stars, limit, offset }),
+  list: (f: Filter, stars: number[], limit: number, offset: number, sort: string, desc: boolean) => call<{ total: number; rows: ListItem[] }>({ action: "list", ...f, stars, limit, offset, sort, desc }),
   alerts: () => call<{ min_reviews: number; threshold: number; items: AlertItem[] }>({ action: "alerts" }),
   saveSettings: (min_reviews: number, threshold: number) => call<{ ok: true }>({ action: "save_settings", min_reviews, threshold }),
   uploadBegin: (b: Record<string, unknown>) => call<{ upload_id: string }>({ action: "upload_begin", ...b }),
