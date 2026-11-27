@@ -53,6 +53,11 @@
 
 - **SKU：拿不到（文档确认）**。`/gmv_max/report/get/` 的维度只有 `advertiser_id / campaign_id / stat_time_day / stat_time_hour / item_group_id（商品 SPU）/ item_id（素材）/ room_id / duration`，没有 SKU 维度（来源：Go SDK `bububa/tiktok-business` 对官方文档的镜像；官方页是前端渲染，抓不到正文）。
 - **达人名：能取，原因已查明（官方文档，负责人 2026-11-27 贴原文）**。`tt_account_name`（账号名）、`tt_account_authorization_type`（TTS_TT 官号 / AFFILIATE 联盟 / TT_USER / BC_AUTH_TT / AUTH_CODE）、`shop_content_type`（VIDEO / PRODUCT_CARD）、`title` 属于「属性指标」，只有在 **过滤单个 campaign_id + 单个 item_group_id、维度里只有一个 ID 维度**（如 `["item_id","stat_time_day"]`）时才返回；多 ID 维度或一次过滤多个商品就拿不到。2026-11-25 抓取用了 `[campaign_id,item_group_id,item_id]` + 一次 100 个商品，所以被判无效（**上轮结论「接口已不返回」是错的，是请求写法问题**）。⚠️ 文档注明：token 对该 TikTok 账号无权限时账号名返回 0 或 -1，联盟达人覆盖率需实测。代价：每个「系列 × 商品」单独请求一次。1127.331 探测已按文档写法改（4 种写法对比 + 逐字段），🔧 负责人点 ⏱ 后 Claude 读结果。
+- **探测结果（1127.333，负责人 2026-11-27 跑 VN、PH，近 7 天，各取花费最高的 1 个系列 × 1 个商品）**：
+  - 写法：`[item_id, stat_time_day]`、`[item_id]`、`[item_id]+ADS_AND_ORGANIC` 三种都能取属性指标；`[campaign_id,item_group_id,item_id]` 全部判无效 → 与文档一致。`identity_id`、`product_name` 素材级不支持。
+  - ✅ 能用：`tt_account_authorization_type`（实测 TTS_TT 官号、AFFILIATE 联盟）、`shop_content_type`（VIDEO / PRODUCT_CARD，商品卡 item_id=-1）、`title`（视频文案）。
+  - ❌ `tt_account_name` 实测全部为 "0"（存库样本 VN、PH 各 2 个视频，含 TTS_TT 官号与 AFFILIATE 联盟各类；头像同为 0）。按文档 = 我们的 token 对这些 TikTok 账号没有权限。⚠️ 样本只存了每个字段前 3 行，未逐行统计全部 20 行；连官号也是 0，说明不是「联盟达人才没有」。
+  - 结论：**GMV Max 报表拿不到达人名，也拿不到 SKU**。达人名按 VID 关联：联盟订单 `creator_username`（实时，TAP 行为空）→ 视频分析 `username`（次日，9 站覆盖 100%）。官号/联盟可直接用 `tt_account_authorization_type` 区分。⚠️ 让账号名有值可能需要把账号授权进 BC（未核验，不建议为此改授权）。
 - **GMV Max 订单含自然流量**：文档写明 orders / gross_revenue 为 "paid and organic"（与负责人一致）。
 - **兜底（都已实测可用，不依赖上面的探测）**：
   - 达人名：按 VID 关联联盟订单的 `creator_username`（实时；TAP 行为空）或视频分析 `username`（次日；batch_performance 9 站覆盖 100%）。
