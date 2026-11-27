@@ -346,6 +346,8 @@ git push origin main
 
 必须把需要执行的 SQL 原文完整提供出来，让用户能够直接复制执行。
 
+**SQL 文件直接发到对话里**（负责人 2026-11-27 要求）：migration 照常存进 `supabase/migrations/`（留版本记录），同时用文件发送功能（如 Claude 的 SendUserFile）把该 `.sql` 文件发给负责人，让负责人在对话里点开、全选复制到 SQL Editor；不要只给仓库路径让负责人去 GitHub 打开复制。多个文件时说明执行顺序；被后续文件取代、不需要再跑的要明说。
+
 ### B 类：必须让 Lovable 执行的
 
 本项目目前没有除 Lovable 外的相关部署权限时，归入 B 类。

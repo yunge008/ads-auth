@@ -56,7 +56,7 @@ export function AlertsPanel({ ver, meta, onSaved, onPick }: { ver: number; meta:
       <div ref={boxRef} className="grid gap-2">
       <div className="rounded-md border overflow-x-auto">
         <Table className="table-fixed min-w-[900px] tabular-nums text-sm">
-          <colgroup><col className="w-[84px]" /><col /><col className="w-[110px]" /><col className="w-[100px]" /><col className="w-[120px]" /><col className="w-[120px]" /><col className="w-[110px]" /></colgroup>
+          <colgroup><col style={{ width: 84 }} /><col /><col style={{ width: 110 }} /><col style={{ width: 100 }} /><col style={{ width: 120 }} /><col style={{ width: 120 }} /><col style={{ width: 110 }} /></colgroup>
           <TableHeader><TableRow>
             <TableHead>站点</TableHead><TableHead>SKU / 名称 / 商品 ID</TableHead>
             <TableHead className="text-right">累计平均分</TableHead><TableHead className="text-right">累计评价</TableHead>

@@ -1,6 +1,7 @@
 import * as React from "react";
 import { toast } from "sonner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { reviewsApi, type ListItem } from "@/lib/reviewsApi";
 import { Thumbs } from "./ImageViewer";
@@ -16,25 +17,26 @@ type SortK = "ts" | "sku" | "star";
  */
 export function CommentsView({ ver, active, sites, from, to, q, onPick }: Props) {
   const [opt, setOpt] = React.useState("bad");
+  const [only, setOnly] = React.useState(false);
   const [sort, setSort] = React.useState<{ k: SortK; desc: boolean }>({ k: "ts", desc: true });
   const [page, setPage] = React.useState(0);
   const [data, setData] = React.useState<{ total: number; rows: ListItem[] } | null>(null);
   const boxRef = React.useRef<HTMLDivElement>(null);
   const per = useFitRows(boxRef, 58, 120);
-  React.useEffect(() => setPage(0), [sites, from, to, q, opt, per, sort]);
+  React.useEffect(() => setPage(0), [sites, from, to, q, opt, per, sort, only]);
 
   // 只在本 TAB 可见时取数；同一条件的结果缓存；取新数据时保留旧内容
   const cache = React.useRef(new Map<string, { total: number; rows: ListItem[] }>());
   React.useEffect(() => {
     if (!active) return;
-    const key = JSON.stringify([ver, sites, from, to, q, opt, per, page, sort]);
+    const key = JSON.stringify([ver, sites, from, to, q, opt, per, page, sort, only]);
     const hit = cache.current.get(key);
     if (hit) { setData(hit); return; }
     let stale = false;
-    reviewsApi.list({ sites, from, to, q }, STAR_OPTS[opt], per, page * per, sort.k, sort.desc)
+    reviewsApi.list({ sites, from, to, q }, STAR_OPTS[opt], per, page * per, sort.k, sort.desc, only)
       .then((r) => { cache.current.set(key, r); if (!stale) setData(r); }).catch((e) => toast.error((e as Error).message));
     return () => { stale = true; };
-  }, [ver, active, sites, from, to, q, opt, per, page, sort]);
+  }, [ver, active, sites, from, to, q, opt, per, page, sort, only]);
 
   const pages = Math.max(1, Math.ceil((data?.total ?? 0) / per));
   const th = (k: SortK, label: string, cls = "") => (
@@ -60,14 +62,18 @@ export function CommentsView({ ver, active, sites, from, to, q, onPick }: Props)
           <ToggleGroupItem value="good">4–5★</ToggleGroupItem>
           <ToggleGroupItem value="all">全部</ToggleGroupItem>
         </ToggleGroup>
-        <Help label="评论内容说明" text="正文来自上传的抓取表（只有带留言或回复的评价）；原文下面一行是中文译文。「待导入评论」= 抓取截止日之后接口新增的评价，还没有内容，×N 为条数。悬停看全文，点图片放大，点 SKU 看该链接趋势。" />
+        <label className="inline-flex cursor-pointer items-center gap-1.5 text-sm">
+          <Checkbox id="rv-only" checked={only} onCheckedChange={(v) => setOnly(v === true)} />
+          只看有评价内容
+        </label>
+        <Help label="评论内容说明" text="正文来自上传的抓取表（只有带留言或回复的评价）；原文下面一行是中文译文。「待导入评论」= 抓取截止日之后接口新增的评价，还没有内容，×N 为条数。勾选「只看有评价内容」= 只留有评论原文或评价图的行（去掉待导入、只有回复的）。悬停看全文，点图片放大，点 SKU 看该链接趋势。" />
         <div className="ml-auto"><Pager page={page} pages={pages} total={data?.total ?? 0} onPage={setPage} /></div>
       </div>
 
       <div className="overflow-x-auto rounded-md border">
         <Table className="table-fixed text-sm">
           <colgroup>
-            <col className="w-[112px]" /><col className="w-[220px]" /><col className="w-[60px]" /><col /><col /><col className="w-[148px]" />
+            <col style={{ width: 112 }} /><col style={{ width: 220 }} /><col style={{ width: 60 }} /><col /><col /><col style={{ width: 148 }} />
           </colgroup>
           <TableHeader>
             <TableRow>

@@ -51,7 +51,7 @@ export function LinksTable({ rows, onPick, picked, from, to }: { rows: Row[] | n
     <div className="rounded-md border overflow-x-auto">
       {/* 固定列宽：翻页、排序时列不跳动 */}
       <Table className="table-fixed min-w-[1180px] tabular-nums text-sm">
-        <colgroup><col className="w-[84px]" /><col /><col className="w-[104px]" /><col className="w-[92px]" /><col className="w-[72px]" /><col className="w-[84px]" /><col className="w-[80px]" /><col className="w-[84px]" /><col className="w-[84px]" /><col className="w-[84px]" /><col className="w-[104px]" /><col className="w-[120px]" /></colgroup>
+        <colgroup><col style={{ width: 84 }} /><col /><col style={{ width: 104 }} /><col style={{ width: 92 }} /><col style={{ width: 72 }} /><col style={{ width: 84 }} /><col style={{ width: 80 }} /><col style={{ width: 84 }} /><col style={{ width: 84 }} /><col style={{ width: 84 }} /><col style={{ width: 104 }} /><col style={{ width: 120 }} /></colgroup>
         <TableHeader>
           <TableRow>
             {COLS.map((c) => (

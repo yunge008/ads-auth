@@ -103,7 +103,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <aside className="w-56 shrink-0 border-r bg-card flex flex-col h-screen sticky top-0">
 
         <div className="px-5 py-4 border-b flex items-start justify-between gap-2">
-          <h1 className="text-base font-semibold text-foreground">AR广告工具</h1>
+          <h1 className="text-base font-semibold text-foreground">ARTPHRO</h1>
           <span className="text-[10px] text-muted-foreground font-mono pt-0.5 flex-none">v{APP_VERSION}</span>
         </div>
         <nav aria-label="主导航" className="flex-1 overflow-y-auto p-3 space-y-1">
