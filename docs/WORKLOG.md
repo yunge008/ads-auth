@@ -454,3 +454,4 @@
 2026-11-27 | claude | [1127.359] 评论查看：评分走势纵轴最小跨度 0.1 分；评分走势/每日评价数两图日期上下对齐（统一边距、轴宽、band 刻度）；点链接跳趋势时站点重置为全部；日期加「全部」。纯前端。
 2026-11-27 | claude | [1127.360] 评论内容表最左加「站点」列（原在时间下方）。纯前端。
 2026-11-27 | claude | [1127.361] tts-p0-probe 新增 cs_probe（买家客服会话+消息只读实测，PH/TH 默认）；raw 白名单加 /customer_service/。需 Lovable 重新部署 tts-p0-probe。
+2026-11-27 | lovable | [1127.362] Lovable 按 main c957c55 重新部署 tts-p0-probe（source_sha256 ba4735c6，POST {"action":"meta"} 不带口令返回 401 鉴权提示，线上正常）。未跑 migration、未动其他函数与前端。
