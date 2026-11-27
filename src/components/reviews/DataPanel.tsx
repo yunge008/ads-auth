@@ -181,9 +181,9 @@ function SyncButton({ shop, onDone }: { shop: string; onDone: () => void }) {
         if (!x) { toast.success(`${shop}：今晚已同步完`); break; }
         if (x.error) { toast.error(`${shop}：${x.error}`); break; }
         calls = x.calls;
-        setBusy(x.done ? `补出单 ${x.bf_idx}/${x.total}` : `同步中 ${x.idx}/${x.total}`);
+        setBusy(!x.done ? `同步中 ${x.idx}/${x.total}` : !x.bf_done ? `补出单 ${x.bf_idx}/${x.total}` : `补名称 剩 ${x.titles_left}`);
         onDone(); // 刷新「今晚进度」列
-        if (x.done && x.bf_done) { toast.success(`${shop}：完成 ${x.total} 个商品，接口调用 ${calls} 次`); break; }
+        if (x.done && x.bf_done && x.titles_left <= 0) { toast.success(`${shop}：完成 ${x.total} 个商品，接口调用 ${calls} 次`); break; }
       }
       onDone();
     } catch (e) { toast.error((e as Error).message); } finally { setBusy(null); }

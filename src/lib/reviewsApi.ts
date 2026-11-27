@@ -50,7 +50,7 @@ export const reviewsApi = {
   uploadTexts: (shop_key: string, rows: unknown[]) => call<{ rows: number }>({ action: "upload_texts", shop_key, rows }, 120_000),
   uploadEnd: (shop_key: string, upload_id: string) => call<{ crawl_from: string; crawl_until: string }>({ action: "upload_end", shop_key, upload_id }),
   reconcile: (shop_key: string, product_ids: string[]) => call<Reconcile>({ action: "reconcile", shop_key, product_ids }, 150_000),
-  step: (shop_key: string) => call<{ finished: boolean; results: { shop: string; done: boolean; idx: number; total: number; calls: number; bf_done: boolean; bf_idx: number; error?: string }[] }>({ action: "step", shop_key }, 150_000),
+  step: (shop_key: string) => call<{ finished: boolean; results: { shop: string; done: boolean; idx: number; total: number; calls: number; bf_done: boolean; bf_idx: number; titles_left: number; error?: string }[] }>({ action: "step", shop_key }, 150_000),
 };
 
 export const sumS = (s: Stars) => s[0] + s[1] + s[2] + s[3] + s[4];

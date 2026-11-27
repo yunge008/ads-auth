@@ -224,7 +224,11 @@ async function pickProducts(shop: Shop, end: string): Promise<string[]> {
   return [...ids];
 }
 
-type StepResult = { shop: string; done: boolean; idx: number; total: number; calls: number; bf_done: boolean; bf_idx: number; error?: string };
+type StepResult = { shop: string; done: boolean; idx: number; total: number; calls: number; bf_done: boolean; bf_idx: number; titles_left: number; error?: string };
+async function titlesLeft(key: string): Promise<number> {
+  const { count } = await admin().from("review_products").select("product_id", { count: "exact", head: true }).eq("shop_key", key).is("title", null);
+  return count ?? 0;
+}
 async function stepShop(shop: Shop, started: number): Promise<StepResult> {
   const db = admin();
   const { data: row } = await db.from("review_shops").select("*").eq("shop_key", shop.key).maybeSingle();
@@ -300,12 +304,12 @@ async function stepShop(shop: Shop, started: number): Promise<StepResult> {
       shop_key: shop.key, state: st, last_run_at: new Date().toISOString(),
       last_error: errs.length ? `${errs.length} 个商品失败，例：${errs[0]}` : null,
     }, { onConflict: "shop_key" });
-    return { shop: shop.key, done: !!st.done, idx: st.idx ?? 0, total: list.length, calls: st.calls ?? 0, bf_done: !!st.bf_done, bf_idx: st.bf_idx ?? 0,
+    return { shop: shop.key, done: !!st.done, idx: st.idx ?? 0, total: list.length, calls: st.calls ?? 0, bf_done: !!st.bf_done, bf_idx: st.bf_idx ?? 0, titles_left: await titlesLeft(shop.key),
       ...(finished && errs.length ? { error: `${errs.length} 个商品失败，例：${errs[0]}` } : {}) };
   } catch (e) {
     const msg = (e as Error).message;
     await db.from("review_shops").upsert({ shop_key: shop.key, state: st, last_run_at: new Date().toISOString(), last_error: msg }, { onConflict: "shop_key" });
-    return { shop: shop.key, done: false, idx: st.idx ?? 0, total: st.products?.length ?? 0, calls: st.calls ?? 0, bf_done: !!st.bf_done, bf_idx: st.bf_idx ?? 0, error: msg };
+    return { shop: shop.key, done: false, idx: st.idx ?? 0, total: st.products?.length ?? 0, calls: st.calls ?? 0, bf_done: !!st.bf_done, bf_idx: st.bf_idx ?? 0, titles_left: -1, error: msg };
   }
 }
 
@@ -323,7 +327,7 @@ async function step(b: Record<string, unknown>, started: number) {
   };
   const results: StepResult[] = [];
   // 先把所有站点的每晚快照跑完，再补出单
-  for (const phase of ["nightly", "backfill"] as const) {
+  for (const phase of ["nightly", "backfill", "titles"] as const) {
     const states = await stateOf();
     for (const s of shops) {
       if (Date.now() - started > PRODUCT_START_LIMIT_MS) break;
@@ -331,6 +335,7 @@ async function step(b: Record<string, unknown>, started: number) {
       const today = st.run_date === runDate;
       if (phase === "nightly" && today && st.done) continue;
       if (phase === "backfill" && (!today || !st.done || st.bf_done)) continue;
+      if (phase === "titles" && (!today || !st.done || !st.bf_done || (await titlesLeft(s.key)) === 0)) continue;
       const r = await stepShop(s, started);
       const i = results.findIndex((x) => x.shop === r.shop);
       if (i >= 0) results[i] = r; else results.push(r);
