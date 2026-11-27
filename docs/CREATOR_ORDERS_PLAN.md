@@ -1,77 +1,76 @@
 # 达人出单日报（可行性 + 计划）
 
-> 2026-11-27 claude，1127.329。负责人需求：每日知道谁今天爆了什么品、什么素材；维度 站点 / 达人 / VID / SKU（无 SKU 时 PID）；带达人、VID 归属同事；标自有官号、渠道号。给同事看。
-> 原型（示例数据）：https://claude.ai/artifact/2S2VzWK3tjfNRTHApqtg22
+> 2026-11-27 claude（1127.329 初版，1127.330 按负责人反馈与探测结果更新）。
+> 需求：每天看谁爆了什么品、什么素材；维度 站点 / 达人 / 素材 VID / SKU（无 SKU 时到商品）；带归属同事；标官号、营销号（= 渠道号）。给同事看。
+> 原型（示例数据，v3）：https://claude.ai/artifact/2S2VzWK3tjfNRTHApqtg22
+> 负责人 2026-11-27：页面放「GMV 归因」组，主要看达人、素材表现；本次不一定继续从联盟订单接口往下做（探测结果先记录）。
 
-## 1. 订单来源：三类互斥（负责人 2026-11-27）
+## 1. 订单来源（1127.330 更正）
 
-Seller Center 前端导出把订单分成三类，逻辑上互斥：**达人出单**、**TAP 机构出单**、**非合作订单**。每类要单独找接口。
+**变更说明**：1127.329 版把订单分成「达人 / TAP / 非合作」三类，并用「视频 GMV − 联盟订单」的差额算非合作订单。负责人反馈后台大部分店铺已没有「非合作」选项，VN 实测（下文）也显示视频 GMV 基本都能在联盟订单里找到 → 去掉「非合作」一类，改为下面三类：
 
-| 来源 | 接口 | 依据 | 拿得到 | 拿不到 / 待测 |
-|---|---|---|---|---|
-| 达人出单 | `POST /affiliate_seller/202410/orders/search` | 官方文档（2026-11-27 重读）+ `tts-export` 月度联盟订单已在用 | 订单 × SKU：`creator_username`、`content_type`（SHOP/VIDEO/LIVE/PRE_LIVE/PROMOTION_PAGE/LINKSHARE）、`content_id`（VID）、`product_id`、`sku_id`、`sku_name`、`seller_sku`、`price`、`quantity`、`create_time`、佣金、`fully_return`；按下单时间筛，单次 ≤3 个月，实时 | — |
-| TAP 机构出单 | 同上，`campaign_id` 非空的 SKU 行 | 官方文档 | 同上 SKU 级，带 TAP 活动 ID、机构佣金率 | ⚠️ 文档写明 TAP 单 `creator_username` **返回空**；`content_id` 是否还有值未写 → 探测 P1。没有达人名时按 VID 用视频接口补 handle。机构名称接口不给（`tts-export` 已记录） |
-| 非合作订单 | 联盟订单接口**不含**（文档：只返回 "affiliate-commission eligible" 订单，⚠️ 待 P1 实测确认）。只能用视频分析接口：`GET /analytics/202605/shop_videos/performance`（视频 × 日，全部账号）+ `GET /analytics/202509/shop_videos/{vid}/products/performance`（视频 × 商品） | 202409 版 VN 2026-11-25 实测返回 VID / username / products / gmv / units_sold；202605 版文档 | VID、达人 handle、PID、GMV、件数、播放、发布时间 | **无 SKU**（只到 PID）；T+1（`latest_available_date` = 昨天）；202605 版单次 ≤30 天（实测报错）。非合作 = 视频 GMV − 同 VID×PID 的联盟订单 GMV（差额法，⚠️ 口径待对账） |
-
-订单接口 `/order/202309/orders/search` 不带达人 / 内容字段（`tts-export` 已记录 Creator Handle 接口不提供），不能用来分来源。
-
-**上轮遗漏**：`tts-export` 的「月度联盟订单」只拆了达人 / 服务商两张表，没有非合作订单；与前端导出的三类不对应。
-
-## 2. 账号类型：官号 / 渠道号
-
-- `202605` 视频列表有 `account_type` 筛选（ALL / OFFICIAL_ACCOUNTS / MARKETING_ACCOUNTS / AFFILIATE_ACCOUNTS），返回 `creator.author_type`（示例值 OFFICIAL）→ 官号、营销号可以直接从接口拿。⚠️ 未实测。
-- 🙋 「渠道号」是否等于 TikTok 的营销号（MARKETING_ACCOUNTS）？不等于的话，用飞书表补：列 = 站点 / handle / 类型（官号、渠道号）/ 负责人 / 备注；接口给的类型优先，飞书表补接口不认的。
-
-## 3. 归属同事（复用归因数据，不新建规则）
-
-- VID 归属：`staff_vid_map`（剪辑表 / BD 表登记的 VID，每晚 23:00 同步）。
-- 达人归属：`creator_ownership`（key_type=HANDLE，`owner_bd`）。
-- 顺序：VID 有登记 → 登记人；否则达人归属 BD；官号 → 「官号」；都没有 → 未归属。⚠️ 这和归因引擎（Pass 1/2、发布时间窗口）不是同一套口径，只是「看是谁的」，不是业绩归因。
-- 覆盖面实测（VN 2026-08，接口返回的 2,968 个有消耗 VID）：按 GMV Max 花费算，达人 handle 命中 69.0%，VID 登记命中 26.0%，任一命中 70.4%。
-
-## 4. 每日更新与存储
-
-| 任务 | 频率 | 量级（估） | 落库 |
+| 来源 | 接口 | 粒度 | 互斥依据 |
 |---|---|---|---|
-| 联盟订单（达人 + TAP） | 每小时，拉当天 + 昨天（补状态） | 10 店 × 每天数千 SKU 行 | 按 站点 × 日 × VID × SKU × 来源 汇总，不存订单原文 |
-| 视频列表（含非合作、账号类型） | 每天 1 次（T+1） | VN 近 4 个月 15,949 个视频；单日只取 GMV>0 的，按 gmv 倒序翻页到 0 为止 | 站点 × 日 × VID 一行 |
-| 视频 × 商品 | 每天，只对有 GMV 的 VID | 每 VID 1 次调用 | 站点 × 日 × VID × PID |
+| 达人联盟 | 联盟订单 `POST /affiliate_seller/202410/orders/search`，`campaign_id` 为空的行 | 订单 × SKU，实时 | 同一 SKU 行只会是其中一类 |
+| TAP 机构 | 同一接口，`campaign_id` 非空的行 | 同上 | ✅ 实测：TAP 行 `creator_username` 为空、`content_id`（VID）有值 |
+| 官号 | 视频分析 `GET /analytics/202605/shop_videos/performance`，`creator.author_type = OFFICIAL_ACCOUNTS` 或账号名含 artphro | VID × 商品，次日 | 官号不走联盟，联盟订单里没有 |
 
-- 数据库容量（3.88GB / 7.6GB，G9 治理中）：只存汇总，保留 🙋 N 天（建议 90）。
-- TikTok Shop 调用走 `_shared/tts.ts`（`tts-export` 同一套签名与退避）；限速未核验，按每店串行。
+账号类型（与来源是两回事）：达人 / 营销号（`MARKETING_ACCOUNTS`，负责人定 = 渠道号）/ 官号。
 
-## 5. 待实测（负责人在「API测试」页粘贴，结果贴回给 Claude）
+## 2. 探测结果（VN，2026-11-26 整日，负责人在「API测试」页跑，2026-11-27）
 
-VN 店，北京时间 2026-11-26 整日（VN 当地 00:00 = 1795626000）：
+**联盟订单**（`total_count` 62 个 SKU 行，单页返回完）
+- 字段齐：`creator_username`、`content_type`（实测出现 VIDEO / SHOP / LINKSHARE）、`content_id`、`product_id`、`sku_id`、`sku_name`、`seller_sku`（如 AR333-B-K）、`price`、`quantity`、`create_time`、`settlement_status`（含 INELIGIBLE）、`target_collaboration_id` / `open_collaboration_id`（定向 / 公开计划）。
+- TAP 行只看到 1 行（`campaign_id` 7612912158965286663、`partner_commission_rate` 2000、达人名为空、VID 有值）。⚠️ 负责人说「大部分是 TAP 机构出单」，VN 当天样本不符，其他站点未测。
 
-```
-tts-p0-probe {"action":"raw","shop_id":"8646920450130020342","method":"POST","path":"/affiliate_seller/202410/orders/search","query":{"page_size":"100"},"body":{"create_time_ge":1795626000,"create_time_lt":1795712400}}
-```
-看：有无 `campaign_id` 行、这些行的 `content_id` / `creator_username`、`total_count`。
+**视频列表 202605**（`account_type=ALL`、单日、按 gmv 倒序）
+- ✅ 单日可查；`latest_available_date` = 2026-11-26（次日可用）。
+- `total_count` 2907：**含当天 0 成交的视频**，有成交的约前 30 条 → 翻页到 gmv=0 即停。
+- `author_type` 实测值：`AFFILIATE_ACCOUNTS`、`OFFICIAL_ACCOUNTS`（artphro_vn）。⚠️ 其他站点官号（artphro_ph、artphro_thh）在 VN 店显示为 `AFFILIATE_ACCOUNTS` → 官号识别要加「账号名含 artphro」规则（负责人：官号一般以 ARTPHRO 命名）。
+- `attributed_gmv` = `gmv` + `indirect_gmv`。
 
-```
-tts-p0-probe {"action":"raw","shop_id":"8646920450130020342","method":"GET","path":"/analytics/202605/shop_videos/performance","query":{"start_date_ge":"2026-11-26","end_date_lt":"2026-11-27","page_size":"100","sort_field":"gmv","sort_order":"DESC","currency":"LOCAL","account_type":"ALL"}}
-```
-看：单日能否查、`creator.author_type` 取值、官号视频是否在内、`total_count`。把 `account_type` 换成 `MARKETING_ACCOUNTS`、`OFFICIAL_ACCOUNTS` 各跑一次。
+**视频 GMV vs 联盟订单（同 VID，人工从贴回结果摘录 8 个 VID，Python 计算）**
+- 5 个完全相等（联盟订单 price×quantity 合计 = 视频 `attributed_gmv`），3 个差 −1,000 / −1,000 / +10,000 VND。⚠️ 差异原因未查（可能是摘录误差或跨日边界），口径以联盟订单为准。
 
-```
-tts-p0-probe {"action":"raw","shop_id":"8646920450130020342","method":"GET","path":"/analytics/202509/shop_videos/<上一条第一个视频 id>/products/performance","query":{"start_date_ge":"2026-11-26","end_date_lt":"2026-11-27","page_size":"20","currency":"LOCAL"}}
-```
-看：单视频按 PID 拆的 GMV / 件数。
+**单视频按商品拆分**：未跑成（命令里的 `<视频id>` 占位没替换），不影响当前方案。
 
-对账：同一天 Seller Center 联盟订单三类导出的 GMV 合计，与 P1（达人 + TAP）及「视频 GMV − 联盟订单」差额对比。
+## 3. 用 GMV Max 数据做是否更简单（负责人 2026-11-27 问）
 
-## 6. 阶段
+| 要的列 | GMV Max 报表（按素材） | 联盟订单 | 视频分析 |
+|---|---|---|---|
+| 花费、ROI | ✅ 唯一来源 | — | — |
+| 订单、GMV | 只有广告带来的那部分 | ✅ 全部联盟出单（含自然流量） | 有，次日 |
+| 达人 handle | ❌ 接口已不返回（阶段 A 已确认） | ✅（TAP 行为空，用 VID 补） | ✅ |
+| SKU | ❌ 只到商品 | ✅ | ❌ |
+| 播放 | 有（广告播放） | — | ✅（全部播放） |
 
-1. 探测（上面 3 条）+ 负责人确认 §7 待定项 → 改原型。
-2. 后端：每小时联盟订单汇总 + 每日视频汇总 + 归属拼接；先 VN / PH 两店跑 7 天，与前端导出三类逐日对账。
-3. 前端页面（左侧「达人建联」或「店铺」组下新 tab，🙋 放哪组）。
-4. 可选：每晚飞书推「今日爆」。
+结论：只用 GMV Max 拿不到达人和 SKU，也漏掉非广告出单，不会更简单。建议三者拼：订单 / GMV / SKU / 达人用联盟订单，花费 / ROI 用 GMV Max（按 VID），播放 / 官号用视频分析。
+⚠️ GMV Max 每日落库自 10-12 暂停（ROADMAP §2 P0 待决策）。本页只需当天按 VID 汇总的花费，可以实时查或只存极小的日汇总，不依赖 §2 恢复 VID 级落库。
 
-## 7. 需负责人决策
+## 4. 页面（原型 v3）
 
-- 🙋 「爆」的口径：原型用「当日 GMV ≥ 近 7 日日均 × 3 且 ≥ 50 USD，或首次出单 ≥ 50 USD」。
-- 🙋 渠道号 = TikTok 营销号？不等于就建飞书「账号类型」表。
-- 🙋 官号视频产生的订单，在前端导出里算哪一类（非合作？还是不在三类里）。
-- 🙋 汇总保留天数（建议 90 天）。
-- 🙋 页面放在哪个导航组。
+- 页内 TAB：数据 / 设置 / 说明（说明默认不展开）。
+- 维度：达人 / 素材 / SKU。所有维度同一组 10 列，主行与展开行对齐：达人 | 素材 VID | SKU | 归属 | 播放 | 订单 | GMV | 花费 | ROI | 近 7 日。
+  - 达人维度：展开为该达人的素材，SKU 列显示该素材出单最多的 SKU。
+  - 素材维度：展开为该素材的 SKU。
+  - SKU 维度：按商品聚合，显示**主 SKU**（商品的第一个 SKU）+ 商品名，PID 小字；展开为各 SKU，主 SKU 标「主」。
+- 爆单（负责人 2026-11-27 定）：单素材当天订单 ≥ 10，或单达人当天订单 ≥ 20；两个门槛在「设置」可调。
+- ROI = 广告成交 ÷ 花费（GMV Max 口径）。🙋 是否要改成「联盟订单 GMV ÷ 花费」。
+- 归属：VID 登记人优先，其次达人归属 BD，官号显示「官号」，都没有显示「未归属」。
+
+## 5. 归属覆盖面（VN 2026-08，接口返回的 2,968 个有消耗 VID，按 GMV Max 花费算）
+
+达人 handle 命中 69.0%，VID 登记命中 26.0%，任一命中 70.4%。
+
+## 6. 存储与更新（待开工时定）
+
+- 联盟订单：每小时拉当天 + 昨天，按 站点 × 日 × VID × SKU × 来源 汇总存，不存订单原文。
+- GMV Max 花费：按 站点 × 日 × VID 汇总。
+- 视频分析：每天一次，只存有成交或有花费的 VID。
+- 保留天数 🙋（建议 90 天）。
+
+## 7. 待负责人决定
+
+- 🙋 是否开工、先做哪几个站点。
+- 🙋 ROI 口径（§4）。
+- 🙋 保留天数。
