@@ -58,6 +58,11 @@
   - ✅ 能用：`tt_account_authorization_type`（实测 TTS_TT 官号、AFFILIATE 联盟）、`shop_content_type`（VIDEO / PRODUCT_CARD，商品卡 item_id=-1）、`title`（视频文案）。
   - ❌ `tt_account_name` 实测全部为 "0"（存库样本 VN、PH 各 2 个视频，含 TTS_TT 官号与 AFFILIATE 联盟各类；头像同为 0）。按文档 = 我们的 token 对这些 TikTok 账号没有权限。⚠️ 样本只存了每个字段前 3 行，未逐行统计全部 20 行；连官号也是 0，说明不是「联盟达人才没有」。
   - 结论：**GMV Max 报表拿不到达人名，也拿不到 SKU**。达人名按 VID 关联：联盟订单 `creator_username`（实时，TAP 行为空）→ 视频分析 `username`（次日，9 站覆盖 100%）。官号/联盟可直接用 `tt_account_authorization_type` 区分。⚠️ 让账号名有值可能需要把账号授权进 BC（未核验，不建议为此改授权）。
+- **负责人 2026-11-27 定：SKU 维度用 SPU 足够**。主 SKU = 飞书商品表（`sku_product_map`，「SKU匹配表-TK」每晚同步）里该 SPU（product_id）出现的**第一行**的商家 SKU。⚠️ 现表无行号（id 为 uuid、created_at 全相同），开工时同步要加 `row_no` 才能取「第一行」。
+- **达人名来源比较（1127.335）**：
+  - TikTok Shop `/analytics/202605/shop_videos/performance`：✅ 已实测（VN 11-26），返回 `creator.user_name / nick_name / open_id / author_type`（实测值 AFFILIATE_ACCOUNTS / OFFICIAL_ACCOUNTS，不是第三方资料写的 AFFILIATE / CHANNEL）；`/analytics/202609/shop_videos/batch_performance`：✅ 9 站覆盖 100%，按 VID 批量（只有 username，无昵称）。→ **主方案**。
+  - Business `/gmv_max/identity/get/`：返回 `display_name / user_name`，但只列出店铺/BC 可用的广告发布身份（TTS_TT 官号/营销号、BC_AUTH_TT、TT_USER、AUTH_CODE）；**枚举里没有联盟达人（报表授权类型 AFFILIATE）**，且不含 VID，不能单独做 VID→达人。现有代码已在用（建组页视频账号面板，`listIdentities`）。
+  - Business `/gmv_max/video/get/`、`custom_anchor_video_list/get/`：按 identity 返回 `item_id + identity_info.display_name`。11-25 探测返回空——文档写明「未传 identity_list 且 need_auth_code_video≠true 时返回空列表」，**是请求写法问题**；但同样只覆盖上述身份，不含联盟达人。可用于给官号/营销号素材补名，价值低（Shop 接口已覆盖）。
 - **GMV Max 订单含自然流量**：文档写明 orders / gross_revenue 为 "paid and organic"（与负责人一致）。
 - **兜底（都已实测可用，不依赖上面的探测）**：
   - 达人名：按 VID 关联联盟订单的 `creator_username`（实时；TAP 行为空）或视频分析 `username`（次日；batch_performance 9 站覆盖 100%）。
