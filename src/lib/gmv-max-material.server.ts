@@ -1401,16 +1401,38 @@ export async function probeCreativeFields(db: SupabaseClient, country: string) {
   const end = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
   const start = new Date(Date.parse(`${end}T00:00:00Z`) - 6 * 86400_000).toISOString().slice(0, 10);
   const EXTRA = [
-    "tt_account_name", "tt_account_profile_image_url", "tt_account_authorization_type",
-    "shop_content_type", "title", "identity_id", "product_name",
+    "tt_account_name",
+    "tt_account_profile_image_url",
+    "tt_account_authorization_type",
+    "shop_content_type",
+    "title",
+    "identity_id",
+    "product_name",
   ];
   const BASE = ["cost", "orders", "gross_revenue"];
-  const out: Record<string, unknown> = { country, window: [start, end], at: new Date().toISOString() };
-  const call = async (token: string, adv: string, shop: string, dims: string[], filter: Record<string, unknown>, metrics: string[]) => {
+  const out: Record<string, unknown> = {
+    country,
+    window: [start, end],
+    at: new Date().toISOString(),
+  };
+  const call = async (
+    token: string,
+    adv: string,
+    shop: string,
+    dims: string[],
+    filter: Record<string, unknown>,
+    metrics: string[],
+  ) => {
     try {
       const d = await ttGet(token, "/gmv_max/report/get/", {
-        advertiser_id: adv, store_ids: JSON.stringify([shop]), dimensions: JSON.stringify(dims),
-        metrics: JSON.stringify(metrics), start_date: start, end_date: end, page: "1", page_size: "20",
+        advertiser_id: adv,
+        store_ids: JSON.stringify([shop]),
+        dimensions: JSON.stringify(dims),
+        metrics: JSON.stringify(metrics),
+        start_date: start,
+        end_date: end,
+        page: "1",
+        page_size: "20",
         filtering: JSON.stringify(filter),
       });
       const list = (d.list ?? []) as Record<string, unknown>[];
@@ -1422,57 +1444,118 @@ export async function probeCreativeFields(db: SupabaseClient, country: string) {
   let picked: Record<string, string> | null = null;
   const pickErrors: string[] = [];
   out.pick_errors = pickErrors;
-  for (const a of (advs ?? []) as { advertiser_id: string; shop_id: string | null; advertiser_name: string | null }[]) {
+  for (const a of (advs ?? []) as {
+    advertiser_id: string;
+    shop_id: string | null;
+    advertiser_name: string | null;
+  }[]) {
     const shop = String(a.shop_id ?? "");
     if (!shop) continue;
     const { data: conns } = await db
       .from("tiktok_connections")
       .select("access_token")
       .contains("advertiser_ids", [String(a.advertiser_id)]);
+    // 文档：系列级维度 [campaign_id] 需 gmv_max_promotion_types=["PRODUCT"]；商品级维度 [item_group_id] 必须过滤 campaign_ids。
+    const topBy = (d: Record<string, unknown>, key: string) =>
+      ((d.list ?? []) as Record<string, unknown>[])
+        .map((r) => ({
+          id: String(((r.dimensions ?? {}) as Record<string, unknown>)[key] ?? ""),
+          cost: Number(((r.metrics ?? {}) as Record<string, unknown>).cost ?? 0),
+        }))
+        .filter((r) => r.id && r.cost > 0)
+        .sort((x, y) => y.cost - x.cost);
     for (const c of (conns ?? []) as { access_token: string }[]) {
       try {
-        const d = await ttGet(c.access_token, "/gmv_max/report/get/", {
-          advertiser_id: String(a.advertiser_id), store_ids: JSON.stringify([shop]),
-          dimensions: JSON.stringify(["campaign_id", "item_group_id"]), metrics: JSON.stringify(["cost"]),
-          start_date: start, end_date: end, page: "1", page_size: "50", filtering: "{}",
-          sort_field: "cost", sort_type: "DESC",
-        });
-        const top = ((d.list ?? []) as Record<string, unknown>[])
-          .map((r) => ({ dims: (r.dimensions ?? {}) as Record<string, unknown>, cost: Number(((r.metrics ?? {}) as Record<string, unknown>).cost ?? 0) }))
-          .filter((r) => r.cost > 0 && r.dims.item_group_id && r.dims.campaign_id)
-          .sort((x, y) => y.cost - x.cost)[0];
-        if (top) {
-          picked = { token: c.access_token, adv: String(a.advertiser_id), name: String(a.advertiser_name ?? ""), shop,
-            cid: String(top.dims.campaign_id), igid: String(top.dims.item_group_id) };
-          break;
+        const base = {
+          advertiser_id: String(a.advertiser_id),
+          store_ids: JSON.stringify([shop]),
+          start_date: start,
+          end_date: end,
+          page: "1",
+          page_size: "100",
+          metrics: JSON.stringify(["cost"]),
+        };
+        const camps = topBy(
+          await ttGet(c.access_token, "/gmv_max/report/get/", {
+            ...base,
+            dimensions: JSON.stringify(["campaign_id"]),
+            filtering: JSON.stringify({ gmv_max_promotion_types: ["PRODUCT"] }),
+          }),
+          "campaign_id",
+        );
+        for (const camp of camps.slice(0, 3)) {
+          const prods = topBy(
+            await ttGet(c.access_token, "/gmv_max/report/get/", {
+              ...base,
+              dimensions: JSON.stringify(["item_group_id"]),
+              filtering: JSON.stringify({ campaign_ids: [camp.id] }),
+            }),
+            "item_group_id",
+          );
+          if (prods[0]) {
+            picked = {
+              token: c.access_token,
+              adv: String(a.advertiser_id),
+              name: String(a.advertiser_name ?? ""),
+              shop,
+              cid: camp.id,
+              igid: prods[0].id,
+            };
+            break;
+          }
         }
+        if (!camps.length) pickErrors.push(`${a.advertiser_id}: 近 7 天无有花费的系列`);
+        if (picked) break;
       } catch (e) {
         pickErrors.push(`${a.advertiser_id}: ${(e as Error).message.slice(0, 300)}`);
       }
     }
     if (picked) break;
   }
-  if (!picked) throw new Error(`站点 ${country} 近 7 天没找到有花费的广告户/系列/商品`);
+  if (!picked)
+    throw new Error(
+      `站点 ${country} 近 7 天没找到有花费的广告户/系列/商品：${pickErrors.join("；") || "无授权连接"}`,
+    );
   const { token, adv, shop, cid, igid } = picked;
-  out.picked = { advertiser_id: adv, advertiser_name: picked.name, campaign_id: cid, item_group_id: igid };
+  out.picked = {
+    advertiser_id: adv,
+    advertiser_name: picked.name,
+    campaign_id: cid,
+    item_group_id: igid,
+  };
   const f = { campaign_ids: [cid], item_group_ids: [igid] };
   // 官方文档（负责人 2026-11-27 贴）：属性指标（tt_account_name 等）只在「过滤单个 campaign_id + 单个 item_group_id、
   // 维度里只有一个 ID 维度」时返回；多 ID 维度或多 ID 过滤拿不到。素材级支持的维度组合：
   // [campaign_id,item_group_id,item_id](+stat_time_day)、[item_id,stat_time_day]；旧写法 [item_id] 需 creative_types（将废弃）。
   out.variants = {
     item_id_day: await call(token, adv, shop, ["item_id", "stat_time_day"], f, [...BASE, ...EXTRA]),
-    item_id_ads_organic: await call(token, adv, shop, ["item_id"], { ...f, creative_types: ["ADS_AND_ORGANIC"] }, [...BASE, ...EXTRA]),
+    item_id_ads_organic: await call(
+      token,
+      adv,
+      shop,
+      ["item_id"],
+      { ...f, creative_types: ["ADS_AND_ORGANIC"] },
+      [...BASE, ...EXTRA],
+    ),
     item_id_only: await call(token, adv, shop, ["item_id"], f, [...BASE, ...EXTRA]),
-    cid_igid_item: await call(token, adv, shop, ["campaign_id", "item_group_id", "item_id"], f, [...BASE, ...EXTRA]),
+    cid_igid_item: await call(token, adv, shop, ["campaign_id", "item_group_id", "item_id"], f, [
+      ...BASE,
+      ...EXTRA,
+    ]),
   };
   const single: Record<string, unknown> = {};
-  for (const m of EXTRA) single[m] = await call(token, adv, shop, ["item_id", "stat_time_day"], f, [...BASE, m]);
+  for (const m of EXTRA)
+    single[m] = await call(token, adv, shop, ["item_id", "stat_time_day"], f, [...BASE, m]);
   out.single_item_id = single;
   const { data: b, error: e2 } = await db
     .from("gmv_max_material_batches")
     .insert({
-      country, month: end.slice(0, 7), status: "READY", triggered_by: "probe:creative",
-      fields: { probe_creative: out }, finished_at: new Date().toISOString(),
+      country,
+      month: end.slice(0, 7),
+      status: "READY",
+      triggered_by: "probe:creative",
+      fields: { probe_creative: out },
+      finished_at: new Date().toISOString(),
     })
     .select("id")
     .single();
