@@ -1119,6 +1119,21 @@ export type Database = {
         }
         Relationships: []
       }
+      co_adv_active: {
+        Row: {
+          advertiser_id: string
+          d: string
+        }
+        Insert: {
+          advertiser_id: string
+          d: string
+        }
+        Update: {
+          advertiser_id?: string
+          d?: string
+        }
+        Relationships: []
+      }
       co_daily: {
         Row: {
           advertiser_id: number
@@ -4255,6 +4270,7 @@ export type Database = {
           p_from: string
           p_limit: number
           p_offset: number
+          p_only?: boolean
           p_q: string
           p_shops: string[]
           p_sort?: string
