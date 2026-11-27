@@ -27,7 +27,7 @@
 4. 新店接入回填起点：现为固定 2026-08-01（`SYNC_FROM`），保留期生效后是否改为「近 6 个月」
 
 ### 阶段
-1. **入库**（1125.264 代码完成）：`tts-export kind=sync` + 路由 `/api/public/hooks/tts-sync-cron` + pg_cron `tts-daily-sync`（每小时第 17 分）。表：`tts_orders`（订单原文，按 update_time 增量覆盖）、`tts_finance_statements`、`tts_finance_tx`（结算交易原文）、`tts_sync_state`（进度、错误、未登记字段）。存接口原文（去空值/0），口径映射放在汇总计算层。接口出现口径表未登记、且非 0 的字段 → 记录并发飞书。
+1. **入库**（1125.264 代码完成）：`tts-export kind=sync` + 路由 `/api/public/hooks/tts-sync-cron` + pg_cron `tts-daily-sync`（每天 3 次，新加坡 07:00/14:00/20:00 前完成（UTC `40,52 22,5,11 * * *`，1127.351；原每小时第 17 分））。表：`tts_orders`（订单原文，按 update_time 增量覆盖）、`tts_finance_statements`、`tts_finance_tx`（结算交易原文）、`tts_sync_state`（进度、错误、未登记字段）。存接口原文（去空值/0），口径映射放在汇总计算层。接口出现口径表未登记、且非 0 的字段 → 记录并发飞书。
 2. **口径清单 + 对账**：把 finance-order 全部取数/计算规则列成清单；API 数据按清单算出 PH、TH 三个月的结果，与手工表结果逐列对比。
    - 已知差异点：接口结算交易是订单维度，不带 SKU ID / 数量。拟沿用 finance-order 现有 PHL 规则「按订单号展开订单表 SKU 行，金额只挂第一条」——**须在对账中验证成本件数一致**，不一致再改为逐单拉 SKU 级明细。
    - 接口导出缺「订单创建时间」列：结算交易原文里取 `order_create_time`（已单独入库）。

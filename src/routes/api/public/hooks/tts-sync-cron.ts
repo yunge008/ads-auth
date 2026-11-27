@@ -1,7 +1,7 @@
 // TikTok Shop 订单 / 财务结算 每日增量入库驱动（负责人 2026-11-25：先按天更新，先 PH、TH）。
 //
 // 调用方：
-//   ① pg_cron `tts-daily-sync`（每小时第 17 分）：带 x-cron-key；
+//   ① pg_cron `tts-daily-sync`（每天 3 次，新加坡 07:00/14:00/20:00 前完成，每时段两次续跑）：带 x-cron-key；
 //   ② 管理员手动：带 x-admin-passcode / x-admin-name，body 可选 {shop_ids?: string[], parts?: ("orders"|"finance")[]}。
 // 范围：tts_shops.daily_sync = true 的店铺（migration 20261125120000 先开 PH、TH）。
 // 每店每部分循环调 Edge Function tts-export kind=sync 直到 finished 或本轮时间用完（下轮从 tts_sync_state.cursor 续跑）。

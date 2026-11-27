@@ -4,7 +4,7 @@
 > 核对脚本：`bash tools/check-api-limits.sh`。代码里出现、本文「登记表」没有的接口路径会被列出并返回非 0；把新路径补进对应表格（含频率、峰值估算）后再提交。
 > 标记：✅ 已核验 ｜ ⚠️ 未核验/估算 ｜ 🔴 已知超速风险
 
-最后更新：2026-11-27（1127.347）
+最后更新：2026-11-27（1127.351）
 
 ---
 
@@ -46,7 +46,7 @@
 
 | 路径 | 调用方 | 触发 | 每次调用量（估） | 峰值 |
 |---|---|---|---|---|
-| `/gmv_max/report/get/` | 达人出单 `creator-orders`（同步） | pg_cron `creator-orders-step` 每 5 分钟，每次 ≤25s；页面「立即刷新」 | 29 户×3 天=87 单元/小时；每单元 1+⌈活动数/50⌉+⌈SPU/20⌉ 次，大户切半重试 | 串行，单进程实测约 1–3 次/秒 → **≤约 180 QPM** ⚠️ |
+| `/gmv_max/report/get/` | 达人出单 `creator-orders`（同步） | pg_cron `creator-orders-step` 每 5 分钟，每次 ≤25s；页面「立即刷新」（今天+昨天） | 1127.351 起只查当天启用户（现 11 户）；今天每小时、昨天每 6 小时、前天每天 2 次（新加坡时间）→ 每户每天 30 个「户×天」单元（原 72）；每单元 1+⌈活动数/50⌉+⌈SPU/20⌉ 次，大户切半重试；⚠️ 估每天约 1,700 次（原约 8,200） | 串行，单进程实测约 1–3 次/秒 → **≤约 180 QPM** ⚠️ |
 | `/gmv_max/report/get/` | 素材成效 / 对账 `gmv-max-material` | 手动 | 每户×每天数次～数十次 | 串行 ≤约 180 QPM ⚠️ |
 | `/gmv_max/report/get/` | 建组页近 N 天消耗 `gmv-max-write`、`gmv-max-live-status`、`gmv-max-raw-export`（经 `_shared/gmv-max-report.ts`）、`gmv-max-sync`（已暂停） | 手动 | 每次几～几十次 | 串行 |
 | `/gmv_max/campaign/get/` | 同上各处 + 达人出单 | 同上 | 每户每天 1～数页 | 低 |
@@ -78,7 +78,7 @@
 | `/analytics/202609/shop_videos/batch_performance` | 达人出单补名、`gmv-max-material` | 同上 | 每 100 个 VID 1 次 | 同上 ⚠️ |
 | `/analytics/202409/shop_videos/performance` | `gmv-max-material` | 手动 | 少量 | 低 |
 | `/analytics/202509/shop_videos/{x}/performance` | `gmv-max-material` | 手动 | 每 VID 1 次 | 2.8/s 上限（ttsCall 不适用，Node 版） |
-| `/order/202309/orders/search` | `tts-export`（每日入库）、`sea-inventory`、`tts-p0-probe` | `tts-daily-sync` 每小时第 17 分（PH、TH，≤8 分钟）；SEA 库存每日 2 次 | 每页 100 单 | ≈2.8/s |
+| `/order/202309/orders/search` | `tts-export`（每日入库）、`sea-inventory`、`tts-p0-probe` | `tts-daily-sync` 每天 3 次，新加坡 07:00/14:00/20:00 前完成（PH、TH）；SEA 库存每日 2 次 | 每页 100 单 | ≈2.8/s |
 | `/order/202309/orders` | `tts-export` | 同上 | 每 50 单 1 次 | ≈2.8/s |
 | `/finance/202309/statements` | `tts-export` | 同上 | 每店每天数页 | ≈2.8/s |
 | `/finance/202501/statements/{x}/statement_transactions` | `tts-export`、`tts-p0-probe` | 同上 | 每结算单数页 | ≈2.8/s |
@@ -131,7 +131,7 @@
 | 任务 | 时间（UTC） | 北京时间 | 外部接口 | 共用桶 |
 |---|---|---|---|---|
 | `creator-orders-step` | 每 5 分钟（每次 ≤25s） | — | BC report / campaign；Shop analytics 视频 | BC 应用桶；Shop 各店 |
-| `tts-daily-sync` | 每小时 :17（≤8 分钟） | — | Shop 订单 / 财务（PH、TH） | Shop PH、TH |
+| `tts-daily-sync` | 22:40/22:52、05:40/05:52、11:40/11:52（每次 ≤8 分钟） | 新加坡 06:40–07:00、13:40–14:00、19:40–20:00 | Shop 订单 / 财务（PH、TH） | Shop PH、TH |
 | `reviews-nightly` | 16:35 / 17:35 / 18:35 | 00:35 / 01:35 / 02:35 | Shop analytics 商品 | Shop 全部店 |
 | `feishu-sync-nightly` | 15:00 | 23:00 | 飞书 | — |
 | `attribution-snapshot-nightly` | 15:30 | 23:30 | 无外部 | — |
@@ -142,7 +142,7 @@
 | `gmv-max-sync` | 已暂停（`GMV_MAX_SYNC_PAUSED`） | — | — | — |
 
 **重叠点**：
-- 每小时 :15–:25：`creator-orders-step`（BC）与 `tts-daily-sync`（Shop PH/TH）同时跑，**不同桶，互不影响**。
+- 新加坡 06:40、13:40、19:40 起各约 20 分钟：`tts-daily-sync`（Shop PH/TH）与 `creator-orders-step`（BC）同时跑，**不同桶，互不影响**。
 - 00:35–03:00 北京：`reviews`（Shop analytics，约 2.8/s/店）与 `creator-orders` 补名（Shop analytics 视频，无间隔）**同店同类接口叠加** ⚠️。补名只在有新 VID 时调用，量小。
 - 19:00 北京：自动授权（BC）与 `creator-orders-step`（BC）同桶，但不是同一个接口（授权 vs 报表），按接口分别计数，不叠加。
 - 白天手动：「达人出单 立即刷新」+ 定时同步 + 素材成效对账同时跑时，**`/gmv_max/report/get/` 三路串行叠加可能超过 240 QPM** 🔴。
@@ -185,7 +185,7 @@
 | 分钟 | BC `/gmv_max/report/get/` | Shop 订单/财务 | Shop Analytics |
 |---|---|---|---|
 | :00–:14 | 达人出单同步（定时） | — | — |
-| :17–:25 | （空，留给手动） | `tts-daily-sync`（现状不变） | — |
+| :17–:25 | （空，留给手动） | —（1127.351 起 `tts-daily-sync` 改为每天 3 次，见 §4） | — |
 | :30–:44 | 达人出单同步续跑 | — | 北京 00:35/01:35/02:35 `reviews`（现状不变） |
 | :47–:57 | — | — | 达人出单补名（**改**：现在同步完立刻补，可能撞 reviews） |
 
@@ -209,3 +209,7 @@
 | D3 | BC 全局令牌桶：DB 记每分钟 `/gmv_max/report/get/` 调用数，≥180 次/分钟（240 留 25% 余量）时所有调用方等待 | 彻底解决多路叠加（含素材成效对账）；改 `_shared/tiktok.ts`，需部署所有 BC 函数，每次请求多一次 DB 往返（约 50ms） |
 | D4 | 首页素材授权并发 3 路 × 8 户 → 2 路 × 5 户（最多 10 并发 ≈ 默认 10 QPS） | 手动授权变慢约 2 倍 |
 | D5 | `reviews` 是否把 Analytics 降到 1 次/秒 | ❌ 不建议：PH 734 + TH 635 + VN 437 等约 2,600 次 ≈ 43 分钟，超出三个 8 分钟窗口；实测 2.8/s 未限流，用 O4 自适应即可 |
+
+### 7.4 已定并实施（1127.351，负责人 2026-11-27；时间均按新加坡时间）
+- 达人出单：只查**当天启用**的广告户（`co_adv_active`：每轮把此刻启用户记到今天，设置里停用时触发器记停用当天）；今天每小时、昨天 0/6/12/18 点、前天 6/18 点那一轮。估算 BC 报表调用每天约 8,200 → 约 1,700（11 个启用户 × 30 单元 × 约 5 次）⚠️ 未实测。
+- 订单/财务入库：每小时 → 每天 3 次，07:00、14:00、20:00 前完成（每时段两次，第二次续跑）。Shop PH/TH 每天约 300 → 约 60–100 次 ⚠️。

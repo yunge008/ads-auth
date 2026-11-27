@@ -223,7 +223,7 @@ GMV Max 导入记录，逐商品一行：batch_id / kind(excel|single|copy) / so
 - 第一版「网站服务端路由 /api/public/hooks/ai-db-read」已删除（需发布才生效，不符合「核验后台最新版本」）。
 
 ### TikTok Shop 订单/财务每日入库（2026-11-25，migration 20261125120000；规则见 docs/AUTO_DATA_PLAN.md）
-- pg_cron `tts-daily-sync`（每小时第 17 分）→ `/api/public/hooks/tts-sync-cron`（x-cron-key；管理员可带口令手动触发，body `{shop_ids?, parts?}`）→ 逐店逐部分循环调 `tts-export` `kind=sync part=orders|finance`（cron 只放行 sync），单轮 8 分钟，未完成的从 `tts_sync_state.cursor` 下轮续跑。
+- pg_cron `tts-daily-sync`（每天 3 次，新加坡 07:00/14:00/20:00 前完成（UTC `40,52 22,5,11 * * *`，1127.351；原每小时第 17 分））→ `/api/public/hooks/tts-sync-cron`（x-cron-key；管理员可带口令手动触发，body `{shop_ids?, parts?}`）→ 逐店逐部分循环调 `tts-export` `kind=sync part=orders|finance`（cron 只放行 sync），单轮 8 分钟，未完成的从 `tts_sync_state.cursor` 下轮续跑。
 - 范围：`tts_shops.daily_sync = true`（先 PH、TH）。首次从 2026-08-01（店铺本地 0 点）回填。
 - 订单：`/order/202309/orders/search` 按 `update_time` 增量（往回重叠 2 小时），附 Search Returns 退货汇总，原文 upsert `tts_orders`。结算：`/finance/202309/statements` 按 `statement_time`（重叠 2 天）upsert `tts_finance_statements`；交易明细未入库的结算单逐张拉 `/finance/202501/statements/{id}/statement_transactions` upsert `tts_finance_tx`，完成后标 `tx_synced_at`。
 - 订单入库按**黑名单**瘦身（1126.314 起加严，`slimOrder`：TOP_DROP 直接去掉；商品行与订单级相同的字段、顶层默认值、false 只在相等时去掉——读原文时字段缺省即取订单级/默认值）；`checkSlim` 每单校验新字段（照存并提示）/ 缺字段 / 瘦身前后导出行一致，不一致改存完整原文（去个人信息）。存量由 migration 20261126160000 一次性回刷。

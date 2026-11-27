@@ -1,9 +1,10 @@
 // 达人出单日报 定时同步（pg_cron `creator-orders-step`，每 5 分钟，带 x-cron-key）。
 // 分步：每次 ≤25 秒，游标存 co_settings（sync_cursor / names_cursor / cycle_started_at）。
-// 每个整点开始新一轮：先逐户拉今天及前两天 GMV Max 素材 × 商品（广告户时区），再给新 VID 补达人名。逻辑见 src/lib/creator-orders.server.ts。
+// 每个整点开始新一轮：先逐户拉 GMV Max 素材 × 商品，再给新 VID 补达人名。逻辑见 src/lib/creator-orders.server.ts。
+// 刷哪几天见 cycleDays（新加坡时间：今天每小时、昨天每 6 小时、前天 6/18 点）；只查当天启用的户（co_adv_active）。
 import { createFileRoute } from "@tanstack/react-router";
 import { isCronCaller } from "@/lib/cron-caller.server";
-import { adminDb, enrichNames, syncAll } from "@/lib/creator-orders.server";
+import { adminDb, cycleDays, enrichNames, syncAll } from "@/lib/creator-orders.server";
 
 const jsonRes = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -42,6 +43,7 @@ export const Route = createFileRoute("/api/public/hooks/creator-orders-cron")({
               .update({ sync_cursor: syncCursor, cycle_started_at: cycle, sync_tries: tries + 1 })
               .eq("id", 1);
             const r = await syncAll(db, {
+              days: cycleDays(cycle ?? now),
               deadline,
               start: syncCursor,
               skipAt: tries >= 2 ? syncCursor : undefined,

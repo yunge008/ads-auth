@@ -53,8 +53,21 @@ export async function checkCoPasscode(
 
 // ───────────────────────── 日期 ─────────────────────────
 /** 新加坡（UTC+8）日期，offset 天 */
-export function sgDate(offset = 0): string {
-  return new Date(Date.now() + 8 * 3600_000 + offset * 86400_000).toISOString().slice(0, 10);
+export function sgDate(offset = 0, base = Date.now()): string {
+  return new Date(base + 8 * 3600_000 + offset * 86400_000).toISOString().slice(0, 10);
+}
+
+/**
+ * 定时一轮要刷哪几天（负责人 2026-11-27，时间均按新加坡时间，按本轮开始时刻算，跨零点不变）：
+ * 今天每小时；昨天在 0/6/12/18 点那一轮；前天在 6/18 点那一轮（花费最多晚到约 11 小时）。
+ */
+export function cycleDays(cycleIso: string): string[] {
+  const t = Date.parse(cycleIso);
+  const h = new Date(t + 8 * 3600_000).getUTCHours();
+  const days = [sgDate(0, t)];
+  if (h % 6 === 0) days.unshift(sgDate(-1, t));
+  if (h === 6 || h === 18) days.unshift(sgDate(-2, t));
+  return days;
 }
 
 /** 与 attribution.ts normalizeName 相同：NFKC + trim + 空白折叠 + 小写 */
@@ -208,15 +221,42 @@ export async function syncAll(
   opts: { days?: string[]; deadline: number; only?: string[]; start?: number; skipAt?: number },
 ) {
   // 最小步 = 广告户 × 天（大户单日数据量大，整户跑可能超过单次请求时长）；cursor = 步序号
+  // 只查「当天启用」的广告户（负责人 2026-11-27）：co_adv_active 记 广告户 × 新加坡日期。
+  // 每轮第一步把此刻启用的户记到今天；设置里停用时触发器记停用当天 → 回看那天仍会查它。
   const days = opts.days ?? [sgDate(-2), sgDate(-1), sgDate(0)];
   const { data: advRows, error } = await db
     .from("advertiser_countries")
-    .select("advertiser_id,country,shop_id,advertiser_name");
+    .select("advertiser_id,country,shop_id,advertiser_name,active");
   if (error) throw new Error(error.message);
-  const advs = ((advRows ?? []) as Adv[])
+  const all = (advRows ?? []) as (Adv & { active: boolean | null })[];
+  if (!opts.start) {
+    const today = sgDate(0);
+    const marks = all
+      .filter((a) => a.active)
+      .map((a) => ({ d: today, advertiser_id: a.advertiser_id }));
+    if (marks.length) {
+      const { error: me } = await db
+        .from("co_adv_active")
+        .upsert(marks, { onConflict: "d,advertiser_id", ignoreDuplicates: true });
+      if (me) throw new Error(`记录启用户：${me.message}`);
+    }
+  }
+  const { data: actRows, error: ae } = await db
+    .from("co_adv_active")
+    .select("d,advertiser_id")
+    .in("d", days);
+  if (ae) throw new Error(ae.message);
+  const activeOn = new Set(
+    ((actRows ?? []) as { d: string; advertiser_id: string }[]).map(
+      (r) => `${r.advertiser_id}|${r.d}`,
+    ),
+  );
+  const advs = all
     .filter((a) => a.shop_id && (!opts.only || opts.only.includes(a.advertiser_id)))
     .sort((a, b) => a.advertiser_id.localeCompare(b.advertiser_id));
-  const units = advs.flatMap((adv) => days.map((day) => ({ adv, day })));
+  const units = advs.flatMap((adv) =>
+    days.filter((day) => activeOn.has(`${adv.advertiser_id}|${day}`)).map((day) => ({ adv, day })),
+  );
   const report: { advertiser: string; day: string; rows?: number; error?: string }[] = [];
   const campCache = new Map<string, { token: string; campaigns: string[] }>();
   for (let i = opts.start ?? 0; i < units.length; i++) {
