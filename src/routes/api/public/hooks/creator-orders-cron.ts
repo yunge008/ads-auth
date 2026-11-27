@@ -51,7 +51,8 @@ export const Route = createFileRoute("/api/public/hooks/creator-orders-cron")({
             step = r;
             syncCursor = r.next;
             if (syncCursor == null) namesCursor = 0;
-          } else if (namesCursor != null) {
+          } else if (namesCursor != null && new Date().getUTCMinutes() >= 45) {
+            // 错峰（负责人 2026-11-27）：补名用 Shop Analytics，只在每小时 :45–:59 跑，避开 reviews（:35 起）等同店同类调用
             const r = await enrichNames(db, deadline, namesCursor);
             step = r;
             namesCursor = r.next;

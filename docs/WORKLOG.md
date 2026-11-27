@@ -449,3 +449,4 @@
 2026-11-27 | claude | [1127.354] 核对 1127.351：migration 已执行（co_adv_active 已有数据）；截至新加坡 22:15 定时同步仍查停用户 = 旧代码，Publish 未生效。上轮错误：达人出单降频后调用量误估 1,700/天，实为约 2,900；全项目约 5,600/天。API_RATE_LIMITS 新增 §8 当前调用量总表。
 2026-11-27 | claude | [1127.355] 评论查看·评论内容：SKU 列改卖家 SKU 简写 + 截断（规格悬停），修超宽；评论原文完整显示、行高自适应，回复铺满本行高度截断；migration 20261127260000；登记 250000 已执行。 | supabase/migrations/20261127260000_review_list_spec.sql、src/components/reviews/{CommentsView,shared}.tsx、src/lib/reviewsApi.ts、docs/*、src/lib/version.ts |
 2026-11-27 | claude | [1127.356] BC 官方限额核验（负责人贴官方页）：报表接口 Basic 8 QPS/240 QPM/80,000 QPD，超 QPD 停到次日 UTC 0 点；API_RATE_LIMITS §1.2 改 ✅，新增 §9 按限额核对。
+2026-11-27 | claude | [1127.357] 负责人定限速只靠错峰：API_RATE_LIMITS §6 加错峰规则（新接口/定时先查时间线，冲突改执行时间，新加坡时间）、CLAUDE.md 同步；达人出单补名只在每小时 :45–:59 跑（避开 reviews）。需 Publish。
