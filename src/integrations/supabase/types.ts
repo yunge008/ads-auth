@@ -1160,22 +1160,34 @@ export type Database = {
       }
       co_settings: {
         Row: {
+          cycle_started_at: string | null
           id: number
+          names_cursor: number | null
           own_kw: string
+          sync_cursor: number | null
+          sync_tries: number
           t_cr: number
           t_vid: number
           updated_at: string | null
         }
         Insert: {
+          cycle_started_at?: string | null
           id?: number
+          names_cursor?: number | null
           own_kw?: string
+          sync_cursor?: number | null
+          sync_tries?: number
           t_cr?: number
           t_vid?: number
           updated_at?: string | null
         }
         Update: {
+          cycle_started_at?: string | null
           id?: number
+          names_cursor?: number | null
           own_kw?: string
+          sync_cursor?: number | null
+          sync_tries?: number
           t_cr?: number
           t_vid?: number
           updated_at?: string | null
@@ -4239,11 +4251,13 @@ export type Database = {
       }
       review_list: {
         Args: {
+          p_desc?: boolean
           p_from: string
           p_limit: number
           p_offset: number
           p_q: string
           p_shops: string[]
+          p_sort?: string
           p_stars: number[]
           p_to: string
         }
