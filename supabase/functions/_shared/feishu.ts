@@ -40,7 +40,7 @@ export async function listSheets(token: string, spreadsheetToken: string) {
  * 字符串形态照样是「19 位数字」、正则照样通过，但值已经错了，归因时永远匹配不上。
  * 所有读取一律走 ToString，数字/日期列由 cellText / parseDate 从文本还原。
  */
-export type ValueRenderOption = "ToString" | "FormattedValue" | "UnformattedValue";
+export type ValueRenderOption = "ToString" | "FormattedValue" | "UnformattedValue" | "Formula";
 
 export async function readRange(
   token: string,
