@@ -1,0 +1,19 @@
+# 新品推广 / 产品推广计划 替换公式（2026-11-28，复制表实测）
+
+口径变更（负责人 2026-11-28 定）：
+1. 寄样按「站点 | 发样日期 | SKU | 达人」去重（新品推广原公式按行计数，复制出来的素材行会重复算）。产品推广计划原来就去重，不变。
+2. 组合 SKU 按数字段匹配：3120-K+3121-K 计入 3120+3121（原公式不计）。寄样、返素材都改。
+
+用法：以第 1 位同事（李汝华）第 4 行为例。整对复制（寄样+返素材两格）到右边各同事的两列、再往下拉；公式里同事名/站点引用会跟着列移动。
+
+## 新品推广 G4（李汝华 · 寄样数量）
+=IF(OR($A4="",$B4="",G$2="",H$2=""),"",IFERROR(LET(sh,"建联-"&TRIM(G$2),b,INDIRECT("'"&sh&"'!$B$3:$B$55000"),area,INDIRECT("'"&sh&"'!$C$3:$C$55000"),d,INDIRECT("'"&sh&"'!$D$3:$D$55000"),k,INDIRECT("'"&sh&"'!$K$3:$K$55000"),bd,ARRAYFORMULA(IFERROR(INT(VALUE(b)),0)),startDate,INT($A4),endDate,startDate+89,sku,","&REGEXREPLACE(TRIM($B4&""),"[^0-9]+",",")&",",sites,ARRAYFORMULA(TRIM(SUBSTITUTE(SPLIT(SUBSTITUTE(H$2&"","，",","),","),CHAR(160)," "))),base,IFERROR(FILTER({ARRAYFORMULA(TRIM(SUBSTITUTE(area&"",CHAR(160)," "))),ARRAYFORMULA(TRIM(SUBSTITUTE(area&"",CHAR(160)," "))&"|"&bd&"|"&TRIM(k&"")&"|"&TRIM(d&""))},bd>=startDate,bd<=endDate,ARRAYFORMULA(TRIM(d&"")<>""),ARRAYFORMULA(ISNUMBER(SEARCH(sku,","&REGEXREPLACE(TRIM(k&""),"[^0-9]+",",")&",")))),{"#无#","#无#"}),ra,INDEX(base,,1),key,INDEX(base,,2),cnt,MAP(sites,LAMBDA(s,IFERROR(ROWS(UNIQUE(FILTER(key,ARRAYFORMULA(((ra=s)+(LEFT(ra,LEN(s)+1)=s&"-"))>0)))),0))),IF(SUM(cnt)=0,0,TEXTJOIN(CHAR(10),TRUE,ARRAYFORMULA(sites&": "&cnt)))),0))
+
+## 新品推广 H4（李汝华 · 返素材数量）
+=IF(OR($A4="",$B4="",G$2="",H$2=""),"",IFERROR(LET(sh,"建联-"&TRIM(G$2),n,INDIRECT("'"&sh&"'!$N$3:$N$55000"),area,INDIRECT("'"&sh&"'!$C$3:$C$55000"),d,INDIRECT("'"&sh&"'!$D$3:$D$55000"),k,INDIRECT("'"&sh&"'!$K$3:$K$55000"),p,INDIRECT("'"&sh&"'!$P$3:$P$55000"),nd,ARRAYFORMULA(IFERROR(INT(VALUE(n)),0)),startDate,INT($A4),endDate,startDate+89,sku,","&REGEXREPLACE(TRIM($B4&""),"[^0-9]+",",")&",",sites,ARRAYFORMULA(TRIM(SUBSTITUTE(SPLIT(SUBSTITUTE(H$2&"","，",","),","),CHAR(160)," "))),base,IFERROR(FILTER({ARRAYFORMULA(TRIM(SUBSTITUTE(area&"",CHAR(160)," "))),ARRAYFORMULA(TRIM(d&"")&"|"&TRIM(k&"")&"|"&TRIM(p&""))},nd>=startDate,nd<=endDate,ARRAYFORMULA(TRIM(p&"")<>""),ARRAYFORMULA(ISNUMBER(SEARCH(sku,","&REGEXREPLACE(TRIM(k&""),"[^0-9]+",",")&",")))),{"#无#","#无#"}),ra,INDEX(base,,1),key,INDEX(base,,2),cnt,MAP(sites,LAMBDA(s,IFERROR(ROWS(UNIQUE(FILTER(key,ARRAYFORMULA(((ra=s)+(LEFT(ra,LEN(s)+1)=s&"-"))>0)))),0))),IF(SUM(cnt)=0,0,TEXTJOIN(CHAR(10),TRUE,ARRAYFORMULA(sites&": "&cnt)))),0))
+
+## 产品推广计划 H4（李汝华 · 寄样数量）
+=IF(TRIM($D4&"")="","",IFERROR(LET(sh,"建联-"&TRIM(H$2),b,INDIRECT("'"&sh&"'!$B$3:$B$55000"),area,INDIRECT("'"&sh&"'!$C$3:$C$55000"),d,INDIRECT("'"&sh&"'!$D$3:$D$55000"),k,INDIRECT("'"&sh&"'!$K$3:$K$55000"),bd,ARRAYFORMULA(IFERROR(INT(VALUE(b)),0)),sku,","&REGEXREPLACE(TRIM($D4&""),"[^0-9]+",",")&",",startDate,IF(TRIM($B4&"")="",1,INT(VALUE($B4))),endDate,IF(TRIM($C4&"")="",10^10,INT(VALUE($C4))),tgt,TRIM(SUBSTITUTE($G4&"",CHAR(160)," ")),r,UNIQUE(FILTER(ARRAYFORMULA(bd&"|"&TRIM(d&"")&"|"&TRIM(k&"")),bd>=startDate,bd<=endDate,ARRAYFORMULA(TRIM(SUBSTITUTE(area&"",CHAR(160)," "))=tgt),ARRAYFORMULA(TRIM(d&"")<>""),ARRAYFORMULA(ISNUMBER(SEARCH(sku,","&REGEXREPLACE(TRIM(k&""),"[^0-9]+",",")&","))))),ROWS(r)),0))
+
+## 产品推广计划 I4（李汝华 · 返素材数量）
+=IF(TRIM($D4&"")="","",IFERROR(LET(sh,"建联-"&TRIM(H$2),n,INDIRECT("'"&sh&"'!$N$3:$N$55000"),area,INDIRECT("'"&sh&"'!$C$3:$C$55000"),d,INDIRECT("'"&sh&"'!$D$3:$D$55000"),k,INDIRECT("'"&sh&"'!$K$3:$K$55000"),p,INDIRECT("'"&sh&"'!$P$3:$P$55000"),nd,ARRAYFORMULA(IFERROR(INT(VALUE(n)),0)),sku,","&REGEXREPLACE(TRIM($D4&""),"[^0-9]+",",")&",",startDate,IF(TRIM($B4&"")="",1,INT(VALUE($B4))),endDate,IF(TRIM($C4&"")="",10^10,INT(VALUE($C4))),tgt,TRIM(SUBSTITUTE($G4&"",CHAR(160)," ")),r,UNIQUE(FILTER(ARRAYFORMULA(TRIM(d&"")&"|"&TRIM(k&"")&"|"&TRIM(p&"")),nd>=startDate,nd<=endDate,ARRAYFORMULA(TRIM(SUBSTITUTE(area&"",CHAR(160)," "))=tgt),ARRAYFORMULA(TRIM(p&"")<>""),ARRAYFORMULA(ISNUMBER(SEARCH(sku,","&REGEXREPLACE(TRIM(k&""),"[^0-9]+",",")&","))))),ROWS(r)),0))
