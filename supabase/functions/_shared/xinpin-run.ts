@@ -7,6 +7,7 @@ import {
   type ClipRow,
   type Row,
   calcChanpin,
+  bdSitesFromXinpin,
   calcXinpin,
   colLetter,
   sameValue,
@@ -86,7 +87,11 @@ export async function runXinpin(body: Record<string, unknown>, opt: RunOptions) 
 
   // 1) 读两张统计表的配置（值 + 公式模板）
   const cfg: Record<string, { sid: string; values: Row[]; formulas: Row[]; lastCol: string }> = {};
-  const tableTitle: Record<string, string> = { xinpin: "新品推广", chanpin: "产品推广计划" };
+  // 配置/模板 sheet（读 A/B/D/G 列、第 2/3 行和统计格位置）；默认就是原 sheet，可传 xinpin_sheet / chanpin_sheet 覆盖
+  const tableTitle: Record<string, string> = {
+    xinpin: String(body.xinpin_sheet ?? "新品推广"),
+    chanpin: String(body.chanpin_sheet ?? "产品推广计划"),
+  };
   for (const t of tables) {
     const id = need(tableTitle[t]);
     const lastCol = t === "xinpin" ? "S" : "Z";
@@ -140,7 +145,10 @@ export async function runXinpin(body: Record<string, unknown>, opt: RunOptions) 
   // 4) 计算
   const result: Record<string, CellOut[]> = {};
   if (cfg.xinpin) result.xinpin = calcXinpin(cfg.xinpin.values, cfg.xinpin.formulas, bd, clips);
-  if (cfg.chanpin) result.chanpin = calcChanpin(cfg.chanpin.values, cfg.chanpin.formulas, bd);
+  if (cfg.chanpin) {
+    const xv = cfg.xinpin?.values ?? (await readRange(token, dataSS, `${need(tableTitle.xinpin)}!A1:S3`));
+    result.chanpin = calcChanpin(cfg.chanpin.values, cfg.chanpin.formulas, bd, bdSitesFromXinpin(xv));
+  }
   const tCalc = Date.now();
 
   const report: Record<string, unknown> = {};

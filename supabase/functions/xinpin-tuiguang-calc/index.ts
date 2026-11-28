@@ -12,6 +12,7 @@
 //   target_sheet    回写目标表；默认 env XINPIN_TARGET_SPREADSHEET
 //   xinpin_target   回写的 sheet 名，默认「新品推广-脚本」
 //   chanpin_target  回写的 sheet 名，默认「产品推广计划-脚本」
+//   xinpin_sheet / chanpin_sheet  配置与模板 sheet 名，默认「新品推广」「产品推广计划」
 //   compare         dryrun 对比哪张 sheet 的公式值：默认原 sheet（新品推广 / 产品推广计划），可传 {xinpin:"新品推广-公式优化",chanpin:"..."}
 //   confirm_source_write  写源表时必须原样填源表 token，否则拒绝（永远不默认写源表）
 //

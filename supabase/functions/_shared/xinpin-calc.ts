@@ -151,24 +151,30 @@ export function calcXinpin(
   const row2 = values[1] ?? [];
   const row3 = values[2] ?? [];
   const out: CellOut[] = [];
-  for (let r = 3; r < formulas.length; r++) {
+  const nRows = Math.max(values.length, formulas.length);
+  const width = Math.max(row3.length, ...formulas.map((r) => r?.length ?? 0));
+  for (let r = 3; r < nRows; r++) {
     const fr = formulas[r] ?? [];
     const vr = values[r] ?? [];
     const start = dayNum(vr[0]);
     const sku = trimText(vr[1]);
     const ok = trimText(vr[0]) !== "" && sku !== "";
-    for (let c = 0; c < fr.length; c++) {
+    for (let c = 0; c < width; c++) {
       const f = typeof fr[c] === "string" ? (fr[c] as string) : "";
-      if (!f.startsWith("=")) continue;
+      const label = trimText(row3[c]);
+      const isClip = f.includes("IMPORTRANGE") || label === "剪辑素材数量";
+      const isBd = f.includes('"建联-"') || label === "寄样数量" || label === "返素材数量";
+      if (!isClip && !isBd) continue;
+      // 哪些格要填：原来有统计公式的格；公式被脚本换成数值以后，就认「这格已有值」（新加行请整行复制上一行）。
+      const hasFormula = f.startsWith("=") && (f.includes("IMPORTRANGE") || f.includes('"建联-"'));
+      if (!hasFormula && !(ok && trimText(vr[c]) !== "")) continue;
       const cell = `${colLetter(c)}${r + 1}`;
-      if (f.includes("IMPORTRANGE")) {
+      if (isClip) {
         const editor = trimText(row2[c]);
         out.push({ cell, row: r + 1, col: c, value: ok ? clipText(clips[editor] ?? [], start, sku) : "" });
         continue;
       }
-      if (!f.includes('"建联-"')) continue;
-      const kind = trimText(row3[c]);
-      const first = kind === "寄样数量" ? c : c - 1;
+      const first = label === "寄样数量" ? c : c - 1;
       const name = trimText(row2[first]);
       const sites = splitSites(row2[first + 1]);
       if (!ok || !name || !sites.length) {
@@ -176,40 +182,56 @@ export function calcXinpin(
         continue;
       }
       const res = bdCounts(bd[name] ?? [], sites, start, start + 89, sku, false);
-      out.push({ cell, row: r + 1, col: c, value: siteText(sites, kind === "寄样数量" ? res.ship : res.ret) });
+      out.push({ cell, row: r + 1, col: c, value: siteText(sites, label === "寄样数量" ? res.ship : res.ret) });
     }
   }
   return out;
 }
 
+/** 新品推广第 2 行：同事名 → 负责站点（如 林乐欣 → [MX, MY]）。 */
+export function bdSitesFromXinpin(values: Row[]): Record<string, string[]> {
+  const row2 = values[1] ?? [];
+  const row3 = values[2] ?? [];
+  const out: Record<string, string[]> = {};
+  row3.forEach((v, c) => {
+    if (trimText(v) === "寄样数量" && trimText(row2[c])) out[trimText(row2[c])] = splitSites(row2[c + 1]);
+  });
+  return out;
+}
+
 /**
  * 产品推广计划：B=开始日期（空=不限）, C=结束日期（空=不限）, D=SKU, G=对应站点（精确匹配）。
- * 只填原来有 "建联-" 统计公式的单元格（即「负责该站点的同事」那两列），输出数字。
+ * 只填「负责该站点的同事」那两列（负责人 2026-11-28）：原有 "建联-" 统计公式的格，
+ * 或 SKU 非空且 G 站点属于该同事负责站点（bdSites，取自新品推广第 2 行；站点 = s 或以「s-」开头）。输出数字。
  */
-export function calcChanpin(values: Row[], formulas: Row[], bd: Record<string, BdRow[]>): CellOut[] {
+export function calcChanpin(values: Row[], formulas: Row[], bd: Record<string, BdRow[]>, bdSites: Record<string, string[]>): CellOut[] {
   const row2 = values[1] ?? [];
   const row3 = values[2] ?? [];
   const out: CellOut[] = [];
-  for (let r = 3; r < formulas.length; r++) {
+  const nRows = Math.max(values.length, formulas.length);
+  for (let r = 3; r < nRows; r++) {
     const fr = formulas[r] ?? [];
     const vr = values[r] ?? [];
     const sku = trimText(vr[3]);
     const site = trimText(vr[6]);
     const lo = trimText(vr[1]) === "" ? 1 : dayNum(vr[1]);
     const hi = trimText(vr[2]) === "" ? 1e10 : dayNum(vr[2]);
-    for (let c = 0; c < fr.length; c++) {
-      const f = typeof fr[c] === "string" ? (fr[c] as string) : "";
-      if (!f.startsWith("=") || !f.includes('"建联-"')) continue;
-      const cell = `${colLetter(c)}${r + 1}`;
-      const kind = trimText(row3[c]);
-      const first = kind === "寄样数量" ? c : c - 1;
+    for (let c = 0; c < row3.length; c++) {
+      const label = trimText(row3[c]);
+      if (label !== "寄样数量" && label !== "返素材数量") continue;
+      const first = label === "寄样数量" ? c : c - 1;
       const name = trimText(row2[first]);
+      const f = typeof fr[c] === "string" ? (fr[c] as string) : "";
+      const hasFormula = f.startsWith("=") && f.includes('"建联-"');
+      const responsible = !!sku && !!site && (bdSites[name] ?? []).some((s) => site === s || site.startsWith(s + "-"));
+      if (!hasFormula && !responsible) continue;
+      const cell = `${colLetter(c)}${r + 1}`;
       if (!sku || !name) {
         out.push({ cell, row: r + 1, col: c, value: "" });
         continue;
       }
       const res = bdCounts(bd[name] ?? [], [site], lo, hi, sku, true);
-      out.push({ cell, row: r + 1, col: c, value: kind === "寄样数量" ? res.ship[0] : res.ret[0] });
+      out.push({ cell, row: r + 1, col: c, value: label === "寄样数量" ? res.ship[0] : res.ret[0] });
     }
   }
   return out;
