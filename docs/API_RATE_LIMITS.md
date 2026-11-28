@@ -133,7 +133,7 @@
 
 | 服务 | 调用方 | 触发 | 备注 |
 |---|---|---|---|
-| 飞书开放平台 `open.feishu.cn` | `feishu-read*`、`feishu-writeback`、`attribution-feishu`、`xinpin-tuiguang-calc`、各 cron 机器人通知 | 每晚 23:00 同步、19:00 授权回写、手动；`xinpin-calc-hourly` 每小时 :25（**默认停用**，每次约 170 次读 + 5 次写，6 张建联表并发读） | 读表按人拆请求并发 3；单函数 150s 墙钟 |
+| 飞书开放平台 `open.feishu.cn` | `feishu-read*`、`feishu-writeback`、`attribution-feishu`、`xinpin-tuiguang-calc`、各 cron 机器人通知 | 每晚 23:00 同步、19:00 授权回写、手动；`xinpin-u-10min` 每 10 分钟（:03/:13/…，**默认停用**；每次约 57 次读 + 8 次 D 列复核 + 约 15 次写，8 张建联表并发读） | 读表按人拆请求并发 3；单函数 150s 墙钟 |
 | 千易 `open.qianyierp.com`、顶妙 `gogo.topwms.com` | `sea-inventory` | 每日 2 次 | 未见限额文档 |
 | ECO 后台 | `src/routes/api/public/hooks/eco.ts` | 余额预警每日 10:00 | — |
 
@@ -147,7 +147,7 @@
 | `tts-daily-sync` | 22:40/22:52、05:40/05:52、11:40/11:52（每次 ≤8 分钟） | 新加坡 06:40–07:00、13:40–14:00、19:40–20:00 | Shop 订单 / 财务（PH、TH） | Shop PH、TH |
 | `reviews-nightly` | 16:35 / 17:35 / 18:35 | 00:35 / 01:35 / 02:35 | Shop analytics 商品 | Shop 全部店 |
 | `feishu-sync-nightly` | 15:00 | 23:00 | 飞书 | — |
-| `xinpin-calc-hourly`（默认停用） | 每小时 :25 | 每小时 :25（新加坡同） | 飞书（只读建联表 + 回写统计表） | — |
+| `xinpin-u-10min`（默认停用） | 每 10 分钟 :03/:13/…/:53 | 同（新加坡同） | 飞书（读 8 张建联表 A:D + 回写「其他同事已建联」列） | — |
 | `attribution-snapshot-nightly` | 15:30 | 23:30 | 无外部 | — |
 | `authorize-daily-1900-bjt` | 11:00 | 19:00 | BC `/tt_video/authorize/` + 飞书 | BC 应用桶 |
 | `balance-alert-daily` | 02:00 | 10:00 | BC 余额 / 报表 + ECO | BC 应用桶 |

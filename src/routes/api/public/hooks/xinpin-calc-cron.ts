@@ -1,6 +1,8 @@
-// Cron entrypoint：新品推广 / 产品推广计划 统计回写（方案④，Edge Function `xinpin-tuiguang-calc` mode=write）。
+// Cron entrypoint：飞书「达人建联登记表」脚本回写（Edge Function `xinpin-tuiguang-calc` mode=write）。
 //
-// pg_cron 每小时 :25 调用（job `xinpin-calc-hourly`，migration 建好后默认停用，负责人确认后再启用）。
+// body.tables 决定写哪部分（pg_cron 传入）：
+//   ["u"]                  建联表「其他同事已建联」列，每 10 分钟（job `xinpin-u-10min`，负责人 2026-11-28 定）
+//   ["xinpin","chanpin"]   新品推广 / 产品推广计划 统计（负责人已改回公式，job `xinpin-calc-hourly` 不再使用）
 // 目标表 / 数据表只从 Edge Function 环境变量取（XINPIN_DATA_SPREADSHEET / XINPIN_TARGET_SPREADSHEET），
 // cron 身份不接受请求体里的表链接，避免被改成写源表。
 // 失败发飞书机器人（FEISHU_BOT_WEBHOOK），不静默。
@@ -50,6 +52,15 @@ export const Route = createFileRoute("/api/public/hooks/xinpin-calc-cron")({
           return new Response(JSON.stringify({ error: "missing vault secret gmv_max_cron_secret" }), { status: 500 });
         }
 
+        let tables: string[] = ["u"];
+        try {
+          const b = (await request.json()) as { tables?: unknown };
+          if (Array.isArray(b?.tables) && b.tables.every((x) => ["u", "xinpin", "chanpin"].includes(String(x)))) {
+            tables = b.tables.map(String);
+          }
+        } catch {
+          /* 空 body → 默认只刷 U 列 */
+        }
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
         let ok = false;
@@ -63,7 +74,7 @@ export const Route = createFileRoute("/api/public/hooks/xinpin-calc-cron")({
               apikey: anonKey,
               Authorization: `Bearer ${anonKey}`,
             },
-            body: JSON.stringify({ mode: "write" }),
+            body: JSON.stringify({ mode: "write", tables }),
             signal: ctrl.signal,
           });
           const text = await r.text();
@@ -79,11 +90,14 @@ export const Route = createFileRoute("/api/public/hooks/xinpin-calc-cron")({
         }
 
         await admin.from("gmv_max_sync_state").upsert({
-          id: "xinpin_calc_hourly",
+          id: `xinpin_calc_${tables.join("_")}`,
           last_synced_at: new Date().toISOString(),
           note: `${ok ? "成功" : "失败"} ${summary}`.slice(0, 2000),
         });
-        if (!ok) await postFeishuBot("新品推广统计回写失败", [summary, "下一小时会自动重跑；连续失败请查 Edge Function xinpin-tuiguang-calc"]);
+        // 每 10 分钟跑一次，失败提醒同一小时内只发一次，避免刷屏
+        if (!ok && new Date().getUTCMinutes() < 10) {
+          await postFeishuBot("建联表「其他同事已建联」刷新失败", [summary, "每 10 分钟自动重试；本小时内不再重复提醒"]);
+        }
         return new Response(JSON.stringify({ ok, summary }), {
           status: ok ? 200 : 500,
           headers: { "Content-Type": "application/json" },

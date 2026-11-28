@@ -6,8 +6,10 @@ import {
   type CellOut,
   type ClipRow,
   type Row,
+  type USheet,
   calcChanpin,
   bdSitesFromXinpin,
+  calcU,
   calcXinpin,
   colLetter,
   sameValue,
@@ -69,7 +71,12 @@ export async function runXinpin(body: Record<string, unknown>, opt: RunOptions) 
   const mode = String(body.mode ?? (isCron ? "write" : "dryrun"));
   if (!["dryrun", "write", "compute"].includes(mode)) throw new Error(`mode 只能是 dryrun / write / compute`);
   if (isCron && mode !== "write") throw new Error("cron 只允许 write");
-  const tables = Array.isArray(body.tables) && body.tables.length ? (body.tables as string[]) : ["xinpin", "chanpin"];
+  const asked = Array.isArray(body.tables) && body.tables.length ? (body.tables as string[]) : ["xinpin", "chanpin"];
+  // "u" = 各建联表「其他同事已建联」列（U 列），单独处理；其余是两张统计表
+  const doU = asked.includes("u");
+  const tables = asked.filter((t) => t === "xinpin" || t === "chanpin");
+  // 写源表的许可：请求体 confirm_source_write 或环境变量 XINPIN_ALLOW_SOURCE_WRITE 等于源表 token
+  const allowSource = body.confirm_source_write === SOURCE_TOKEN || opt.env("XINPIN_ALLOW_SOURCE_WRITE") === SOURCE_TOKEN;
 
   const token = await getTenantAccessToken();
   const dataRaw = (isCron ? "" : String(body.data_sheet ?? "")) || opt.env("XINPIN_DATA_SPREADSHEET") || "";
@@ -174,11 +181,11 @@ export async function runXinpin(body: Record<string, unknown>, opt: RunOptions) 
         .map((c) => [c.cell, fv[c.row - 1]?.[c.col] ?? null, c.value]);
       report[t] = { compared_with: title, cells: cells.length, same: cells.length - diffs.length, diffs };
     }
-  } else if (mode === "write") {
+  } else if (mode === "write" && tables.length) {
     const tgtRaw = (isCron ? "" : String(body.target_sheet ?? "")) || opt.env("XINPIN_TARGET_SPREADSHEET") || "";
     if (!tgtRaw) throw new Error("未指定回写目标：传 target_sheet 或配置 env XINPIN_TARGET_SPREADSHEET");
     const tgtSS = await resolveToken(token, tgtRaw);
-    if (tgtSS === SOURCE_TOKEN && body.confirm_source_write !== SOURCE_TOKEN) {
+    if (tgtSS === SOURCE_TOKEN && !allowSource) {
       throw new Error("拒绝写源表「达人建联登记表」：如确需写入，confirm_source_write 填源表 token");
     }
     const tgtSheets = tgtSS === dataSS ? sheets : await listSheets(token, tgtSS);
@@ -213,6 +220,76 @@ export async function runXinpin(body: Record<string, unknown>, opt: RunOptions) 
       for (let i = 0; i < ranges.length; i += 200) await writeValues(token, tgtSS, ranges.slice(i, i + 200));
       report[t] = { target: targets[t], cells: result[t].length, ranges: ranges.length };
     }
+  }
+
+  // 5) 建联表 U 列「其他同事已建联」：直接读所有「建联-*」表 A:D 计算，不再依赖「建联动态汇总」
+  if (doU) {
+    const uSheets = sheets.filter((x) => /^建联-/.test(x.title.trim()));
+    const data: USheet[] = [];
+    const meta: Record<string, { sid: string; col: number; rc: number }> = {};
+    await Promise.all(uSheets.map(async (x) => {
+      const rc = x.grid_properties?.row_count ?? 0;
+      if (rc < 3) return;
+      const head = await readRange(token, dataSS, `${x.sheet_id}!A2:AZ2`);
+      const col = (head[0] ?? []).findIndex((v) => trimText(v) === "其他同事已建联");
+      if (col < 0) return; // 没有这一列的表只当数据源，不写
+      meta[x.title.trim()] = { sid: x.sheet_id, col, rc };
+    }));
+    // 数据源 = 所有建联表（含没有 U 列的），按 sheet 顺序
+    const rowsBy = await Promise.all(uSheets.map(async (x) => {
+      const rc = x.grid_properties?.row_count ?? 0;
+      return rc < 3 ? [] : await readRange(token, dataSS, `${x.sheet_id}!A3:D${rc}`, 1000);
+    }));
+    uSheets.forEach((x, i) => data.push({ name: x.title.trim(), rows: rowsBy[i] }));
+    const uOut = calcU(data);
+    // readRange 会去掉表尾空行；补齐到表格行数，保证写回时整列覆盖（空行写空值）
+    for (const x of uSheets) {
+      const n = Math.max(0, (x.grid_properties?.row_count ?? 0) - 2);
+      const arr = uOut[x.title.trim()] ?? [];
+      while (arr.length < n) arr.push("");
+      uOut[x.title.trim()] = arr;
+    }
+    const uRep: Record<string, unknown> = {};
+    if (mode === "dryrun") {
+      const waitMs = Number(body.wait_ms ?? 60000);
+      for (const [name, m] of Object.entries(meta)) {
+        const L = colLetter(m.col);
+        const want = uOut[name] ?? [];
+        const fv = await readFormatted(token, dataSS, `${m.sid}!${L}3:${L}${m.rc}`, waitMs);
+        const diffs: unknown[] = [];
+        want.forEach((v, i) => {
+          if (!sameValue(fv[i]?.[0], v)) diffs.push([`${L}${i + 3}`, fv[i]?.[0] ?? null, v]);
+        });
+        uRep[name] = { rows: want.length, same: want.length - diffs.length, diffs: diffs.slice(0, 50), diff_count: diffs.length };
+      }
+    } else if (mode === "write") {
+      if (dataSS === SOURCE_TOKEN && !allowSource) {
+        throw new Error("拒绝写源表「达人建联登记表」的 U 列：如确需写入，confirm_source_write 填源表 token 或配置 XINPIN_ALLOW_SOURCE_WRITE");
+      }
+      const rowsByName = Object.fromEntries(data.map((d) => [d.name, d.rows]));
+      for (const [name, m] of Object.entries(meta)) {
+        const L = colLetter(m.col);
+        // 防错位：写之前再读一次 D 列（用户名），和计算时读到的逐行比对；
+        // 读→写之间有人插行/删行就跳过这张表，下一轮（10 分钟后）再写。
+        const dNow = await readRange(token, dataSS, `${m.sid}!D3:D${m.rc}`, 4500);
+        const before = rowsByName[name] ?? [];
+        const moved = Math.max(dNow.length, before.length) > 0 &&
+          Array.from({ length: Math.max(dNow.length, before.length) }).some((_, i) => trimText(dNow[i]?.[0]) !== trimText(before[i]?.[3]));
+        if (moved) {
+          uRep[name] = { column: L, skipped: "读取后表格有改动（插行/删行/改用户名），本轮跳过" };
+          continue;
+        }
+        const vals = (uOut[name] ?? []).map((v) => [v]);
+        // 整列写到表格最后一行：原来空行里也铺满了 U 公式（每格都会去扫汇总表），必须一起清成值
+        const last = vals.length;
+        for (let i = 0; i < last; i += 4000) {
+          await writeValues(token, dataSS, [{ range: `${m.sid}!${L}${3 + i}:${L}${3 + Math.min(last, i + 4000) - 1}`, values: vals.slice(i, Math.min(last, i + 4000)) }]);
+        }
+        uRep[name] = { column: L, rows_written: last };
+      }
+    }
+    report.u = uRep;
+    if (mode === "compute") (result as Record<string, unknown>).u = uOut;
   }
 
   return {

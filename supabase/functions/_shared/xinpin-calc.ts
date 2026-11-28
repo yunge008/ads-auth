@@ -44,18 +44,22 @@ function escapeRe(s: string): string {
 }
 
 /**
- * SKU 匹配（负责人 2026-11-28 定，**变更**：原公式是正则 (^|[^0-9])sku([^0-9]|$)，组合 SKU 的「+」必须原样出现）：
- * 两边都只取数字段、用逗号连起来再比「包含」，所以 SKU 3120+3121 也匹配 3120-K+3121-K（刻字款）。
- * 单个 SKU 与原正则等价；组合 SKU 要求各数字段在 K 列里按顺序紧挨着出现（中间可隔任意非数字字符）。
- * 公式写法：ISNUMBER(SEARCH(","&REGEXREPLACE(sku,"[^0-9]+",",")&",", ","&REGEXREPLACE(K,"[^0-9]+",",")&","))
+ * SKU 匹配（负责人 2026-11-28 定，**变更**；原公式是正则 (^|[^0-9])sku([^0-9]|$)）：
+ * 只看数字段。SKU 的每个数字段都出现在 K 列的数字段里就算——不分先后、可夹杂别的款、可带字母后缀。
+ *   333 → 计 333-K、333-B-K、AR333-B、1004、333；不计 3334、1333、333418（漏分隔符）
+ *   3120+3121 → 计 3120-K+3121-K、3121-K+3120-K、3120+999+3121
+ * 公式写法：REDUCE(1, SPLIT(数字段(sku)), LAMBDA(acc,p, acc*ISNUMBER(SEARCH(","&p&",", ","&数字段(K)&","))))
  */
-export function skuKey(s: string): string {
-  return "," + (s.match(/\d+/g) ?? []).join(",") + ",";
+export function skuParts(s: string): string[] {
+  return s.match(/\d+/g) ?? [];
 }
 export function skuMatcher(sku: string): (k: string) => boolean {
-  const want = skuKey(sku);
-  if (want === ",,") return () => false;
-  return (k) => skuKey(k).includes(want);
+  const want = [...new Set(skuParts(sku))];
+  if (!want.length) return () => false;
+  return (k) => {
+    const have = new Set(skuParts(k));
+    return want.every((p) => have.has(p));
+  };
 }
 
 /** 站点 = s 或以「s-」开头（新品推广）；产品推广计划为精确匹配。 */
@@ -250,4 +254,58 @@ export function calcChanpin(values: Row[], formulas: Row[], bd: Record<string, B
 export function sameValue(a: Cell, b: Cell): boolean {
   const norm = (x: Cell) => cellStr(x).replace(/\r\n/g, "\n").trim();
   return norm(a) === norm(b);
+}
+
+/**
+ * 建联表 U 列「是否已被他人建联」（原公式逐行扫「建联动态汇总」，是整本表变慢的主因 → 改脚本回写数值，负责人 2026-11-28 定）。
+ * 口径同原公式：本行 站点(PH2 并入 PH)|用户名 → 所有建联表里同站点同用户名、负责同事 ≠ 本行负责同事、负责同事与发样日期都不为空的记录，
+ * 取发样日期最近的一条（同日取表顺序靠后的）→「同事名\n yyyy-mm-dd」；没有 →「否」；本行站点或用户名为空 → 空。
+ * 与原公式的差异：站点 / 用户名 / 同事名先 TRIM；负责同事写成公式 ="林丽洪" 时按文本 林丽洪 处理。
+ */
+export type USheet = { name: string; rows: Row[] }; // rows 从第 3 行起，列 A..D
+function ownerText(v: Cell): string {
+  const t = trimText(v);
+  const m = t.match(/^="?(.*?)"?$/) ?? t.match(/^"(.*)"$/);
+  return m ? m[1].trim() : t;
+}
+function uKey(site: string, user: string): string {
+  return `${site === "PH2" ? "PH" : site}|${user}`;
+}
+function serialToYmd(n: number): string {
+  const d = new Date(Date.UTC(1899, 11, 30) + n * 86400000);
+  return d.toISOString().slice(0, 10);
+}
+export function calcU(sheets: USheet[]): Record<string, Array<string>> {
+  type Rec = { owner: string; day: number; seq: number };
+  const recs = new Map<string, Rec[]>();
+  let seq = 0;
+  for (const s of sheets) {
+    for (const r of s.rows) {
+      seq++;
+      const user = trimText(r?.[3]);
+      const owner = ownerText(r?.[0]);
+      const day = dayNum(r?.[1]);
+      if (!user || !owner || !day) continue;
+      const k = uKey(trimText(r?.[2]), user);
+      const list = recs.get(k) ?? [];
+      list.push({ owner, day, seq });
+      recs.set(k, list);
+    }
+  }
+  const out: Record<string, string[]> = {};
+  for (const s of sheets) {
+    out[s.name] = s.rows.map((r) => {
+      const site = trimText(r?.[2]);
+      const user = trimText(r?.[3]);
+      if (!site || !user) return "";
+      const me = ownerText(r?.[0]);
+      let best: Rec | null = null;
+      for (const x of recs.get(uKey(site, user)) ?? []) {
+        if (x.owner === me) continue;
+        if (!best || x.day > best.day || (x.day === best.day && x.seq > best.seq)) best = x;
+      }
+      return best ? `${best.owner}\n${serialToYmd(best.day)}` : "否";
+    });
+  }
+  return out;
 }

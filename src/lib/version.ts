@@ -1,3 +1,3 @@
 // Bumped on each publish or when user asks "加版本".
 // Format: MMDD.NNN (month+day.global-incrementing serial).
-export const APP_VERSION = "1128.367";
+export const APP_VERSION = "1128.368";
