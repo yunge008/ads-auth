@@ -194,7 +194,10 @@ function PlanPanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }
   const [shopF, setShopF] = React.useState("");
   const [whF, setWhF] = React.useState("");
   const shown = items.filter((i) => (!shopF || i.shop_id === shopF) && (!whF || i.warehouse_code === whF));
-  const ovItems = shown.filter((i) => i.kind === "overseas");
+  // 无销量的 listing（只会是超卖调减）默认隐藏，飞书也不提醒；勾选后显示
+  const [showQuiet, setShowQuiet] = React.useState(false);
+  const quietCount = shown.filter((i) => i.kind === "overseas" && !(Number(i.daily_sales) > 0)).length;
+  const ovItems = shown.filter((i) => i.kind === "overseas" && (showQuiet || Number(i.daily_sales) > 0));
   const cnItems = shown.filter((i) => i.kind === "cn");
   const shopOpts = [...new Set(items.map((i) => i.shop_id))];
   const whOpts = [...new Set(items.map((i) => i.warehouse_code))];
@@ -252,6 +255,9 @@ function PlanPanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }
             {whOpts.map((c) => <option key={c} value={c}>{whName(c)}</option>)}
           </select>
           {(shopF || whF) && <Button size="sm" variant="ghost" onClick={() => { setShopF(""); setWhF(""); }}>清除</Button>}
+          <label className="flex items-center gap-1 ml-2" title="仓库已无货、TikTok 还挂着几件的无销量 listing，建议调减防超卖；不在飞书提醒">
+            <Checkbox checked={showQuiet} onCheckedChange={(v) => setShowQuiet(v === true)} />显示无销量的 {quietCount} 条
+          </label>
           <span className="text-xs text-muted-foreground">表头可点击排序</span>
         </div>
       )}
@@ -821,9 +827,9 @@ const FIELDS: Array<[keyof Overview["settings"], string, string]> = [
   ["window_days", "销量统计窗口（天）", "近 N 天订单算日均销量（待确认：默认 14）"],
   ["min_days", "预警天数（海外仓）", "listing 可售天数全部 ≥ 此值就不调整；低于才调"],
   ["target_days", "补到目标天数（海外仓）", "低于预警的补到这么多天销量；先用仓库未分配，再从可售最多的调（待确认：默认 30）"],
-  ["min_qty", "listing 数量低于（件）", "少于此件数也算预警（含无销量的），负责人口径 5"],
+  ["min_qty", "listing 数量低于（件）", "有销量的 listing 少于此件数也算预警（无销量的不预警），负责人口径 5"],
   ["reserve_per_sku", "每 SKU 海外仓预留", "负责人口径 5，不分配给 listing"],
-  ["zero_sale_qty", "无销量 listing 补到（件）", "近 N 天没卖出的 listing，少于 5 件时补到这个数（待确认：默认 5）"],
+  ["zero_sale_qty", "无销量 listing 至少保留（件）", "无销量的 listing 不预警、不补货；被调出给其他 listing 时至少留这么多"],
   ["cn_min_days", "国内仓触发：可售天数 <", "负责人口径 10"],
   ["cn_target_days", "国内仓补到（天销量）", "待确认：默认 20"],
   ["stock_max_age_hours", "海外仓库存最长有效（小时）", "超过则该仓本次不调整"],

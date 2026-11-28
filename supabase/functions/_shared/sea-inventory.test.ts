@@ -219,12 +219,17 @@ Deno.test("库存紧张：从高于预警的部分调，双方天数拉平，不
   eq(items.map((i) => [i.sku_id, i.current_qty, i.proposed_qty]), [["A", 5, 49], ["B", 80, 51]]);
 });
 
-Deno.test("无销量且 < 5 件：补到 zero_sale_qty，其他不动", () => {
+Deno.test("无销量的 listing 不预警、不补货（即使 < 5 件）", () => {
   const slots = [slot({ sku_id: "A", qty: 2, sold: 0 }), slot({ sku_id: "B", qty: 30, sold: 10 })];
-  const { items } = planOverseas({ warehouses: [whPH], slots, stock: stock("QY-PH", { "AR140-B2": 45 }), overrides: new Map(), params: P });
-  eq(items.map((i) => [i.sku_id, i.proposed_qty]), [["A", 5]]);
+  const { items, groups } = planOverseas({ warehouses: [whPH], slots, stock: stock("QY-PH", { "AR140-B2": 45 }), overrides: new Map(), params: P });
+  eq(items.length, 0);
+  eq(groups[0].triggered, false);
 });
 
+Deno.test("无销量的 listing 超卖时仍调减（仓库没货、TikTok 还挂着）", () => {
+  const { items } = planOverseas({ warehouses: [whPH], slots: [slot({ sku_id: "A", qty: 2, sold: 0 })], stock: stock("QY-PH", { "AR140-B2": 3 }), overrides: new Map(), params: P });
+  eq(items.map((i) => [i.proposed_qty, i.daily_sales]), [[0, 0]]);
+});
 Deno.test("仓库可用 ≤ 预留：压到 0，并提示目标 0 与需补货", () => {
   const { items } = planOverseas({ warehouses: [whPH], slots: [slot({ sku_id: "A", qty: 3, sold: 10 })], stock: stock("QY-PH", { "AR140-B2": 4 }), overrides: new Map(), params: P });
   eq(items[0].proposed_qty, 0);

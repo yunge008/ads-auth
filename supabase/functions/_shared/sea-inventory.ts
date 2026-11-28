@@ -257,7 +257,8 @@ export function planCluster(w: Warehouse, cs: Consumer[], stock: Map<string, num
   const move = (c: Consumer, n: number) => { cur.set(c, cur.get(c)! + n); for (const [k, q] of c.comps) used.set(k, used.get(k)! + n * q); };
   const days = (c: Consumer, q = cur.get(c)!) => (c.daily > 0 ? q / c.daily : q > 0 ? Infinity : 0);
   const keepAt = (c: Consumer, d: number) => (c.daily > 0 ? Math.ceil(c.daily * d) : Math.min(c.slot.qty, p.zero_sale_qty));
-  const isLow = (c: Consumer) => c.slot.virtual ? cap(c, pool) > 0 : (c.slot.qty < p.min_qty || (c.daily > 0 && c.slot.qty / c.daily < p.min_days));
+  // 只有「有销量」的 listing 才算预警（2026-11-28 负责人：没销量、只能补几件的不提醒、不补）；无销量的只会因超卖被调减
+  const isLow = (c: Consumer) => c.slot.virtual ? cap(c, pool) > 0 : (c.daily > 0 && (c.slot.qty < p.min_qty || c.slot.qty / c.daily < p.min_days));
   const want = (c: Consumer) => (c.daily > 0 ? Math.ceil(c.daily * p.target_days) : p.zero_sale_qty);
 
   const lows = cs.filter(isLow);

@@ -642,13 +642,16 @@ async function buildMessage(b: Record<string, unknown>) {
   const { plan, items, shops } = await planGet(b) as { plan: Record<string, unknown>; items: ItemRow[]; shops: Array<{ shop_id: string; shop_name: string | null; region: string | null }> };
   const shopName = new Map(shops.map((s) => [s.shop_id, s.shop_name ?? s.region ?? s.shop_id]));
   const whs = new Map((await loadWarehouses()).map((w) => [w.code, w.name]));
-  const ov = items.filter((i) => i.kind === "overseas");
+  // 飞书只提醒有销量的（2026-11-28 负责人：没销量、只动几件的不提醒）；无销量的超卖调减只在网页列出
+  const ov = items.filter((i) => i.kind === "overseas" && Number(i.daily_sales) > 0);
+  const quiet = items.filter((i) => i.kind === "overseas" && !(Number(i.daily_sales) > 0));
   const cn = items.filter((i) => i.kind === "cn");
+  const alertCount = ov.length + cn.length;
   const warnings = (plan.data_warnings as string[] | null) ?? [];
   const md = (plan.map_diff as { counts?: { added: number; removed: number; changed: number } } | null)?.counts;
   const all = [...ov, ...cn].filter((i) => !i.new_link && i.days_before !== null);
   const worst = all.length ? Math.min(...all.map((i) => i.days_before!)) : null;
-  const template = !items.length ? (warnings.length ? "orange" : "green") : worst !== null && worst < 3 ? "red" : worst !== null && worst < 7 ? "orange" : "yellow";
+  const template = !alertCount ? (warnings.length ? "orange" : "green") : worst !== null && worst < 3 ? "red" : worst !== null && worst < 7 ? "orange" : "yellow";
   const bjTime = new Date(String(plan.created_at)).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false });
 
   const table = (list: ItemRow[], withWh: boolean) => ({
@@ -681,14 +684,15 @@ async function buildMessage(b: Record<string, unknown>) {
       `**生成时间**：${bjTime}（${plan.source === "CRON" ? "定时" : "手动"}）`,
       `**海外仓**：${ov.length} 条（${skuCount(ov)} 个 SKU）${ov.length ? `，最紧急可售 **<font color='${dayColor(minDays(ov))}'>${fmtDays(minDays(ov))} 天</font>**` : ""}`,
       `**国内仓预警**：${cn.length} 条（${skuCount(cn)} 个 SKU）${cn.length ? `，最紧急可售 **<font color='${dayColor(minDays(cn))}'>${fmtDays(minDays(cn))} 天</font>**` : ""}`,
+      quiet.length ? `<font color='grey'>另有 ${quiet.length} 条无销量 listing 的超卖调减（仓库已无货、TikTok 还挂着几件），不提醒，见网页</font>` : "",
       md && (md.added || md.removed || md.changed) ? `**映射表变化**：新增 ${md.added}、下架 ${md.removed}、SKU 变更 ${md.changed}` : "",
     ].filter(Boolean).join("\n"),
   });
   if (ov.length) elements.push({ tag: "markdown", content: "**海外仓（按紧急度，前 15 条）**" }, table(ov, true));
   if (cn.length) elements.push({ tag: "markdown", content: "**国内仓预警（按紧急度，前 15 条）**\n<font color='grey'>仅预警：确认国内仓有货（不足及时采购）后人工修改 TikTok 库存</font>" }, table(cn, false));
-  elements.push({ tag: "markdown", content: items.length ? (execEnabled() ? "请到网页「SEA库存监控」核对并点「确认执行」，**未确认不会改任何库存**。" : "请到网页「SEA库存监控」核对，**导出调整清单后人工修改**（系统不会自动改库存）。") : "本次没有需要调整的 listing。" });
+  elements.push({ tag: "markdown", content: alertCount ? (execEnabled() ? "请到网页「SEA库存监控」核对并点「确认执行」，**未确认不会改任何库存**。" : "请到网页「SEA库存监控」核对，**导出调整清单后人工修改**（系统不会自动改库存）。") : "本次没有需要调整的 listing。" });
 
-  const title = items.length
+  const title = alertCount
     ? `SEA 库存：海外仓 ${skuCount(ov)} 个 SKU 待调整 / 国内仓 ${skuCount(cn)} 个 SKU 预警`
     : warnings.length ? "SEA 库存监控：无调整，但有数据异常" : "SEA 库存监控：本次无需调整";
   const card = { config: { wide_screen_mode: true }, header: { template, title: { tag: "plain_text", content: title } }, elements };

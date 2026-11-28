@@ -455,3 +455,4 @@
 2026-11-27 | claude | [1127.360] 评论内容表最左加「站点」列（原在时间下方）。纯前端。
 2026-11-27 | claude | [1127.361] tts-p0-probe 新增 cs_probe（买家客服会话+消息只读实测，PH/TH 默认）；raw 白名单加 /customer_service/。需 Lovable 重新部署 tts-p0-probe。
 2026-11-27 | lovable | [1127.362] Lovable 按 main c957c55 重新部署 tts-p0-probe（source_sha256 ba4735c6，POST {"action":"meta"} 不带口令返回 401 鉴权提示，线上正常）。未跑 migration、未动其他函数与前端。
+2026-11-28 | claude | [1128.363] SEA库存监控：无销量 listing 不再预警 / 补货（min_qty 只对有销量的生效）；飞书卡片海外仓只列有销量的，无销量的超卖调减只附一行计数；网页海外仓表默认隐藏无销量条目（勾选「显示无销量的 N 条」）；参数说明同步；+2 条单测。 | supabase/functions/{_shared/sea-inventory{,.test}.ts,sea-inventory/index.ts}、src/{routes/sea-inventory.tsx,lib/version.ts}、docs/{ARCHITECTURE,WORKLOG}.md |
