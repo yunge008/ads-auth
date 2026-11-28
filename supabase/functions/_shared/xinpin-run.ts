@@ -19,6 +19,8 @@ import {
 const FEISHU = "https://open.feishu.cn/open-apis";
 /** 源表「达人建联登记表」：只读。写它必须显式 confirm_source_write。 */
 const SOURCE_TOKEN = "ZWA7s1iqTh63j1t6PJfcuPnunBe";
+/** 剪辑台账（小莫 / 王诗蔓 等剪辑师 sheet），即原 E/F 公式 IMPORTRANGE 的表。 */
+const DEFAULT_CLIP_SPREADSHEET = "EHmlsMg33heiiOtb4kZcvpg8nJg";
 
 export let apiCalls = 0;
 const origFetch = globalThis.fetch;
@@ -119,21 +121,27 @@ export async function runXinpin(body: Record<string, unknown>, opt: RunOptions) 
     bd[n] = toBdRows(rows);
   }));
 
-  // 3) 剪辑台账（新品推广 E/F）
+  // 3) 剪辑台账（新品推广 E/F）。来源：请求 clip_sheet → 原公式里 IMPORTRANGE 的链接 → env → 默认表。
+  //    公式被换成数值后就没有 IMPORTRANGE 可抄了，所以必须有默认值；读不到就报错，不能静默写「无素材」。
   const clips: Record<string, ClipRow[]> = {};
   if (tables.includes("xinpin")) {
-    const f = cfg.xinpin.formulas.slice(3).flat().find((x) => typeof x === "string" && x.includes("IMPORTRANGE")) as string | undefined;
-    const clipRaw = String(body.clip_sheet ?? "") || f?.match(/IMPORTRANGE\("([^"]+)"/)?.[1] || "";
-    if (clipRaw) {
+    const row2 = cfg.xinpin.values[1] ?? [];
+    const row3 = cfg.xinpin.values[2] ?? [];
+    const editors = new Set<string>();
+    row3.forEach((v, c) => {
+      if (trimText(v) === "剪辑素材数量" && trimText(row2[c])) editors.add(trimText(row2[c]));
+    });
+    cfg.xinpin.formulas.slice(3).forEach((fr) => fr?.forEach((x, c) => {
+      if (typeof x === "string" && x.includes("IMPORTRANGE") && trimText(row2[c])) editors.add(trimText(row2[c]));
+    }));
+    if (editors.size) {
+      const f = cfg.xinpin.formulas.slice(3).flat().find((x) => typeof x === "string" && x.includes("IMPORTRANGE")) as string | undefined;
+      const clipRaw = String(body.clip_sheet ?? "") || f?.match(/IMPORTRANGE\("([^"]+)"/)?.[1] || opt.env("XINPIN_CLIP_SPREADSHEET") ||
+        DEFAULT_CLIP_SPREADSHEET;
       const clipSS = await resolveToken(token, clipRaw);
-      const clipSheets = await listSheets(token, clipSS);
-      const editors = new Set<string>();
-      const row2 = cfg.xinpin.values[1] ?? [];
-      cfg.xinpin.formulas.slice(3).forEach((fr) => fr?.forEach((x, c) => {
-        if (typeof x === "string" && x.includes("IMPORTRANGE")) editors.add(trimText(row2[c]));
-      }));
+      const clipSheets = (await listSheets(token, clipSS)) as Array<{ sheet_id: string; title: string; grid_properties?: { row_count?: number } }>;
       await Promise.all([...editors].map(async (e) => {
-        const s = clipSheets.find((x) => x.title.trim() === e) as { sheet_id: string; grid_properties?: { row_count?: number } } | undefined;
+        const s = clipSheets.find((x) => x.title.trim() === e);
         if (!s) throw new Error(`剪辑台账里找不到 sheet「${e}」`);
         const rc = s.grid_properties?.row_count ?? 0;
         if (rc < 3) throw new Error(`剪辑台账「${e}」读不到行数`);
