@@ -194,10 +194,7 @@ function PlanPanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }
   const [shopF, setShopF] = React.useState("");
   const [whF, setWhF] = React.useState("");
   const shown = items.filter((i) => (!shopF || i.shop_id === shopF) && (!whF || i.warehouse_code === whF));
-  // 无销量的 listing（只会是超卖调减）默认隐藏，飞书也不提醒；勾选后显示
-  const [showQuiet, setShowQuiet] = React.useState(false);
-  const quietCount = shown.filter((i) => i.kind === "overseas" && !(Number(i.daily_sales) > 0)).length;
-  const ovItems = shown.filter((i) => i.kind === "overseas" && (showQuiet || Number(i.daily_sales) > 0));
+  const ovItems = shown.filter((i) => i.kind === "overseas");
   const cnItems = shown.filter((i) => i.kind === "cn");
   const shopOpts = [...new Set(items.map((i) => i.shop_id))];
   const whOpts = [...new Set(items.map((i) => i.warehouse_code))];
@@ -239,6 +236,7 @@ function PlanPanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }
           {plan.data_warnings.map((w, i) => <div key={i} className="text-red-700">⚠ {w}</div>)}
         </CardContent></Card>
       )}
+      {plan && <RiskCard plan={plan} whName={whName} />}
       {plan?.summary && Number(plan.summary.missing_in_warehouse ?? 0) > 0 && (
         <MissingTable plan={plan} shopName={shopName} whName={whName} />
       )}
@@ -255,9 +253,6 @@ function PlanPanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }
             {whOpts.map((c) => <option key={c} value={c}>{whName(c)}</option>)}
           </select>
           {(shopF || whF) && <Button size="sm" variant="ghost" onClick={() => { setShopF(""); setWhF(""); }}>清除</Button>}
-          <label className="flex items-center gap-1 ml-2" title="仓库已无货、TikTok 还挂着几件的无销量 listing，建议调减防超卖；不在飞书提醒">
-            <Checkbox checked={showQuiet} onCheckedChange={(v) => setShowQuiet(v === true)} />显示无销量的 {quietCount} 条
-          </label>
           <span className="text-xs text-muted-foreground">表头可点击排序</span>
         </div>
       )}
@@ -285,6 +280,48 @@ function PlanPanel({ ov, reload }: { ov: Overview; reload: () => Promise<void> }
 }
 
 type SortKey = "sku" | "shop" | "wh" | "daily" | "cur" | "prop" | "delta" | "days" | "avail";
+
+type RiskGroup = { warehouse_code: string; wh_sku: string; risk: Array<{ kind: "oversold" | "short"; sku: string; online: number; pool: number; wh_days: number | null }> };
+/** 超卖风险（全部提示）：仓库实际 0 但线上有货 / 仓库只够几天但线上显示偏多；「仓库没有该 SKU 但线上有货」见下方找不到清单。线上合计 > 仓库可分配不算 */
+function RiskCard({ plan, whName }: { plan: PlanRow; whName: (c: string) => string }) {
+  const groups = (plan.summary?.risk_groups as RiskGroup[] | undefined) ?? [];
+  const missingRisk = Number(plan.summary?.missing_risk ?? 0);
+  const rows = groups.flatMap((g) => g.risk.map((r) => ({ g, r }))).sort((a, b) => (a.r.kind === b.r.kind ? b.r.online - a.r.online : a.r.kind === "oversold" ? -1 : 1));
+  if (!rows.length && !missingRisk) return null;
+  return (
+    <Card className="border-red-300">
+      <CardContent className="p-3 space-y-2 text-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-medium text-red-700">⚠ 超卖风险 {rows.length + missingRisk} 个</span>
+          <span className="rounded-full bg-red-100 text-red-700 px-2 py-0.5 text-xs">仓库实际 0、线上有货 {rows.filter((x) => x.r.kind === "oversold").length}</span>
+          <span className="rounded-full bg-orange-100 text-orange-700 px-2 py-0.5 text-xs">仓库只够几天、线上显示偏多 {rows.filter((x) => x.r.kind === "short").length}</span>
+          <span className="rounded-full bg-red-100 text-red-700 px-2 py-0.5 text-xs">仓库没有该 SKU 但线上有货 {missingRisk}（见下方清单）</span>
+        </div>
+        {rows.length > 0 && (
+          <div className="max-h-72 overflow-auto border rounded">
+            <table className="w-full text-xs">
+              <thead className="bg-muted/50 text-muted-foreground sticky top-0"><tr className="[&>th]:px-2 [&>th]:py-1.5 [&>th]:text-left">
+                <th>类型</th><th>仓库</th><th>SKU</th><th className="text-right">线上合计</th><th className="text-right">仓库可分配</th><th className="text-right">仓库够卖（天）</th>
+              </tr></thead>
+              <tbody>
+                {rows.map(({ g, r }, i) => (
+                  <tr key={i} className="border-t [&>td]:px-2 [&>td]:py-1">
+                    <td className={r.kind === "oversold" ? "text-red-600 font-medium" : "text-orange-600 font-medium"}>{r.kind === "oversold" ? "超卖" : "库存不足"}</td>
+                    <td className="whitespace-nowrap">{whName(g.warehouse_code)}</td>
+                    <td className="font-mono">{g.wh_sku}{g.wh_sku !== r.sku && <span className="text-muted-foreground">（单品 {r.sku}）</span>}</td>
+                    <td className="text-right tabular-nums">{r.online}</td>
+                    <td className="text-right tabular-nums">{r.pool}</td>
+                    <td className="text-right tabular-nums">{r.wh_days ?? "无销量"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 type MissingGroup = {
   warehouse_code: string; wh_sku: string; slots: number; note: string; listing_qty?: number;
@@ -827,9 +864,12 @@ const FIELDS: Array<[keyof Overview["settings"], string, string]> = [
   ["window_days", "销量统计窗口（天）", "近 N 天订单算日均销量（待确认：默认 14）"],
   ["min_days", "预警天数（海外仓）", "listing 可售天数全部 ≥ 此值就不调整；低于才调"],
   ["target_days", "补到目标天数（海外仓）", "低于预警的补到这么多天销量；先用仓库未分配，再从可售最多的调（待确认：默认 30）"],
-  ["min_qty", "listing 数量低于（件）", "有销量的 listing 少于此件数也算预警（无销量的不预警），负责人口径 5"],
+  ["min_qty", "listing 数量低于（件）", "有销量的 listing 少于此件数也算预警，负责人口径 5"],
   ["reserve_per_sku", "每 SKU 海外仓预留", "负责人口径 5，不分配给 listing"],
-  ["zero_sale_qty", "无销量 listing 至少保留（件）", "无销量的 listing 不预警、不补货；被调出给其他 listing 时至少留这么多"],
+  ["zero_sale_qty", "无销量 listing 补到（件）", "无销量且线上 0 件、仓库可补够多时补到这个数；被调出时也至少留这么多"],
+  ["zero_sale_min_free", "无销量提示门槛（件）", "无销量 listing 线上 0 件且仓库未分配 > 此值才提示补货"],
+  ["short_wh_days", "库存不足：仓库够卖 <（天）", "仓库可分配 ÷ 全部 listing 日销 < 此值…"],
+  ["short_online_days", "…且线上显示 >（天）", "…且有 listing 线上可售天数 > 此值 → 记超卖风险"],
   ["cn_min_days", "国内仓触发：可售天数 <", "负责人口径 10"],
   ["cn_target_days", "国内仓补到（天销量）", "待确认：默认 20"],
   ["stock_max_age_hours", "海外仓库存最长有效（小时）", "超过则该仓本次不调整"],

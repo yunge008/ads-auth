@@ -82,6 +82,7 @@ async function loadParams(): Promise<Params & { stock_max_age_hours: number }> {
   return {
     window_days: n("window_days"), min_days: n("min_days"), min_qty: n("min_qty"), reserve_per_sku: n("reserve_per_sku"),
     zero_sale_qty: n("zero_sale_qty"), cn_min_days: n("cn_min_days"), cn_target_days: n("cn_target_days"), target_days: n("target_days"),
+    zero_sale_min_free: n("zero_sale_min_free"), short_wh_days: n("short_wh_days"), short_online_days: n("short_online_days"),
     stock_max_age_hours: Number(d.stock_max_age_hours ?? 26),
   };
 }
@@ -445,6 +446,8 @@ async function buildPlan(b: Record<string, unknown>, who: string) {
     overseas: ov.items.length, cn: cn.length, groups_checked: ov.groups.length, groups_triggered: ov.groups.filter((g) => g.triggered).length,
     // 找不到的全部保存（按 TikTok 当前可售降序：> 0 的有超卖风险，排最前）
     missing_in_warehouse: missing.length, missing_risk: missing.filter((g) => (g.listing_qty ?? 0) > 0).length,
+    // 超卖风险（全部提示）：①仓库实际 0、线上有货 ②仓库只够 < N 天但线上显示 > M 天；③「找不到」且线上有货见 missing_sample。「线上合计 > 仓库可分配」不算（负责人 2026-11-28）
+    risk_groups: ov.groups.filter((g) => g.risk?.length).map((g) => ({ warehouse_code: g.warehouse_code, wh_sku: g.wh_sku, risk: g.risk })),
     missing_sample: [...missing].sort((a, b) => (b.listing_qty ?? 0) - (a.listing_qty ?? 0)).slice(0, 3000),
     min_days_overseas: minDays(ov.items), min_days_cn: minDays(cn), slots: okSlots.length,
   };
@@ -642,16 +645,27 @@ async function buildMessage(b: Record<string, unknown>) {
   const { plan, items, shops } = await planGet(b) as { plan: Record<string, unknown>; items: ItemRow[]; shops: Array<{ shop_id: string; shop_name: string | null; region: string | null }> };
   const shopName = new Map(shops.map((s) => [s.shop_id, s.shop_name ?? s.region ?? s.shop_id]));
   const whs = new Map((await loadWarehouses()).map((w) => [w.code, w.name]));
-  // 飞书只提醒有销量的（2026-11-28 负责人：没销量、只动几件的不提醒）；无销量的超卖调减只在网页列出
-  const ov = items.filter((i) => i.kind === "overseas" && Number(i.daily_sales) > 0);
-  const quiet = items.filter((i) => i.kind === "overseas" && !(Number(i.daily_sales) > 0));
+  // 2026-11-28 负责人：计划里的都提示（无销量只在「线上 0 且可补 > N」或超卖时才会进计划）；所有超卖单列全部提示
+  const ov = items.filter((i) => i.kind === "overseas");
   const cn = items.filter((i) => i.kind === "cn");
-  const alertCount = ov.length + cn.length;
+  const sum = (plan.summary ?? {}) as { risk_groups?: Array<{ warehouse_code: string; wh_sku: string; risk: Array<{ kind: string; sku: string; online: number; pool: number; wh_days: number | null }> }>; missing_sample?: Array<{ warehouse_code: string; wh_sku: string; listing_qty?: number; missing_parts?: string[] }> };
+  const riskRows = [
+    ...(sum.risk_groups ?? []).flatMap((g) => g.risk.map((r) => ({
+      sku: g.wh_sku === r.sku ? r.sku : `${g.wh_sku}（单品 ${r.sku}）`, wh: whs.get(g.warehouse_code) ?? g.warehouse_code,
+      what: r.kind === "oversold" ? `<font color='red'>超卖</font>：仓库实际 0，线上还有 ${r.online}` : `<font color='orange'>库存不足</font>：仓库只够 ${r.wh_days} 天，线上 ${r.online} 件`,
+      w: r.kind === "oversold" ? 2 : 1, n: r.online,
+    }))),
+    ...(sum.missing_sample ?? []).filter((g) => (g.listing_qty ?? 0) > 0).map((g) => ({
+      sku: g.wh_sku, wh: whs.get(g.warehouse_code) ?? g.warehouse_code,
+      what: `<font color='red'>超卖</font>：线上 ${g.listing_qty}，仓库${g.missing_parts?.length ? `缺单品 ${g.missing_parts.join("、")}` : "无此 SKU"}`, w: 2, n: g.listing_qty ?? 0,
+    })),
+  ].sort((a, b) => b.w - a.w || b.n - a.n);
+  const alertCount = ov.length + cn.length + riskRows.length;
   const warnings = (plan.data_warnings as string[] | null) ?? [];
   const md = (plan.map_diff as { counts?: { added: number; removed: number; changed: number } } | null)?.counts;
   const all = [...ov, ...cn].filter((i) => !i.new_link && i.days_before !== null);
   const worst = all.length ? Math.min(...all.map((i) => i.days_before!)) : null;
-  const template = !alertCount ? (warnings.length ? "orange" : "green") : worst !== null && worst < 3 ? "red" : worst !== null && worst < 7 ? "orange" : "yellow";
+  const template = riskRows.length ? "red" : !alertCount ? (warnings.length ? "orange" : "green") : worst !== null && worst < 3 ? "red" : worst !== null && worst < 7 ? "orange" : "yellow";
   const bjTime = new Date(String(plan.created_at)).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false });
 
   const table = (list: ItemRow[], withWh: boolean) => ({
@@ -684,21 +698,34 @@ async function buildMessage(b: Record<string, unknown>) {
       `**生成时间**：${bjTime}（${plan.source === "CRON" ? "定时" : "手动"}）`,
       `**海外仓**：${ov.length} 条（${skuCount(ov)} 个 SKU）${ov.length ? `，最紧急可售 **<font color='${dayColor(minDays(ov))}'>${fmtDays(minDays(ov))} 天</font>**` : ""}`,
       `**国内仓预警**：${cn.length} 条（${skuCount(cn)} 个 SKU）${cn.length ? `，最紧急可售 **<font color='${dayColor(minDays(cn))}'>${fmtDays(minDays(cn))} 天</font>**` : ""}`,
-      quiet.length ? `<font color='grey'>另有 ${quiet.length} 条无销量 listing 的超卖调减（仓库已无货、TikTok 还挂着几件），不提醒，见网页</font>` : "",
+      riskRows.length ? `**超卖风险**：<font color='red'>${riskRows.length} 个</font>（全部列在下方）` : "",
       md && (md.added || md.removed || md.changed) ? `**映射表变化**：新增 ${md.added}、下架 ${md.removed}、SKU 变更 ${md.changed}` : "",
     ].filter(Boolean).join("\n"),
   });
+  if (riskRows.length) {
+    elements.push({ tag: "markdown", content: `**⚠ 超卖风险（全部 ${riskRows.length} 个）**\n<font color='grey'>仓库实际 0 但线上有货 / 仓库没有该 SKU 但线上有货 / 仓库只够几天但线上显示偏多</font>` }, {
+      tag: "table", page_size: 10, row_height: "low",
+      header_style: { text_align: "left", text_size: "normal", background_style: "grey", bold: true, lines: 1 },
+      columns: [
+        { name: "sku", display_name: "SKU", data_type: "text", width: "auto" },
+        { name: "wh", display_name: "仓", data_type: "text", width: "auto" },
+        { name: "what", display_name: "情况", data_type: "lark_md", width: "auto" },
+      ],
+      rows: riskRows.slice(0, 200).map(({ sku, wh, what }) => ({ sku, wh, what })),
+    });
+  }
   if (ov.length) elements.push({ tag: "markdown", content: "**海外仓（按紧急度，前 15 条）**" }, table(ov, true));
   if (cn.length) elements.push({ tag: "markdown", content: "**国内仓预警（按紧急度，前 15 条）**\n<font color='grey'>仅预警：确认国内仓有货（不足及时采购）后人工修改 TikTok 库存</font>" }, table(cn, false));
   elements.push({ tag: "markdown", content: alertCount ? (execEnabled() ? "请到网页「SEA库存监控」核对并点「确认执行」，**未确认不会改任何库存**。" : "请到网页「SEA库存监控」核对，**导出调整清单后人工修改**（系统不会自动改库存）。") : "本次没有需要调整的 listing。" });
 
   const title = alertCount
-    ? `SEA 库存：海外仓 ${skuCount(ov)} 个 SKU 待调整 / 国内仓 ${skuCount(cn)} 个 SKU 预警`
+    ? `SEA 库存：${riskRows.length ? `超卖风险 ${riskRows.length} / ` : ""}海外仓 ${skuCount(ov)} 个 SKU 待调整 / 国内仓 ${skuCount(cn)} 个 SKU 预警`
     : warnings.length ? "SEA 库存监控：无调整，但有数据异常" : "SEA 库存监控：本次无需调整";
   const card = { config: { wide_screen_mode: true }, header: { template, title: { tag: "plain_text", content: title } }, elements };
   // 纯文本兜底（卡片表格组件被拒时由路由改发这个）
   const lines = [
     title, `生成时间：${bjTime}`, ...warnings.map((w) => `⚠ ${w}`),
+    ...riskRows.slice(0, 30).map((r) => `[超卖风险] ${r.sku} ${r.wh}：${r.what.replace(/<[^>]+>/g, "")}`),
     ...[...ov.slice(0, 10), ...cn.slice(0, 10)].map((i) => `[${i.kind === "cn" ? "国内仓" : whs.get(i.warehouse_code) ?? i.warehouse_code}] ${i.seller_sku} ${shopName.get(i.shop_id) ?? ""}：${i.current_qty}→${i.proposed_qty}，可售 ${fmtDays(i.days_before)}→${fmtDays(i.days_after)} 天`),
   ];
   return { send: true, title, card, lines, plan_id: plan.id, items: items.length };
@@ -717,7 +744,7 @@ Deno.serve(async (req) => {
     switch (action) {
       case "overview": return json(await overview());
       case "save_settings": {
-        const keys = ["window_days", "min_days", "target_days", "min_qty", "reserve_per_sku", "zero_sale_qty", "cn_min_days", "cn_target_days", "stock_max_age_hours"];
+        const keys = ["window_days", "min_days", "target_days", "min_qty", "reserve_per_sku", "zero_sale_qty", "zero_sale_min_free", "short_wh_days", "short_online_days", "cn_min_days", "cn_target_days", "stock_max_age_hours"];
         const patch: Record<string, unknown> = { updated_at: nowIso() };
         for (const k of keys) if (b[k] !== undefined && b[k] !== "") {
           const v = Number(b[k]);

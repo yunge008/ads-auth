@@ -50,6 +50,12 @@ export type Params = {
   cn_target_days: number;
   /** 海外仓补货目标天数：低于预警天数（min_days）的 listing 补到这么多天的销量 */
   target_days: number;
+  /** 无销量 listing：线上 0 件且仓库未分配 > 此件数时才提示补货（补到 zero_sale_qty） */
+  zero_sale_min_free: number;
+  /** 库存不足（超卖风险）：仓库可分配按全部 listing 日销只够 < 此天数… */
+  short_wh_days: number;
+  /** …且有 listing 线上显示 > 此天数 */
+  short_online_days: number;
 };
 
 export const DEFAULT_PARAMS: Params = {
@@ -61,6 +67,9 @@ export const DEFAULT_PARAMS: Params = {
   cn_min_days: 10,
   cn_target_days: 20,
   target_days: 30,
+  zero_sale_min_free: 10,
+  short_wh_days: 5,
+  short_online_days: 6,
 };
 
 export type PlanItem = {
@@ -102,6 +111,8 @@ export type GroupStatus = {
   candidates?: string[];
   /** 「找不到」组：组合款缺的单品 */
   missing_parts?: string[];
+  /** 超卖风险（全部提示，负责人 2026-11-28）：oversold = 仓库实际已 0、线上还有货；short = 仓库只够 < short_wh_days 天但有 listing 线上 > short_online_days 天 */
+  risk?: Array<{ kind: "oversold" | "short"; sku: string; online: number; pool: number; wh_days: number | null }>;
 };
 
 /** 编码核心：去掉 M-/M 前缀、AR 前缀、+B数字 包装后缀、空格，转大写；用于给「找不到」的 SKU 找相近的仓库编码 */
@@ -257,16 +268,37 @@ export function planCluster(w: Warehouse, cs: Consumer[], stock: Map<string, num
   const move = (c: Consumer, n: number) => { cur.set(c, cur.get(c)! + n); for (const [k, q] of c.comps) used.set(k, used.get(k)! + n * q); };
   const days = (c: Consumer, q = cur.get(c)!) => (c.daily > 0 ? q / c.daily : q > 0 ? Infinity : 0);
   const keepAt = (c: Consumer, d: number) => (c.daily > 0 ? Math.ceil(c.daily * d) : Math.min(c.slot.qty, p.zero_sale_qty));
-  // 只有「有销量」的 listing 才算预警（2026-11-28 负责人：没销量、只能补几件的不提醒、不补）；无销量的只会因超卖被调减
-  const isLow = (c: Consumer) => c.slot.virtual ? cap(c, pool) > 0 : (c.daily > 0 && (c.slot.qty < p.min_qty || c.slot.qty / c.daily < p.min_days));
+  // 预警（负责人 2026-11-28）：
+  //   有销量：可售 < 预警天数 或 < min_qty 件；
+  //   无销量：只有「线上 0 件 且 仓库未分配 > zero_sale_min_free 件」才提示补（只能补几件的不提示）
+  const freeAtStart = new Map(skus.map((k) => [k, free(k)]));
+  const isLow = (c: Consumer) => c.slot.virtual ? cap(c, pool) > 0
+    : c.daily > 0 ? (c.slot.qty < p.min_qty || c.slot.qty / c.daily < p.min_days)
+    : (c.slot.qty === 0 && cap(c, freeAtStart) > p.zero_sale_min_free);
   const want = (c: Consumer) => (c.daily > 0 ? Math.ceil(c.daily * p.target_days) : p.zero_sale_qty);
 
   const lows = cs.filter(isLow);
-  const overSold = skus.some((k) => free(k) < 0);
+  // 超卖（负责人 2026-11-28）：只有「线下已经 0、线上还有货」才算并调减到 0；
+  // 「线上合计 > 仓库可分配」不算（多个 listing 共用同一批货，线上合计本来就会超过仓库数）
+  const zeroSkus = skus.filter((k) => (stock.get(k) ?? 0) <= 0 && cs.some((c) => c.comps.has(k) && !c.slot.virtual && c.slot.qty > 0));
+  const overSold = zeroSkus.length > 0;
+  // 超卖风险（全部提示）：① 线上合计 > 仓库可分配（含仓库已 0）；② 仓库只够 < short_wh_days 天，但有 listing 线上显示 > short_online_days 天
+  const risk: NonNullable<GroupStatus["risk"]> = [];
+  for (const k of skus) {
+    const users = cs.filter((c) => c.comps.has(k) && !c.slot.virtual);
+    const online = users.reduce((t, c) => t + c.slot.qty * c.comps.get(k)!, 0);
+    const dsum = users.reduce((t, c) => t + c.daily * c.comps.get(k)!, 0);
+    const whDays = dsum > 0 ? pool.get(k)! / dsum : null;
+    if (zeroSkus.includes(k)) risk.push({ kind: "oversold", sku: k, online, pool: 0, wh_days: whDays === null ? null : r1(whDays) });
+    else if (whDays !== null && whDays < p.short_wh_days && users.some((c) => c.daily > 0 && c.slot.qty / c.daily > p.short_online_days)) {
+      risk.push({ kind: "short", sku: k, online, pool: pool.get(k)!, wh_days: r1(whDays) });
+    }
+  }
   const group: GroupStatus = {
     warehouse_code: w.code, wh_sku: label, wh_available: Math.min(...skus.map((k) => stock.get(k) ?? 0)), pool: Math.min(...skus.map((k) => pool.get(k)!)),
-    slots: cs.length, triggered: lows.length > 0 || overSold,
-    note: (hasCombo ? `含单品组套（单品 ${skus.join("、")}）：` : "") + (overSold ? "listing 合计超过仓库可分配，需调减" : lows.length ? `${lows.length} 个 listing 低于预警` : "全部 ≥ 预警天数，无需调整"),
+    slots: cs.length, triggered: lows.length > 0 || overSold || risk.length > 0,
+    note: (hasCombo ? `含单品组套（单品 ${skus.join("、")}）：` : "") + (overSold ? "仓库已无货、线上还挂着，需调到 0" : risk.length ? "仓库库存不足，线上显示偏多" : lows.length ? `${lows.length} 个 listing 低于预警` : "全部 ≥ 预警天数，无需调整"),
+    ...(risk.length ? { risk } : {}),
   };
   if (!lows.length && !overSold) return { items: [], group };
 
@@ -275,15 +307,8 @@ export function planCluster(w: Warehouse, cs: Consumer[], stock: Map<string, num
   const add = (m: Map<Consumer, number>, c: Consumer, n: number) => m.set(c, (m.get(c) ?? 0) + n);
   let guard = 0;
 
-  // 超卖：从可售天数最多的逐件减
-  for (const k of skus) {
-    while (free(k) < 0 && guard++ < 200_000) {
-      const donors = cs.filter((c) => c.comps.has(k) && cur.get(c)! > 0);
-      if (!donors.length) break;
-      donors.sort((a, b) => days(b) - days(a) || cur.get(b)! - cur.get(a)!);
-      move(donors[0], -1);
-    }
-  }
+  // 超卖：仓库已 0 的单品，用到它的 listing 全部调到 0
+  for (const k of zeroSkus) for (const c of cs) if (c.comps.has(k) && cur.get(c)! > 0) move(c, -cur.get(c)!);
   // 低于预警的补货：每次给「当前可售天数最低」的那个补 1 件（库存不够时大家天数尽量拉平）
   const blocked = new Set<Consumer>();
   const tryAddOne = (c: Consumer): boolean => {
@@ -331,11 +356,11 @@ export function planCluster(w: Warehouse, cs: Consumer[], stock: Map<string, num
     const took = fromOthers.get(c) ?? 0;
     const why = s.virtual ? `新仓首次设置库存（listing 尚未关联 ${w.name}）`
       : lowSet.has(c)
-      ? `${before !== null ? `可售 ${r1(before)} 天` : `当前 ${s.qty} 件`} < 预警 ${c.daily > 0 ? `${p.min_days} 天` : `${p.min_qty} 件`}，补到 ${t} 件` +
+      ? (c.daily > 0 ? `${before !== null ? `可售 ${r1(before)} 天` : `当前 ${s.qty} 件`} < 预警 ${s.qty < p.min_qty ? `${p.min_qty} 件` : `${p.min_days} 天`}，补到 ${t} 件` : `无销量、线上 0 件，仓库未分配 > ${p.zero_sale_min_free} 件，补到 ${t} 件`) +
         `（仓库未分配 ${Math.max(0, t - s.qty - took)} 件${took ? `、从其他 listing 调入 ${took} 件` : ""}）` + (combo ? `；单品组套 ${compText}` : "")
       : gaveTo.has(c)
       ? `调出 ${s.qty - t} 件给同 SKU 可售不足的 listing，调后仍可售 ${after === null ? "—" : r1(after)} 天`
-      : `listing 合计超过仓库可分配，从可售天数最多的调减 ${s.qty - t} 件`;
+      : `仓库已无货（${[...c.comps.keys()].filter((k) => zeroSkus.includes(k)).join("、") || c.whSku} 实际库存 0），线上调到 0 防超卖`;
     items.push({
       kind: "overseas", warehouse_code: w.code, wh_sku: c.whSku, shop_id: s.shop_id, region: s.region,
       product_id: s.product_id, sku_id: s.sku_id, seller_sku: s.seller_sku, title: s.title, tts_warehouse_id: s.tts_warehouse_id,

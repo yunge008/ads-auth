@@ -1,5 +1,7 @@
 // 跑法：deno test supabase/functions/_shared/sea-inventory.test.ts
 import {
+  skuCore,
+  suggestWhSku,
   addDays,
   dayStartSec,
   localDay,
@@ -69,10 +71,10 @@ Deno.test("海外仓：包装不同（SKU 编码不同）不合并；人工映�
   eq(r2.items.map((i) => [i.sku_id, i.proposed_qty]).sort(), [["A", 10], ["C", 10]]);
 });
 
-Deno.test("海外仓：listing 合计超过可分配量（超卖风险）→ 即使天数够也压回", () => {
+Deno.test("线上合计 > 仓库可分配（多个 listing 共用）：不调减、不算超卖", () => {
   const slots = [slot({ sku_id: "A", qty: 60, sold: 10 }), slot({ sku_id: "B", qty: 60, sold: 10 })];
-  const { items } = planOverseas({ warehouses: [whPH], slots, stock: stock("QY-PH", { "AR140-B2": 65 }), overrides: new Map(), params: P });
-  eq(items.map((i) => i.proposed_qty), [30, 30]);
+  const r = planOverseas({ warehouses: [whPH], slots, stock: stock("QY-PH", { "AR140-B2": 65 }), overrides: new Map(), params: P });
+  eq([r.items.length, r.groups[0].risk], [0, undefined]);
 });
 
 Deno.test("国内仓：不绑定，凡未绑定到海外仓的 TikTok 仓库都算国内仓；只预警可售 < 10 天的", () => {
@@ -226,14 +228,16 @@ Deno.test("无销量的 listing 不预警、不补货（即使 < 5 件）", () =
   eq(groups[0].triggered, false);
 });
 
-Deno.test("无销量的 listing 超卖时仍调减（仓库没货、TikTok 还挂着）", () => {
-  const { items } = planOverseas({ warehouses: [whPH], slots: [slot({ sku_id: "A", qty: 2, sold: 0 })], stock: stock("QY-PH", { "AR140-B2": 3 }), overrides: new Map(), params: P });
+Deno.test("无销量的 listing：仓库实际 0、线上还挂着 → 调到 0", () => {
+  const { items } = planOverseas({ warehouses: [whPH], slots: [slot({ sku_id: "A", qty: 2, sold: 0 })], stock: stock("QY-PH", { "AR140-B2": 0 }), overrides: new Map(), params: P });
   eq(items.map((i) => [i.proposed_qty, i.daily_sales]), [[0, 0]]);
 });
-Deno.test("仓库可用 ≤ 预留：压到 0，并提示目标 0 与需补货", () => {
-  const { items } = planOverseas({ warehouses: [whPH], slots: [slot({ sku_id: "A", qty: 3, sold: 10 })], stock: stock("QY-PH", { "AR140-B2": 4 }), overrides: new Map(), params: P });
-  eq(items[0].proposed_qty, 0);
-  eq(items[0].warnings.length, 2);
+
+Deno.test("仓库实际 0：压到 0，并提示目标 0 与需补货；仓库 ≤ 预留但不为 0 时不压", () => {
+  const { items } = planOverseas({ warehouses: [whPH], slots: [slot({ sku_id: "A", qty: 3, sold: 10 })], stock: stock("QY-PH", { "AR140-B2": 0 }), overrides: new Map(), params: P });
+  eq([items[0].proposed_qty, items[0].warnings.length], [0, 2]);
+  const r2 = planOverseas({ warehouses: [whPH], slots: [slot({ sku_id: "A", qty: 3, sold: 10 })], stock: stock("QY-PH", { "AR140-B2": 4 }), overrides: new Map(), params: P });
+  eq(r2.items.length, 0);
 });
 
 Deno.test("新仓 onboarding：listing 未挂新仓 → 首次设置到目标天数（listing 合计销量）", () => {
@@ -279,26 +283,24 @@ Deno.test("预组装实物：有可分配只按实物（不叠加单品）；没
   const b = run([th({ sku_id: "C", seller_sku: "AR108+B4", qty: 2, sold: 10 })], { "AR108+B4": 3, AR108: 105, B4: 45 });
   eq(b.items.map((i) => [i.proposed_qty, i.warnings.some((w) => w.includes("单品组套"))]), [[30, true]]);
   const d = run([th({ sku_id: "C", seller_sku: "AR108+B4", qty: 2, sold: 10 })], { "AR108+B4": 3, AR108: 105 });
-  eq(d.items.map((i) => i.proposed_qty), [0]);
+  eq(d.items.map((i) => i.proposed_qty), []); // 实物还有 3 件（未到 0），不压
+  const z = run([th({ sku_id: "C", seller_sku: "AR108+B4", qty: 2, sold: 10 })], { "AR108+B4": 0, AR108: 105 });
+  eq(z.items.map((i) => i.proposed_qty), [0]); // 实物 0 且单品凑不齐 → 调到 0
 });
 
-Deno.test("跨店铺多个 listing 共用单品：超卖时从天数最多的减，结果不超卖", () => {
+Deno.test("跨店铺多个 listing 共用单品：单品实际 0 → 用到它的 listing（含组合款）全部调到 0 并记超卖", () => {
   const two: Warehouse = { ...whTH, links: [{ shop_id: "TH1", tts_warehouse_id: "W" }, { shop_id: "TH2", tts_warehouse_id: "W2" }] };
   const r = planOverseas({
     warehouses: [two],
     slots: [
       th({ sku_id: "A", seller_sku: "AR141", qty: 900, sold: 50 }),
-      th({ shop_id: "TH2", tts_warehouse_id: "W2", sku_id: "B", seller_sku: "AR141+AR371", qty: 900, sold: 50 }),
-      th({ shop_id: "TH2", tts_warehouse_id: "W2", sku_id: "C", seller_sku: "AR141+AR223-2", qty: 900, sold: 50 }),
+      th({ shop_id: "TH2", tts_warehouse_id: "W2", sku_id: "B", seller_sku: "AR141+AR371", qty: 20, sold: 50 }),
     ],
-    stock: stock("BS-TH", { AR141: 1005, AR371: 205, "AR223-2": 105 }), overrides: new Map(), params: P,
+    stock: stock("BS-TH", { AR141: 0, AR371: 205 }), overrides: new Map(), params: P,
   });
-  const q = Object.fromEntries(r.items.map((i) => [i.sku_id, i.proposed_qty]));
-  eq([q.A + q.B + q.C <= 1000, q.B <= 200, q.C <= 100], [true, true, true]);
+  eq(r.items.map((i) => [i.sku_id, i.proposed_qty]).sort(), [["A", 0], ["B", 0]]);
+  eq(r.groups[0].risk?.map((x) => [x.kind, x.sku, x.online]), [["oversold", "AR141", 920]]);
 });
-
-// ── 「找不到」诊断与无销量补货（2026-11-20）──
-import { skuCore, suggestWhSku } from "./sea-inventory.ts";
 
 Deno.test("编码核心与建议映射：MY 仓的 M-…+B4 预装编码", () => {
   const keys = ["M-AR101-A+B4", "M-334-A+B4", "M-AR402+406+B4", "AR1099-B60"];
@@ -320,4 +322,30 @@ Deno.test("无销量的 listing 只用仓库未分配补，不从其他 listing 
   const slots = [slot({ sku_id: "A", qty: 2, sold: 0 }), slot({ sku_id: "B", qty: 38, sold: 10 })];
   const { items } = planOverseas({ warehouses: [whPH], slots, stock: stock("QY-PH", { "AR140-B2": 45 }), overrides: new Map(), params: P });
   eq(items.length, 0);
+});
+
+// ── 2026-11-28 负责人：无销量线上 0 件且可补 > 10 才提示；所有超卖都提示 ──
+Deno.test("无销量：线上 0 件且仓库未分配 > 10 → 提示补到 5；未分配 ≤ 10 或线上还有货 → 不提示", () => {
+  const run1 = (qty: number, avail: number) => planOverseas({ warehouses: [whPH], slots: [slot({ sku_id: "A", qty, sold: 0 })], stock: stock("QY-PH", { "AR140-B2": avail }), overrides: new Map(), params: P });
+  eq(run1(0, 20).items.map((i) => [i.proposed_qty, i.reason?.includes("无销量")]), [[5, true]]); // 未分配 15 > 10
+  eq(run1(0, 15).items.length, 0);  // 未分配 10，不 > 10
+  eq(run1(2, 60).items.length, 0);  // 线上还有 2 件
+});
+
+Deno.test("超卖①：仓库实际 0、线上还有货（含无销量）→ 记风险并调到 0", () => {
+  const r = planOverseas({ warehouses: [whPH], slots: [slot({ sku_id: "A", qty: 2, sold: 0 })], stock: stock("QY-PH", { "AR140-B2": 0 }), overrides: new Map(), params: P });
+  eq(r.groups[0].risk, [{ kind: "oversold", sku: "AR140-B2", online: 2, pool: 0, wh_days: null }]);
+  eq(r.items.map((i) => i.proposed_qty), [0]);
+});
+
+Deno.test("超卖②：仓库只够 < 5 天，但有 listing 线上 > 6 天 → 记风险", () => {
+  // 可分配 40，日销合计 10 → 仓库只够 4 天；A 线上 35 件 / 5 件每天 = 7 天 > 6
+  const slots = [slot({ sku_id: "A", qty: 35, sold: 50 }), slot({ shop_id: "PH2", tts_warehouse_id: "W_PH2", sku_id: "B", qty: 0, sold: 50 })];
+  const r = planOverseas({ warehouses: [whPH], slots, stock: stock("QY-PH", { "AR140-B2": 45 }), overrides: new Map(), params: P });
+  eq(r.groups[0].risk?.map((x) => [x.kind, x.wh_days]), [["short", 4]]);
+});
+
+Deno.test("库存充足时不记风险", () => {
+  const r = planOverseas({ warehouses: [whPH], slots: [slot({ sku_id: "A", qty: 35, sold: 50 })], stock: stock("QY-PH", { "AR140-B2": 505 }), overrides: new Map(), params: P });
+  eq(r.groups[0].risk, undefined);
 });

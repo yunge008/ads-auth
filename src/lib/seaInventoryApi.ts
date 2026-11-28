@@ -15,7 +15,8 @@ export type SeaWarehouse = {
 export type FileConfig = { warehouse_value?: string };
 export type SeaSettings = {
   window_days: number; min_days: number; min_qty: number; reserve_per_sku: number; zero_sale_qty: number;
-  cn_min_days: number; cn_target_days: number; stock_max_age_hours: number; target_days: number; last_run_at: string | null; map_refreshed_at: string | null;
+  cn_min_days: number; cn_target_days: number; stock_max_age_hours: number; target_days: number;
+  zero_sale_min_free: number; short_wh_days: number; short_online_days: number; last_run_at: string | null; map_refreshed_at: string | null;
 };
 export type SeaShop = { shop_id: string; shop_name: string | null; region: string | null; seller_type: string | null; access_expires_at: string | null };
 export type ShopSync = { shop_id: string; listings_at: string | null; orders_at: string | null; orders_count: number | null; slots_count: number | null; error: string | null; sales_synced_day: string | null };
