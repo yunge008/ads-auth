@@ -43,10 +43,19 @@ function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** REGEXMATCH(TRIM(k), "(^|[^0-9])"&sku&"([^0-9]|$)")，sku 原样（含 "+"）当字面量。 */
+/**
+ * SKU 匹配（负责人 2026-11-28 定，**变更**：原公式是正则 (^|[^0-9])sku([^0-9]|$)，组合 SKU 的「+」必须原样出现）：
+ * 两边都只取数字段、用逗号连起来再比「包含」，所以 SKU 3120+3121 也匹配 3120-K+3121-K（刻字款）。
+ * 单个 SKU 与原正则等价；组合 SKU 要求各数字段在 K 列里按顺序紧挨着出现（中间可隔任意非数字字符）。
+ * 公式写法：ISNUMBER(SEARCH(","&REGEXREPLACE(sku,"[^0-9]+",",")&",", ","&REGEXREPLACE(K,"[^0-9]+",",")&","))
+ */
+export function skuKey(s: string): string {
+  return "," + (s.match(/\d+/g) ?? []).join(",") + ",";
+}
 export function skuMatcher(sku: string): (k: string) => boolean {
-  const re = new RegExp("(^|[^0-9])" + escapeRe(sku) + "([^0-9]|$)");
-  return (k) => re.test(k);
+  const want = skuKey(sku);
+  if (want === ",,") return () => false;
+  return (k) => skuKey(k).includes(want);
 }
 
 /** 站点 = s 或以「s-」开头（新品推广）；产品推广计划为精确匹配。 */
